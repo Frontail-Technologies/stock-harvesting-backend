@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1784037661205,
+      "tag": "0000_numerous_sprite",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784644635671,
+      "tag": "0001_vengeful_doctor_strange",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784709600000,
+      "tag": "0002_ai_key_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784876829769,
+      "tag": "0003_modern_sumo",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784989642041,
+      "tag": "0004_red_charles_xavier",
+      "breakpoints": true
+    }
+  ]
+}

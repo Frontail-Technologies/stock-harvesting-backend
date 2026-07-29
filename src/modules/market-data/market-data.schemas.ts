@@ -1,0 +1,48 @@
+import { z } from "zod";
+
+import { CANDLE_TIMEFRAMES, DEFAULT_CANDLE_TIMEFRAME, DEFAULT_EXCHANGE } from "../../shared/constants";
+
+// Open rather than a closed enum — the exchange list is dynamic (see
+// listSupportedExchanges), sourced live from EODHD (~70 exchanges) plus
+// NSE. Bad codes fail gracefully downstream (the data-provider adapter
+// returns empty results for an unknown exchange code) rather than needing
+// this schema to know the full valid set up front.
+export const exchangeSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(16)
+  .transform((value) => value.toUpperCase())
+  .default(DEFAULT_EXCHANGE);
+
+export const MOVE_FILTERS = ["all", "gainers", "decliners", "unchanged"] as const;
+export type MoveFilter = (typeof MOVE_FILTERS)[number];
+
+export const stockListQuerySchema = z
+  .object({
+    q: z.string().trim().optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(2000).default(25),
+    sortBy: z.enum(["symbol", "name", "close", "changePct", "volume"]).default("name"),
+    sortDirection: z.enum(["asc", "desc"]).default("asc"),
+    exchange: exchangeSchema,
+    moveFilter: z.enum(MOVE_FILTERS).default("all"),
+    minVolume: z.coerce.number().nonnegative().optional(),
+    includeUnpriced: z.coerce.boolean().default(false),
+  })
+  .strict();
+
+export const candleParamsSchema = z
+  .object({
+    symbol: z.string().trim().min(1).max(64),
+  })
+  .strict();
+
+export const candleQuerySchema = z
+  .object({
+    timeframe: z.enum(CANDLE_TIMEFRAMES).default(DEFAULT_CANDLE_TIMEFRAME),
+    from: z.string().date().optional(),
+    to: z.string().date().optional(),
+    exchange: exchangeSchema,
+  })
+  .strict();
