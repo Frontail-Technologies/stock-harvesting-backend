@@ -30,5 +30,6 @@ export const scannerSymbolParamsSchema = z
 export const scannerBacktestQuerySchema = z
   .object({
     exchange: exchangeSchema,
+    lookback: z.enum(SCANNER_LOOKBACK_MULTIPLIERS).default(DEFAULT_SCANNER_LOOKBACK),
   })
   .strict();

@@ -496,7 +496,8 @@ type BreakoutTrade = { entryIndex: number; exitIndex: number; returnPct: number 
 // confirmation condition, which is why its numbers didn't match "our logic".
 export async function computeSymbolBreakoutBacktest(
   symbol: string,
-  exchange: string
+  exchange: string,
+  lookbackWeeks = WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS
 ): Promise<SymbolBreakoutBacktestStats | null> {
   const normalizedSymbol = normalizeSymbol(symbol);
   const { dailyCandles, weeklyCandles } = await readDailyAndWeeklyMetricCandles({
@@ -513,8 +514,10 @@ export async function computeSymbolBreakoutBacktest(
     return null;
   }
 
-  const dailyMaxArr = rollingMax(dailyRows.map((row) => row.high), WEEKLY_STRONG_DAILY_LOOKBACK_BARS);
-  const weeklyMaxArr = rollingMax(weeklyRows.map((row) => row.high), WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS);
+  const weeklyLookbackBars = Math.max(1, Math.round(lookbackWeeks));
+  const dailyLookbackBars = Math.max(1, Math.round(lookbackWeeks * 5));
+  const dailyMaxArr = rollingMax(dailyRows.map((row) => row.high), dailyLookbackBars);
+  const weeklyMaxArr = rollingMax(weeklyRows.map((row) => row.high), weeklyLookbackBars);
 
   const matched: boolean[] = new Array(weeklyRows.length).fill(false);
   let dailyIndex = 0;

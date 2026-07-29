@@ -64,8 +64,16 @@ export async function listScannerResults(input: {
   return [];
 }
 
-export async function getScannerBacktest(input: { symbol: string; exchange: string }) {
-  return computeSymbolBreakoutBacktest(input.symbol, input.exchange);
+export async function getScannerBacktest(input: {
+  symbol: string;
+  exchange: string;
+  lookback: ScannerLookbackMultiplier;
+}) {
+  return computeSymbolBreakoutBacktest(
+    input.symbol,
+    input.exchange,
+    SCANNER_LOOKBACK_WEEKS[input.lookback]
+  );
 }
 
 async function calculateCurrentNear250WeekHighResult(input: {

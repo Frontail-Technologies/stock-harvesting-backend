@@ -53,8 +53,15 @@ scannerRouter.get(
   validate({ params: scannerSymbolParamsSchema, query: scannerBacktestQuerySchema }),
   asyncHandler(async (req, res) => {
     const params = req.params as { symbol: string };
-    const query = req.query as unknown as { exchange: string };
-    const stats = await getScannerBacktest({ symbol: params.symbol, exchange: query.exchange });
+    const query = req.query as unknown as {
+      exchange: string;
+      lookback: ScannerLookbackMultiplier;
+    };
+    const stats = await getScannerBacktest({
+      symbol: params.symbol,
+      exchange: query.exchange,
+      lookback: query.lookback,
+    });
     sendData(res, { stats });
   })
 );
