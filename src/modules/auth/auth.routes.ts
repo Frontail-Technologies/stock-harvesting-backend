@@ -34,16 +34,29 @@ authRouter.get(
   AUTH_ROUTES.googleCallback,
   validate({ query: googleCallbackQuerySchema }),
   asyncHandler(async (req, res) => {
-    const query = req.query as { code: string; state: string };
-    const expectedState = getCookie(req, OAUTH_STATE_COOKIE_NAME);
-    if (!expectedState || expectedState !== query.state) {
-      throw unauthorized("OAuth state mismatch");
+    const query = req.query as { code?: string; state?: string; error?: string };
+    const redirectToLogin = (reason: string) => {
+      clearOauthStateCookie(res);
+      return res.redirect(`${env.WEB_APP_URL}/login?auth=${encodeURIComponent(reason)}`);
+    };
+
+    if (query.error || !query.code || !query.state) {
+      return redirectToLogin(query.error ?? "failed");
     }
 
-    const session = await completeGoogleLogin(query.code);
-    setRefreshCookie(res, session.refreshToken);
-    clearOauthStateCookie(res);
-    res.redirect(`${env.WEB_APP_URL}/scanner?auth=success`);
+    const expectedState = getCookie(req, OAUTH_STATE_COOKIE_NAME);
+    if (!expectedState || expectedState !== query.state) {
+      return redirectToLogin("state-mismatch");
+    }
+
+    try {
+      const session = await completeGoogleLogin(query.code);
+      setRefreshCookie(res, session.refreshToken);
+      clearOauthStateCookie(res);
+      return res.redirect(`${env.WEB_APP_URL}/scanner?auth=success`);
+    } catch {
+      return redirectToLogin("failed");
+    }
   })
 );
 
