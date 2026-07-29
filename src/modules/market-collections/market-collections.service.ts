@@ -182,8 +182,8 @@ export async function getCollectionRelativeStrength(input: { code: string; limit
   });
 }
 
-// ChartInk-style "within 15% of its own multi-year high, on both weekly and
-// daily closes" breakout screen, scoped to this collection's active members.
+// ChartInk-style "within 15% of its own multi-year closing high" breakout
+// screen, scoped to this collection's active members.
 export async function getCollectionWeeklyStrongStocks(input: { code: string }) {
   const collection = await requireCollectionByCode(input.code);
   const cacheKey = `collectionWeeklyStrongStocks:${collection.code}`;

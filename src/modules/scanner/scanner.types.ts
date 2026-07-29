@@ -11,9 +11,9 @@ export type Near250WeekHighScanMatch = {
   highlightTimes: string[];
   metrics: {
     currentClose: number;
-    highestHigh250: number;
+    highestClose250: number;
     threshold85: number;
-    currentVsHighPct: number;
+    currentVsHighestClosePct: number;
     distanceAboveThresholdPct: number;
     lookbackWeeks: number;
   };

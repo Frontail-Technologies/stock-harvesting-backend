@@ -17,11 +17,11 @@ export function calculateNear250WeekHighScan(
 
   const latestWindow = sortedCandles.slice(-lookbackWeeks);
   const latest = latestWindow[latestWindow.length - 1];
-  const highestHigh250 = Math.max(...latestWindow.map((candle) => candle.high));
-  const threshold85 = highestHigh250 * NEAR_250_WEEK_HIGH_RULE.thresholdMultiplier;
+  const highestClose250 = Math.max(...latestWindow.map((candle) => candle.close));
+  const threshold85 = highestClose250 * NEAR_250_WEEK_HIGH_RULE.thresholdMultiplier;
   const currentClose = latest.close;
   const matched = currentClose >= threshold85;
-  const currentVsHighPct = (currentClose / highestHigh250) * 100;
+  const currentVsHighestClosePct = (currentClose / highestClose250) * 100;
   const distanceAboveThresholdPct = ((currentClose - threshold85) / threshold85) * 100;
   const highlightTimes = getRollingHighlightTimes(sortedCandles, lookbackWeeks);
 
@@ -33,9 +33,9 @@ export function calculateNear250WeekHighScan(
       highlightTimes,
       metrics: {
         currentClose,
-        highestHigh250,
+        highestClose250,
         threshold85,
-        currentVsHighPct,
+        currentVsHighestClosePct,
         distanceAboveThresholdPct,
         lookbackWeeks,
       },
@@ -49,9 +49,9 @@ export function calculateNear250WeekHighScan(
     highlightTimes,
     metrics: {
       currentClose,
-      highestHigh250,
+      highestClose250,
       threshold85,
-      currentVsHighPct,
+      currentVsHighestClosePct,
       distanceAboveThresholdPct,
       lookbackWeeks,
     },
@@ -63,8 +63,8 @@ function getRollingHighlightTimes(candles: ScannerCandle[], lookbackWeeks: numbe
 
   for (let index = lookbackWeeks - 1; index < candles.length; index++) {
     const window = candles.slice(index - lookbackWeeks + 1, index + 1);
-    const highestHigh = Math.max(...window.map((candle) => candle.high));
-    const threshold = highestHigh * NEAR_250_WEEK_HIGH_RULE.thresholdMultiplier;
+    const highestClose = Math.max(...window.map((candle) => candle.close));
+    const threshold = highestClose * NEAR_250_WEEK_HIGH_RULE.thresholdMultiplier;
     const candle = candles[index];
 
     if (candle.close >= threshold) {

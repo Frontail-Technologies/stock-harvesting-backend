@@ -315,16 +315,16 @@ export async function computeRelativeStrengthMetrics(
   );
 }
 
-// ChartInk-style "near multi-year high" breakout screen: a stock passes only
-// if its latest weekly close is within 15% of its own 250-week high AND its
-// latest daily close is within 15% of its own 1252-day (~5yr) high. Unlike
+// ChartInk-style "near multi-year close" breakout screen: a stock passes only
+// if its latest weekly close is within 15% of its own 250-week closing high AND its
+// latest daily close is within 15% of its own 1252-day (~5yr) closing high. Unlike
 // the relative-strength metrics above (which rank everything), this filters
 // down to only the stocks that pass both conditions.
 const WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS = 250;
 const WEEKLY_STRONG_DAILY_LOOKBACK_BARS = 1252;
 const WEEKLY_STRONG_NEAR_HIGH_RATIO = 0.85;
 // Floor below the full lookback windows above — enough of a sample that a
-// symbol's own trailing high isn't trivially just its own recent close.
+// symbol's own trailing close isn't trivially just its own recent close.
 const MIN_WEEKLY_STRONG_DAILY_BARS = 50;
 const MIN_WEEKLY_STRONG_WEEKLY_BARS = 20;
 
@@ -372,11 +372,11 @@ export async function computeWeeklyStrongStocks(
 
     const dailyWindow = dailyRows.slice(-WEEKLY_STRONG_DAILY_LOOKBACK_BARS);
     const weeklyWindow = weeklyRows.slice(-WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS);
-    const dailyHigh = Math.max(...dailyWindow.map((row) => row.high));
-    const weeklyHigh = Math.max(...weeklyWindow.map((row) => row.high));
+    const dailyCloseHigh = Math.max(...dailyWindow.map((row) => row.close));
+    const weeklyCloseHigh = Math.max(...weeklyWindow.map((row) => row.close));
 
-    const passesDaily = latestDaily.close > dailyHigh * WEEKLY_STRONG_NEAR_HIGH_RATIO;
-    const passesWeekly = latestWeekly.close > weeklyHigh * WEEKLY_STRONG_NEAR_HIGH_RATIO;
+    const passesDaily = latestDaily.close > dailyCloseHigh * WEEKLY_STRONG_NEAR_HIGH_RATIO;
+    const passesWeekly = latestWeekly.close > weeklyCloseHigh * WEEKLY_STRONG_NEAR_HIGH_RATIO;
     if (!passesDaily || !passesWeekly) continue;
 
     const previousDaily = dailyRows[dailyRows.length - 2];
@@ -435,15 +435,15 @@ export async function computeWeeklyStrongStocksBacktest(
     const dailyRows = dailyCandlesBySymbol.get(instrument.symbol) ?? [];
     const weeklyRows = weeklyCandlesBySymbol.get(instrument.symbol) ?? [];
     // Same data-gap guard as computeWeeklyStrongStocks: a symbol with
-    // barely any history can't produce a meaningful "near its own high"
+    // barely any history can't produce a meaningful "near its own close high"
     // reading at any point in the backtest either.
     if (dailyRows.length < MIN_WEEKLY_STRONG_DAILY_BARS || weeklyRows.length < MIN_WEEKLY_STRONG_WEEKLY_BARS) {
       continue;
     }
 
-    const dailyMaxArr = rollingMax(dailyRows.map((row) => row.high), WEEKLY_STRONG_DAILY_LOOKBACK_BARS);
+    const dailyMaxArr = rollingMax(dailyRows.map((row) => row.close), WEEKLY_STRONG_DAILY_LOOKBACK_BARS);
     const weeklyMaxArr = rollingMax(
-      weeklyRows.map((row) => row.high),
+      weeklyRows.map((row) => row.close),
       WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS
     );
 
@@ -516,8 +516,8 @@ export async function computeSymbolBreakoutBacktest(
 
   const weeklyLookbackBars = Math.max(1, Math.round(lookbackWeeks));
   const dailyLookbackBars = Math.max(1, Math.round(lookbackWeeks * 5));
-  const dailyMaxArr = rollingMax(dailyRows.map((row) => row.high), dailyLookbackBars);
-  const weeklyMaxArr = rollingMax(weeklyRows.map((row) => row.high), weeklyLookbackBars);
+  const dailyMaxArr = rollingMax(dailyRows.map((row) => row.close), dailyLookbackBars);
+  const weeklyMaxArr = rollingMax(weeklyRows.map((row) => row.close), weeklyLookbackBars);
 
   const matched: boolean[] = new Array(weeklyRows.length).fill(false);
   let dailyIndex = 0;
@@ -554,6 +554,7 @@ export async function computeSymbolBreakoutBacktest(
     trades.push(buildBreakoutTrade(entryIndex, weeklyRows.length - 1, weeklyRows));
   }
 
+  const signalsGenerated = trades.length;
   if (trades.length === 0) return null;
 
   const winners = trades.filter((trade) => trade.returnPct > 0);
@@ -576,7 +577,7 @@ export async function computeSymbolBreakoutBacktest(
     totalReturnPct: equity - 100,
     maxDrawdownPct,
     profitFactor: grossLoss === 0 ? null : grossProfit / grossLoss,
-    signalsGenerated: trades.length,
+    signalsGenerated,
     avgHoldingDays:
       trades.reduce((sum, trade) => sum + (trade.exitIndex - trade.entryIndex) * 7, 0) / trades.length,
     largestWinnerPct: Math.max(...trades.map((trade) => trade.returnPct)),
