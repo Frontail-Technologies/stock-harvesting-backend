@@ -1,4 +1,4 @@
-import { DATA_PROVIDER_KEY, HTTP_STATUS } from "../../../../shared/constants";
+import { DATA_PROVIDER_KEY, HTTP_STATUS, PROVIDER_STATUS } from "../../../../shared/constants";
 import { env } from "../../../../shared/env";
 import { AppError, ERROR_CODES } from "../../../../shared/errors";
 import { normalizeSymbol } from "../../../../shared/normalize";
@@ -6,9 +6,16 @@ import type {
   DataProviderAdapter,
   ProviderDailyCandle,
   ProviderExchange,
+  ProviderHealthStatus,
   ProviderInstrument,
   ProviderSymbolDailyCandle,
 } from "../../data-provider.types";
+import {
+  configuredProviderConnected,
+  configuredProviderMissing,
+  getConfiguredExpiryHealth,
+  providerHealthFromError,
+} from "../../provider-health";
 import {
   GLOBAL_DATAFEEDS_DEFAULT_EXCHANGE,
   GLOBAL_DATAFEEDS_INDEX_EXCHANGE,
@@ -56,7 +63,7 @@ function sleep(ms: number) {
 
 // GetHistory in particular times out intermittently against the live
 // GlobalDataFeeds socket (observed both in bulk backfills and on-demand
-// chart fetches) but reliably succeeds on a fresh attempt — a short retry
+// chart fetches) but reliably succeeds on a fresh attempt - a short retry
 // here is cheaper than surfacing a broken chart to the user.
 async function requestWithRetry<T extends GlobalDatafeedsResponse = GlobalDatafeedsResponse>(
   request: GlobalDatafeedsRequest,
@@ -101,6 +108,47 @@ export class GlobalDatafeedsDataProviderAdapter implements DataProviderAdapter {
 
   getConnectUrl() {
     return "https://globaldatafeeds.in/global-datafeeds-apis/";
+  }
+  async checkConnection(): Promise<ProviderHealthStatus> {
+    if (!this.isConfigured()) {
+      return configuredProviderMissing("GlobalDataFeeds API key is not configured");
+    }
+
+    const expiryHealth = getConfiguredExpiryHealth(
+      "GlobalDataFeeds",
+      env.GLOBAL_DATAFEEDS_EXPIRES_AT
+    );
+    if (expiryHealth) return expiryHealth;
+
+    try {
+      const [exchange = GLOBAL_DATAFEEDS_DEFAULT_EXCHANGE] = configuredExchanges();
+      const response = await requestWithRetry(
+        {
+          MessageType: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getInstruments,
+          Exchange: exchange,
+          OnlyActive: true,
+          DetailedInfo: false,
+        },
+        1
+      );
+
+      if (response.MessageType === "RequestError") {
+        throw new Error(String(response.Message ?? "GlobalDataFeeds health check failed"));
+      }
+
+      const rows = resultArray<GlobalDatafeedsInstrumentRow>(response);
+      if (rows.length === 0) {
+        return {
+          connected: false,
+          status: PROVIDER_STATUS.error,
+          errorMessage: "GlobalDataFeeds health check returned no instruments",
+        };
+      }
+
+      return configuredProviderConnected();
+    } catch (error) {
+      return providerHealthFromError(error);
+    }
   }
 
   async exchangeRequestToken(): Promise<{

@@ -8,6 +8,11 @@ export type ProviderConnectionStatus = {
   errorMessage: string | null;
 };
 
+export type ProviderHealthStatus = Pick<
+  ProviderConnectionStatus,
+  "connected" | "status" | "errorMessage"
+>;
+
 export type ProviderDailyCandle = {
   time: string;
   open: number;
@@ -40,6 +45,7 @@ export interface DataProviderAdapter {
   readonly providerKey: string;
   readonly requiresConnection: boolean;
   isConfigured(): boolean;
+  checkConnection?(): Promise<ProviderHealthStatus>;
   getConnectUrl(): string | null;
   exchangeRequestToken(requestToken: string): Promise<{
     accessToken: string;

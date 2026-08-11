@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-import { CANDLE_TIMEFRAMES, DEFAULT_CANDLE_TIMEFRAME, DEFAULT_EXCHANGE } from "../../shared/constants";
+import { CANDLE_TIMEFRAME, CANDLE_TIMEFRAMES, DEFAULT_CANDLE_TIMEFRAME, DEFAULT_EXCHANGE } from "../../shared/constants";
 import { GLOBAL_DATAFEEDS_INDEX_EXCHANGE } from "../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
 import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 
-// Open rather than a closed enum — the exchange list is dynamic (see
+// Open rather than a closed enum - the exchange list is dynamic (see
 // listSupportedExchanges), sourced live from EODHD (~70 exchanges) plus
 // NSE. Bad codes fail gracefully downstream (the data-provider adapter
 // returns empty results for an unknown exchange code) rather than needing
@@ -19,6 +19,15 @@ export const exchangeSchema = z
 
 export const MOVE_FILTERS = ["all", "gainers", "decliners", "unchanged"] as const;
 export type MoveFilter = (typeof MOVE_FILTERS)[number];
+
+const candleTimeframeSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1d") return CANDLE_TIMEFRAME.day;
+  if (normalized === "1w") return CANDLE_TIMEFRAME.week;
+  if (normalized === "1m" || normalized === "1mo") return CANDLE_TIMEFRAME.month;
+  return value;
+}, z.enum(CANDLE_TIMEFRAMES));
 
 export const stockListQuerySchema = z
   .object({
@@ -42,14 +51,22 @@ export const candleParamsSchema = z
 
 export const candleQuerySchema = z
   .object({
-    timeframe: z.enum(CANDLE_TIMEFRAMES).default(DEFAULT_CANDLE_TIMEFRAME),
+    timeframe: candleTimeframeSchema.default(DEFAULT_CANDLE_TIMEFRAME),
     from: z.string().date().optional(),
     to: z.string().date().optional(),
     exchange: exchangeSchema,
   })
   .strict();
 
-// Closed whitelist, unlike the general exchangeSchema above — there are
+export const historyRangeQuerySchema = z
+  .object({
+    symbol: z.string().trim().min(1).max(64),
+    timeframe: candleTimeframeSchema.default(DEFAULT_CANDLE_TIMEFRAME),
+    exchange: exchangeSchema,
+  })
+  .strict();
+
+// Closed whitelist, unlike the general exchangeSchema above - there are
 // only ever a handful of *index* exchanges, and an unrecognized one would
 // silently return an empty ranking rather than erroring, so it's worth
 // rejecting up front instead.
@@ -59,3 +76,5 @@ export const indexRelativeStrengthQuerySchema = z
     exchange: z.enum([NSE_INDEX_EXCHANGE, GLOBAL_DATAFEEDS_INDEX_EXCHANGE]).default(NSE_INDEX_EXCHANGE),
   })
   .strict();
+
+

@@ -1,4 +1,4 @@
-import { DATA_PROVIDER_KEY, HTTP_STATUS } from "../../../shared/constants";
+import { DATA_PROVIDER_KEY, HTTP_STATUS, PROVIDER_STATUS } from "../../../shared/constants";
 import { env } from "../../../shared/env";
 import { AppError, ERROR_CODES, ERROR_MESSAGES } from "../../../shared/errors";
 import { logger } from "../../../shared/logger";
@@ -7,9 +7,16 @@ import type {
   DataProviderAdapter,
   ProviderDailyCandle,
   ProviderExchange,
+  ProviderHealthStatus,
   ProviderInstrument,
   ProviderSymbolDailyCandle,
 } from "../data-provider.types";
+import {
+  configuredProviderConnected,
+  configuredProviderMissing,
+  getConfiguredExpiryHealth,
+  providerHealthFromError,
+} from "../provider-health";
 
 const EODHD_BASE_URL = "https://eodhd.com/api";
 const EODHD_SETTINGS_URL = "https://eodhd.com/cp/settings";
@@ -98,6 +105,9 @@ function fromEodhdTicker(symbol: string, exchangeCode: string) {
     : normalizedSymbol;
 }
 
+function toDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
 function toFiniteNumber(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
@@ -136,6 +146,38 @@ export class EodhdDataProviderAdapter implements DataProviderAdapter {
 
   getConnectUrl() {
     return EODHD_SETTINGS_URL;
+  }
+  async checkConnection(): Promise<ProviderHealthStatus> {
+    if (!this.isConfigured()) {
+      return configuredProviderMissing("EODHD API token is not configured");
+    }
+
+    const expiryHealth = getConfiguredExpiryHealth("EODHD", env.EODHD_EXPIRES_AT);
+    if (expiryHealth) return expiryHealth;
+
+    try {
+      const to = toDateOnly(new Date());
+      const from = toDateOnly(new Date(Date.now() - 21 * 24 * 60 * 60 * 1000));
+      const candles = await this.fetchDailyCandles({
+        symbol: "AAPL",
+        instrumentToken: "AAPL.US",
+        exchangeCode: "US",
+        from,
+        to,
+      });
+
+      if (candles.length === 0) {
+        return {
+          connected: false,
+          status: PROVIDER_STATUS.error,
+          errorMessage: "EODHD health check returned no candles",
+        };
+      }
+
+      return configuredProviderConnected();
+    } catch (error) {
+      return providerHealthFromError(error);
+    }
   }
 
   async exchangeRequestToken(): Promise<{

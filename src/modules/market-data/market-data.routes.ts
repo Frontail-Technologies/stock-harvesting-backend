@@ -6,12 +6,14 @@ import { asyncHandler, requireAuth, validate } from "../../shared/middleware";
 import {
   candleParamsSchema,
   candleQuerySchema,
+  historyRangeQuerySchema,
   indexRelativeStrengthQuerySchema,
   stockListQuerySchema,
   type MoveFilter,
 } from "./market-data.schemas";
 import {
   getChartCandles,
+  getChartHistoryRange,
   getIndexRelativeStrength,
   listExchangeRates,
   listStocks,
@@ -70,6 +72,20 @@ marketDataRouter.get(
       includeUnpriced?: boolean;
     };
     sendData(res, await listStocks(query));
+  })
+);
+
+marketDataRouter.get(
+  "/history-range",
+  validate({ query: historyRangeQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as {
+      symbol: string;
+      timeframe: CandleTimeframe;
+      exchange: string;
+    };
+
+    sendData(res, await getChartHistoryRange(query));
   })
 );
 

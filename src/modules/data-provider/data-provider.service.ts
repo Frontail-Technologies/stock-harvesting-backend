@@ -33,23 +33,73 @@ export async function getProviderStatus(
     .orderBy(desc(dataProviderConnections.createdAt))
     .limit(1);
 
+  const providerConfigured = adapter.isConfigured();
+  const lastSyncedAt = connection?.lastSyncedAt?.toISOString() ?? null;
+
   if (!adapter.requiresConnection) {
+    if (!providerConfigured) {
+      return {
+        providerConfigured,
+        connected: false,
+        status: PROVIDER_STATUS.disconnected,
+        lastSyncedAt,
+        errorMessage: connection?.errorMessage ?? null,
+      };
+    }
+
+    const health = adapter.checkConnection
+      ? await adapter.checkConnection()
+      : {
+          connected: true,
+          status: PROVIDER_STATUS.connected,
+          errorMessage: null,
+        };
+
     return {
-      providerConfigured: adapter.isConfigured(),
-      connected: adapter.isConfigured(),
-      status: adapter.isConfigured()
-        ? PROVIDER_STATUS.connected
-        : PROVIDER_STATUS.disconnected,
-      lastSyncedAt: connection?.lastSyncedAt?.toISOString() ?? null,
+      providerConfigured,
+      connected: health.connected,
+      status: health.status,
+      lastSyncedAt,
+      errorMessage: health.errorMessage ?? connection?.errorMessage ?? null,
+    };
+  }
+
+  if (!providerConfigured) {
+    return {
+      providerConfigured,
+      connected: false,
+      status: PROVIDER_STATUS.disconnected,
+      lastSyncedAt,
       errorMessage: connection?.errorMessage ?? null,
     };
   }
 
+  if (connection?.expiresAt && connection.expiresAt.getTime() <= Date.now()) {
+    if (connection.status === PROVIDER_STATUS.connected) {
+      await db
+        .update(dataProviderConnections)
+        .set({
+          status: PROVIDER_STATUS.expired,
+          errorMessage: "Provider access token expired",
+          updatedAt: new Date(),
+        })
+        .where(eq(dataProviderConnections.id, connection.id));
+    }
+
+    return {
+      providerConfigured,
+      connected: false,
+      status: PROVIDER_STATUS.expired,
+      lastSyncedAt,
+      errorMessage: connection.errorMessage ?? "Provider access token expired",
+    };
+  }
+
   return {
-    providerConfigured: adapter.isConfigured(),
+    providerConfigured,
     connected: connection?.status === PROVIDER_STATUS.connected,
     status: connection?.status ?? PROVIDER_STATUS.disconnected,
-    lastSyncedAt: connection?.lastSyncedAt?.toISOString() ?? null,
+    lastSyncedAt,
     errorMessage: connection?.errorMessage ?? null,
   };
 }
@@ -138,8 +188,13 @@ export async function getActiveProviderAccessToken(provider: string) {
     .orderBy(desc(dataProviderConnections.createdAt))
     .limit(1);
 
-  if (!connection?.encryptedAccessToken) {
+if (!connection?.encryptedAccessToken) {
     throw notFound("Data provider is not connected");
+  }
+
+  if (connection.expiresAt && connection.expiresAt.getTime() <= Date.now()) {
+    await markProviderConnectionExpired(adapter.providerKey, "Provider access token expired");
+    throw notFound("Data provider token expired");
   }
 
   return decryptField(connection.encryptedAccessToken);

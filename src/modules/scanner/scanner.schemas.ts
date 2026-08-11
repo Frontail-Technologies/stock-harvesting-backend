@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { CANDLE_TIMEFRAMES, DEFAULT_CANDLE_TIMEFRAME } from "../../shared/constants";
+import { CANDLE_TIMEFRAME, CANDLE_TIMEFRAMES, DEFAULT_CANDLE_TIMEFRAME } from "../../shared/constants";
 import { exchangeSchema } from "../market-data/market-data.schemas";
 import {
   DEFAULT_SCANNER_LOOKBACK,
@@ -10,10 +10,19 @@ import {
 
 export type { ScannerLookbackMultiplier };
 
+const candleTimeframeSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1d") return CANDLE_TIMEFRAME.day;
+  if (normalized === "1w") return CANDLE_TIMEFRAME.week;
+  if (normalized === "1m" || normalized === "1mo") return CANDLE_TIMEFRAME.month;
+  return value;
+}, z.enum(CANDLE_TIMEFRAMES));
+
 export const scannerResultsQuerySchema = z
   .object({
     symbol: z.string().trim().max(64).optional(),
-    timeframe: z.enum(CANDLE_TIMEFRAMES).default(DEFAULT_CANDLE_TIMEFRAME),
+    timeframe: candleTimeframeSchema.default(DEFAULT_CANDLE_TIMEFRAME),
     rule: z.string().trim().max(128).optional(),
     limit: z.coerce.number().int().positive().max(200).default(50),
     exchange: exchangeSchema,
@@ -33,3 +42,4 @@ export const scannerBacktestQuerySchema = z
     lookback: z.enum(SCANNER_LOOKBACK_MULTIPLIERS).default(DEFAULT_SCANNER_LOOKBACK),
   })
   .strict();
+

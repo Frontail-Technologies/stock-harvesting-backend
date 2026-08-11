@@ -8,6 +8,7 @@ import {
   type CandleTimeframe,
 } from "../../shared/constants";
 import { normalizeSymbol } from "../../shared/normalize";
+import { aggregateWeeklyCandles } from "../market-data/candle-aggregation";
 import { computeSymbolBreakoutBacktest } from "../market-data/market-data.service";
 import { calculateNear250WeekHighScan } from "./rules/near-250-week-high";
 import {
@@ -88,21 +89,51 @@ async function calculateCurrentNear250WeekHighResult(input: {
   if (input.rule && input.rule !== SCANNER_RULE_KEY.near250WeekHigh) return null;
 
   const symbol = normalizeSymbol(input.symbol);
-  const weeklyCandles = await db
+  const dailyCandles = await db
     .select({
       time: candles.time,
+      open: candles.open,
       high: candles.high,
+      low: candles.low,
       close: candles.close,
+      volume: candles.volume,
     })
     .from(candles)
     .where(
       and(
         eq(candles.exchange, input.exchange),
         eq(candles.symbol, symbol),
-        eq(candles.timeframe, CANDLE_TIMEFRAME.week)
+        eq(candles.timeframe, CANDLE_TIMEFRAME.day)
       )
     )
     .orderBy(asc(candles.time));
+
+  const weeklyCandles = dailyCandles.length > 0
+    ? aggregateWeeklyCandles(
+        dailyCandles.map((candle) => ({
+          time: candle.time,
+          open: Number(candle.open),
+          high: Number(candle.high),
+          low: Number(candle.low),
+          close: Number(candle.close),
+          volume: Number(candle.volume),
+        }))
+      )
+    : await db
+        .select({
+          time: candles.time,
+          high: candles.high,
+          close: candles.close,
+        })
+        .from(candles)
+        .where(
+          and(
+            eq(candles.exchange, input.exchange),
+            eq(candles.symbol, symbol),
+            eq(candles.timeframe, CANDLE_TIMEFRAME.week)
+          )
+        )
+        .orderBy(asc(candles.time));
 
   const lookback = input.lookback ?? DEFAULT_SCANNER_LOOKBACK;
   const lookbackWeeks = SCANNER_LOOKBACK_WEEKS[lookback];
@@ -132,3 +163,5 @@ async function calculateCurrentNear250WeekHighResult(input: {
     },
   };
 }
+
+

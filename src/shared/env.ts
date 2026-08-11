@@ -26,16 +26,18 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   DATA_PROVIDER: z.enum(["eodhd", "zerodha", "global-datafeeds"]).default("eodhd"),
   EODHD_API_TOKEN: z.string().optional(),
+  EODHD_EXPIRES_AT: z.string().optional(),
   EODHD_EXCHANGE_CODE: z.string().trim().min(1).default("US"),
   ZERODHA_API_KEY: z.string().optional(),
   ZERODHA_API_SECRET: z.string().optional(),
   ZERODHA_REDIRECT_URL: z.string().url().optional(),
   GLOBAL_DATAFEEDS_ENABLED: z.coerce.boolean().default(false),
   GLOBAL_DATAFEEDS_API_KEY: z.string().optional(),
+  GLOBAL_DATAFEEDS_EXPIRES_AT: z.string().optional(),
   GLOBAL_DATAFEEDS_WS_URL: z.string().url().default("wss://test.lisuns.com:4576"),
   GLOBAL_DATAFEEDS_EXCHANGES: z.string().default("BSE,BSE_IDX"),
   GLOBAL_DATAFEEDS_SYMBOL_LIMIT: z.coerce.number().int().positive().default(100),
-  // Separate REST product/key from the WebSocket feed above — GlobalDataFeeds
+  // Separate REST product/key from the WebSocket feed above - GlobalDataFeeds
   // sells Fundamentals data as its own subscription with its own access key.
   GLOBAL_DATAFEEDS_FUNDAMENTALS_ENABLED: z.coerce.boolean().default(false),
   GLOBAL_DATAFEEDS_FUNDAMENTALS_ACCESS_KEY: z.string().optional(),
@@ -45,7 +47,7 @@ const envSchema = z.object({
     .default("https://test.lisuns.com:4532"),
   // Confirmed live: the vendor's product is labeled "BSE-FD" in account
   // emails, but the API itself rejects that value ("Data for requested
-  // exchange is disabled") — the real query param is just "BSE".
+  // exchange is disabled") - the real query param is just "BSE".
   GLOBAL_DATAFEEDS_FUNDAMENTALS_EXCHANGE: z.string().default("BSE"),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_EXTRACTION_MODEL: z.string().trim().min(1).optional(),
