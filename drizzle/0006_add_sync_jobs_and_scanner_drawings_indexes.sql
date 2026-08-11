@@ -1,0 +1,2 @@
+CREATE INDEX "sync_jobs_created_at_idx" ON "sync_jobs" USING btree ("created_at" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "scanner_drawings_user_exchange_symbol_timeframe_idx" ON "scanner_drawings" USING btree ("user_id","exchange","symbol","timeframe");

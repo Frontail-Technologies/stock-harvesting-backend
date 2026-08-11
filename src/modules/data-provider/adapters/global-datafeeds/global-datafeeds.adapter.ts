@@ -22,6 +22,7 @@ import {
 import type {
   GlobalDatafeedsHistoryRow,
   GlobalDatafeedsInstrumentRow,
+  GlobalDatafeedsRequest,
   GlobalDatafeedsResponse,
 } from "./global-datafeeds.types";
 import { globalDatafeedsClient } from "./global-datafeeds.websocket-client";
@@ -47,6 +48,30 @@ function assertExchangeSupported(exchange: string) {
 function toEpochSeconds(dateOnly: string, endOfDay = false) {
   const suffix = endOfDay ? "T23:59:59.000Z" : "T00:00:00.000Z";
   return Math.floor(new Date(`${dateOnly}${suffix}`).getTime() / 1000);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// GetHistory in particular times out intermittently against the live
+// GlobalDataFeeds socket (observed both in bulk backfills and on-demand
+// chart fetches) but reliably succeeds on a fresh attempt — a short retry
+// here is cheaper than surfacing a broken chart to the user.
+async function requestWithRetry<T extends GlobalDatafeedsResponse = GlobalDatafeedsResponse>(
+  request: GlobalDatafeedsRequest,
+  attempts = 2
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await globalDatafeedsClient.request<T>(request);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(500);
+    }
+  }
+  throw lastError;
 }
 
 function resultArray<T>(response: GlobalDatafeedsResponse | unknown): T[] {
@@ -176,7 +201,7 @@ export class GlobalDatafeedsDataProviderAdapter implements DataProviderAdapter {
     const exchange = assertExchangeSupported(
       input.exchangeCode ?? GLOBAL_DATAFEEDS_DEFAULT_EXCHANGE
     );
-    const response = await globalDatafeedsClient.request({
+    const response = await requestWithRetry({
       MessageType: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory,
       Exchange: exchange,
       InstrumentIdentifier: input.instrumentToken || normalizeSymbol(input.symbol),

@@ -6,13 +6,17 @@ import {
   REFRESH_COOKIE_NAME,
   REFRESH_TOKEN_TTL_DAYS,
 } from "../../shared/constants";
-import { env } from "../../shared/env";
 
 function secureCookieOptions(maxAgeMs: number) {
   return {
     httpOnly: true,
-    secure: env.NODE_ENV === "production",
-    sameSite: "lax" as const,
+    // The admin subdomain is a different site from the main app, so the
+    // cookie has to survive a cross-site fetch() — that requires
+    // SameSite=None, which in turn requires Secure. Browsers treat
+    // localhost/loopback as a trustworthy origin even over plain HTTP, so
+    // this still works in local dev without HTTPS.
+    secure: true,
+    sameSite: "none" as const,
     path: "/",
     maxAge: maxAgeMs,
   };

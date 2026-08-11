@@ -3,6 +3,7 @@ import express, { type Request, type Response } from "express";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
 
+import { pool } from "./db/client";
 import { adminRouter } from "./modules/admin/admin.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
 import { authRouter } from "./modules/auth/auth.routes";
@@ -11,7 +12,7 @@ import { marketCollectionsRouter } from "./modules/market-collections/market-col
 import { marketDataRouter } from "./modules/market-data/market-data.routes";
 import { scannerRouter } from "./modules/scanner/scanner.routes";
 import { usersRouter } from "./modules/users/users.routes";
-import { API_ROUTES } from "./shared/constants";
+import { API_ROUTES, HTTP_STATUS } from "./shared/constants";
 import { corsOrigins } from "./shared/env";
 import { errorHandler, notFound } from "./shared/errors";
 import { sendData } from "./shared/http";
@@ -66,12 +67,19 @@ export function createApp() {
     })
   );
 
-  app.get(API_ROUTES.health, (_req, res) => {
-    sendData(res, {
-      ok: true,
-      service: "stock-harvesting-backend",
-      timestamp: new Date().toISOString(),
-    });
+  app.get(API_ROUTES.health, async (_req, res) => {
+    const database = await checkDatabaseHealth();
+
+    sendData(
+      res,
+      {
+        ok: database.ok,
+        service: "stock-harvesting-backend",
+        timestamp: new Date().toISOString(),
+        database,
+      },
+      database.ok ? HTTP_STATUS.ok : HTTP_STATUS.serviceUnavailable
+    );
   });
 
   app.use(API_ROUTES.auth, authRouter);
@@ -89,6 +97,54 @@ export function createApp() {
   app.use(errorHandler);
 
   return app;
+}
+
+const DATABASE_HEALTH_CHECK_TIMEOUT_MS = 2_000;
+
+// A lightweight liveness probe for the database connection itself, not just
+// "the Node process is running" — the health route previously always
+// returned ok:true even if Postgres was completely unreachable. Times out
+// independently of DB_CONNECTION_TIMEOUT_MS so a slow-but-not-dead database
+// still reports unhealthy quickly rather than hanging the health check too.
+async function checkDatabaseHealth() {
+  const startedAt = Date.now();
+
+  try {
+    await Promise.race([
+      pool.query("SELECT 1"),
+      new Promise((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("Database health check timed out")),
+          DATABASE_HEALTH_CHECK_TIMEOUT_MS
+        )
+      ),
+    ]);
+
+    return {
+      ok: true,
+      latencyMs: Date.now() - startedAt,
+      pool: {
+        total: pool.totalCount,
+        idle: pool.idleCount,
+        waiting: pool.waitingCount,
+      },
+    };
+  } catch (error) {
+    logger.error(
+      { message: error instanceof Error ? error.message : "Unknown error" },
+      "Database health check failed"
+    );
+
+    return {
+      ok: false,
+      latencyMs: Date.now() - startedAt,
+      pool: {
+        total: pool.totalCount,
+        idle: pool.idleCount,
+        waiting: pool.waitingCount,
+      },
+    };
+  }
 }
 
 function toSafeRequestLog(req: Request) {

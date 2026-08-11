@@ -1,0 +1,1 @@
+ALTER TABLE "candles" ALTER COLUMN "instrument_id" SET NOT NULL;

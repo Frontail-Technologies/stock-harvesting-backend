@@ -51,8 +51,18 @@ marketCollectionsRouter.get(
   validate({ params: collectionCodeParamsSchema, query: collectionRelativeStrengthQuerySchema }),
   asyncHandler(async (req, res) => {
     const params = req.params as { code: string };
-    const query = req.query as unknown as { limit: number };
-    sendData(res, await getCollectionRelativeStrength({ code: params.code, limit: query.limit }));
+    const query = req.query as unknown as {
+      limit: number;
+      groupBy?: "sector" | "industry";
+    };
+    sendData(
+      res,
+      await getCollectionRelativeStrength({
+        code: params.code,
+        limit: query.limit,
+        groupBy: query.groupBy,
+      })
+    );
   })
 );
 

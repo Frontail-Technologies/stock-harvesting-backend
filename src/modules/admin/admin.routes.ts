@@ -17,12 +17,14 @@ import {
   validate,
 } from "../../shared/middleware";
 import {
+  adminUsersExportQuerySchema,
   adminUsersQuerySchema,
   backfillCandlesBodySchema,
   brandingBodySchema,
   collectionIdParamsSchema,
   createCollectionBodySchema,
   importCollectionCsvBodySchema,
+  indexCandleBackfillBodySchema,
   providerConnectBodySchema,
   providerSyncBodySchema,
   updateAiSettingsBodySchema,
@@ -36,14 +38,17 @@ import {
   completeProviderConnection,
   createProviderConnectUrl,
   deleteUser,
+  exportAdminUsersCsv,
   getAdminProviderStatus,
   getAdminProviderStatuses,
   getBrandingSettings,
   listAdminUsers,
   listJobs,
   triggerCandleBackfill,
+  triggerIndexCandleBackfill,
   triggerInstrumentSync,
   triggerPriceRefresh,
+  triggerSectorClassificationSync,
   updateBrandingSettings,
   updateUserPlan,
   updateUserRole,
@@ -69,6 +74,21 @@ adminRouter.get(
   asyncHandler(async (req, res) => {
     const query = req.query as unknown as Parameters<typeof listAdminUsers>[0];
     sendData(res, await listAdminUsers(query));
+  })
+);
+
+adminRouter.get(
+  "/users/export",
+  validate({ query: adminUsersExportQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as Parameters<typeof exportAdminUsersCsv>[0];
+    const csv = await exportAdminUsersCsv(query);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="stock-harvesting-users-${Date.now()}.csv"`
+    );
+    res.send(csv);
   })
 );
 
@@ -146,6 +166,29 @@ adminRouter.post(
   asyncHandler(async (req, res) => {
     const body = req.body as { exchange: string };
     const job = await triggerInstrumentSync({
+      actorUserId: getAuthUserId(req),
+      exchange: body.exchange,
+    });
+    sendAccepted(res, { job });
+  })
+);
+
+adminRouter.post(
+  "/data-provider/sector-classification-sync",
+  asyncHandler(async (req, res) => {
+    const job = await triggerSectorClassificationSync({
+      actorUserId: getAuthUserId(req),
+    });
+    sendAccepted(res, { job });
+  })
+);
+
+adminRouter.post(
+  "/data-provider/index-candle-backfill",
+  validate({ body: indexCandleBackfillBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { exchange: string };
+    const job = await triggerIndexCandleBackfill({
       actorUserId: getAuthUserId(req),
       exchange: body.exchange,
     });

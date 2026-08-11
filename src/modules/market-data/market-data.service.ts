@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gt, gte, ilike, inArray, lt, lte, not, or, sql } from "drizzle-orm";
 
-import { db } from "../../db/client";
+import { db, type DbOrTx } from "../../db/client";
 import { candles, instruments } from "../../db/schema";
 import { getOrSetCache } from "../../shared/cache";
 import { logger } from "../../shared/logger";
@@ -19,6 +19,7 @@ import {
   getEodhdDataProviderAdapter,
   markProviderConnectionExpired,
 } from "../data-provider/data-provider.service";
+import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 import type {
   ProviderDailyCandle,
   ProviderExchange,
@@ -78,15 +79,17 @@ export type RelativeStrengthMetricRow = {
   symbol: string;
   name: string;
   exchange: string;
+  sector: string | null;
+  industry: string | null;
   close: number;
   volume: number;
   change55dPct: number;
   monthlyPct: number;
   weeklyMacdPct: number;
   weeklyMacdHistogramPct: number;
-  // Sum of the 4 metrics above — all 4 dashboard cards (RSI/Sector/
-  // Industry/Weekly Strong) rank by this single combined score rather
-  // than each card using one metric on its own.
+  // Sum of the 4 metrics above — the Index box and the per-stock ranking
+  // functions rank by this single combined score; the Sector/Industry
+  // group-ranking averages it across each category's member stocks.
   combinedScore: number;
 };
 
@@ -256,14 +259,23 @@ async function listStocksUncached(input: {
   };
 }
 
+type RelativeStrengthInstrumentInput = {
+  symbol: string;
+  name: string;
+  exchange: string;
+  sector?: string | null;
+  industry?: string | null;
+};
+
 // Computes the same 4 relative-strength metrics (55-day change, 19-day
 // "monthly" change, weekly MACD line %, weekly MACD histogram %, all as %
-// of price) over an arbitrary instrument pool — used by market-collections
-// to scope this to a collection's members instead of a raw segment filter.
-export async function computeRelativeStrengthMetrics(
-  instrumentRows: Array<{ symbol: string; name: string; exchange: string }>,
-  exchange: string,
-  limit: number
+// of price) over an arbitrary instrument pool, for every instrument that has
+// enough history — no top-N slicing here, unlike computeRelativeStrengthMetrics
+// below. computeGroupRelativeStrength needs every qualifying row (to average
+// per sector/industry), not just the global top N.
+async function computeAllRelativeStrengthMetrics(
+  instrumentRows: RelativeStrengthInstrumentInput[],
+  exchange: string
 ): Promise<RelativeStrengthMetricRow[]> {
   const symbols = instrumentRows.map((row) => row.symbol);
   if (symbols.length === 0) return [];
@@ -272,47 +284,107 @@ export async function computeRelativeStrengthMetrics(
     exchange,
     symbols,
     dailyFrom: getDateDaysAgo(140),
-    weeklyFrom: getDateYearsAgo(3),
+    weeklyFrom: getDateYearsAgo(5),
   });
   const dailyCandlesBySymbol = groupMetricCandlesBySymbol(dailyCandles);
   const weeklyCandlesBySymbol = groupMetricCandlesBySymbol(weeklyCandles);
 
-  return pickTopRelativeStrengthRows(
-    instrumentRows
-      .map((instrument): RelativeStrengthMetricRow | null => {
-        const dailyRows = dailyCandlesBySymbol.get(instrument.symbol) ?? [];
-        const weeklyRows = weeklyCandlesBySymbol.get(instrument.symbol) ?? [];
-        const latestDaily = dailyRows[dailyRows.length - 1];
-        if (!latestDaily) return null;
+  return instrumentRows
+    .map((instrument): RelativeStrengthMetricRow | null => {
+      const dailyRows = dailyCandlesBySymbol.get(instrument.symbol) ?? [];
+      const weeklyRows = weeklyCandlesBySymbol.get(instrument.symbol) ?? [];
+      const latestDaily = dailyRows[dailyRows.length - 1];
+      if (!latestDaily) return null;
 
-        // A symbol with only a handful of candles (e.g. just synced
-        // today's close, no real history yet) can't produce a genuine
-        // 55-day/monthly/MACD reading — calculateLookbackChangePct and
-        // calculateMacdPercent both fall back to 0 when they don't have
-        // enough bars, which would otherwise look identical to a real
-        // "flat" score instead of "we don't have enough data yet".
-        if (dailyRows.length <= 54 || weeklyRows.length < 35) return null;
+      // A symbol with only a handful of candles (e.g. just synced
+      // today's close, no real history yet) can't produce a genuine
+      // 55-day/monthly/MACD reading — calculateLookbackChangePct and
+      // calculateMacdPercent both fall back to 0 when they don't have
+      // enough bars, which would otherwise look identical to a real
+      // "flat" score instead of "we don't have enough data yet".
+      if (dailyRows.length <= 54 || weeklyRows.length < 35) return null;
 
-        const macd = calculateMacdPercent(weeklyRows);
-        const change55dPct = calculateLookbackChangePct(dailyRows, 54);
-        const monthlyPct = calculateLookbackChangePct(dailyRows, 19);
+      // Same near-250-week-high condition as the scanner page's
+      // near_250_week_high scan band and computeWeeklyStrongStocks below —
+      // weekly close must be within 15% of its trailing 250-week high.
+      const weeklyWindow = weeklyRows.slice(-WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS);
+      const weeklyCloseHigh = Math.max(...weeklyWindow.map((row) => row.close));
+      const latestWeekly = weeklyRows[weeklyRows.length - 1];
+      if (latestWeekly.close <= weeklyCloseHigh * WEEKLY_STRONG_NEAR_HIGH_RATIO) return null;
 
-        return {
-          symbol: instrument.symbol,
-          name: instrument.name,
-          exchange: instrument.exchange,
-          close: latestDaily.close,
-          volume: latestDaily.volume,
-          change55dPct,
-          monthlyPct,
-          weeklyMacdPct: macd.linePct,
-          weeklyMacdHistogramPct: macd.histogramPct,
-          combinedScore: change55dPct + monthlyPct + macd.linePct + macd.histogramPct,
-        };
-      })
-      .filter((row): row is RelativeStrengthMetricRow => Boolean(row)),
-    limit
-  );
+      const macd = calculateMacdPercent(weeklyRows);
+      const change55dPct = calculateLookbackChangePct(dailyRows, 54);
+      const monthlyPct = calculateLookbackChangePct(dailyRows, 19);
+
+      return {
+        symbol: instrument.symbol,
+        name: instrument.name,
+        exchange: instrument.exchange,
+        sector: instrument.sector ?? null,
+        industry: instrument.industry ?? null,
+        close: latestDaily.close,
+        volume: latestDaily.volume,
+        change55dPct,
+        monthlyPct,
+        weeklyMacdPct: macd.linePct,
+        weeklyMacdHistogramPct: macd.histogramPct,
+        // Only the 55-day change condition is enabled for now — monthlyPct
+        // and the weekly MACD terms are still computed above (and returned)
+        // so they're one-line to add back into the sum later.
+        combinedScore: change55dPct,
+      };
+    })
+    .filter((row): row is RelativeStrengthMetricRow => Boolean(row));
+}
+
+export async function computeRelativeStrengthMetrics(
+  instrumentRows: RelativeStrengthInstrumentInput[],
+  exchange: string,
+  limit: number
+): Promise<RelativeStrengthMetricRow[]> {
+  const allMetrics = await computeAllRelativeStrengthMetrics(instrumentRows, exchange);
+  return pickTopRelativeStrengthRows(allMetrics, limit);
+}
+
+export type GroupRelativeStrengthRow = {
+  label: string;
+  score: number;
+  memberCount: number;
+};
+
+// "Sector rotation" style ranking: instead of ranking individual stocks, rank
+// the sector/industry categories themselves by the mean combinedScore of
+// their member stocks within this instrument pool. Requires instrumentRows
+// to carry real sector/industry classification (from the sector-classification
+// sync) — instruments with no classification yet are silently excluded
+// rather than lumped into a misleading "unclassified" group.
+export async function computeGroupRelativeStrength(
+  instrumentRows: RelativeStrengthInstrumentInput[],
+  exchange: string,
+  groupBy: "sector" | "industry",
+  limit: number
+): Promise<GroupRelativeStrengthRow[]> {
+  const allMetrics = await computeAllRelativeStrengthMetrics(instrumentRows, exchange);
+  const groups = new Map<string, { total: number; count: number }>();
+
+  for (const metric of allMetrics) {
+    const key = groupBy === "sector" ? metric.sector : metric.industry;
+    if (!key) continue;
+
+    const group = groups.get(key) ?? { total: 0, count: 0 };
+    group.total += metric.combinedScore;
+    group.count += 1;
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()]
+    .map(([label, { total, count }]) => ({
+      label,
+      score: total / count,
+      memberCount: count,
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
 
 // ChartInk-style "near multi-year close" breakout screen: a stock passes only
@@ -1100,15 +1172,30 @@ async function readDailyAndWeeklyMetricCandles(input: {
   if (dailyCandles.length === 0 && weeklyCandles.length === 0) {
     const seedSymbols = input.symbols.slice(0, RELATIVE_STRENGTH_SEED_BACKFILL_LIMIT);
     await safeProviderAction("market-data.relative-strength-seed-backfill", async () => {
+      let seeded = 0;
+      // One bad symbol shouldn't stop the rest of the batch from seeding —
+      // same failure mode fixed in backfillIndexCandles above.
       for (const symbol of seedSymbols) {
-        await backfillDailyCandles({
-          symbol,
-          exchange: input.exchange,
-          from: getDateYearsAgo(5),
-          to: getTodayDate(),
-        });
+        try {
+          await backfillDailyCandles({
+            symbol,
+            exchange: input.exchange,
+            from: getDateYearsAgo(5),
+            to: getTodayDate(),
+          });
+          seeded++;
+        } catch (error) {
+          logger.warn(
+            {
+              exchange: input.exchange,
+              symbol,
+              message: error instanceof Error ? error.message : "Seed backfill failed",
+            },
+            "Relative strength seed backfill failed for symbol"
+          );
+        }
       }
-      return { symbols: seedSymbols.length };
+      return { symbols: seeded };
     });
 
     [dailyCandles, weeklyCandles] = await Promise.all([
@@ -1208,20 +1295,27 @@ export async function syncProviderInstruments(exchange: string = DEFAULT_EXCHANG
   return { count: providerInstruments.length };
 }
 
-export async function backfillDailyCandles(input: {
-  symbol: string;
-  from: string;
-  to: string;
-  exchange?: string;
-}) {
+export async function backfillDailyCandles(
+  input: {
+    symbol: string;
+    from: string;
+    to: string;
+    exchange?: string;
+  },
+  dbClient: DbOrTx = db
+) {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
-  const instrument = await getOrCreateInstrument(symbol, exchange);
+  const instrument = await getOrCreateInstrument(symbol, exchange, dbClient);
 
   if (!instrument) {
     return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 };
   }
 
+  // Everything that can fail for reasons outside our control (network,
+  // vendor errors, rate limits) happens before we touch existing rows —
+  // deleteCandlesForRefresh only runs once we already have validated
+  // replacement data in hand, inside the transaction below.
   const adapter = getDataProviderAdapterForExchange(exchange);
   const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
   const daily = await adapter.fetchDailyCandles({
@@ -1235,50 +1329,158 @@ export async function backfillDailyCandles(input: {
 
   const weekly = aggregateWeeklyCandles(daily);
   const monthly = aggregateMonthlyCandles(daily);
-  await deleteCandlesForRefresh({
+
+  await replaceCandlesAtomically(dbClient, {
+    instrumentId: instrument.id,
+    exchange,
     symbol,
     from: input.from,
     to: input.to,
-    exchange,
+    daily,
+    weekly,
+    monthly,
   });
 
-  await upsertCandles(
-    daily.map((candle) => ({
-      instrumentId: instrument.id,
-      exchange,
-      symbol,
-      timeframe: CANDLE_TIMEFRAME.day,
-      source: CANDLE_SOURCE.provider,
-      ...candle,
-    }))
-  );
-  await refreshLatestInstrumentStats(exchange, [symbol]);
-  await upsertCandles(
-    weekly.map((candle) => ({
-      instrumentId: instrument.id,
-      exchange,
-      symbol,
-      timeframe: CANDLE_TIMEFRAME.week,
-      source: CANDLE_SOURCE.derived,
-      ...candle,
-    }))
-  );
-  await upsertCandles(
-    monthly.map((candle) => ({
-      instrumentId: instrument.id,
-      exchange,
-      symbol,
-      timeframe: CANDLE_TIMEFRAME.month,
-      source: CANDLE_SOURCE.derived,
-      ...candle,
-    }))
-  );
+  // A denormalized read-cache refresh, not part of the replacement
+  // invariant above — runs after commit so it reads the now-durable rows.
+  // If this step fails, the candles are still correctly replaced; only the
+  // instruments.latest* cache stays stale until the next sync.
+  await refreshLatestInstrumentStats(exchange, [symbol], dbClient);
 
   return {
     insertedDaily: daily.length,
     insertedWeekly: weekly.length,
     insertedMonthly: monthly.length,
   };
+}
+
+// The atomic core of a candle-range replacement: delete the existing
+// exchange/symbol/date-range across all 3 timeframes, then upsert the fresh
+// daily/weekly/monthly rows — all inside one transaction, so a failure at
+// any step (including a duplicate-key error surfaced from upsertCandles)
+// rolls back the delete too, instead of leaving the range empty. Exported
+// so it can be exercised directly against a fake DbOrTx in tests, without
+// needing to also fake the provider-fetch layer that backfillDailyCandles
+// wraps around it.
+export async function replaceCandlesAtomically(
+  dbClient: DbOrTx,
+  input: {
+    instrumentId: string;
+    exchange: string;
+    symbol: string;
+    from: string;
+    to: string;
+    daily: ProviderDailyCandle[];
+    weekly: ProviderDailyCandle[];
+    monthly: ProviderDailyCandle[];
+  }
+) {
+  await dbClient.transaction(async (tx) => {
+    await deleteCandlesForRefresh(
+      {
+        symbol: input.symbol,
+        from: input.from,
+        to: input.to,
+        exchange: input.exchange,
+      },
+      tx
+    );
+
+    await upsertCandles(
+      input.daily.map((candle) => ({
+        instrumentId: input.instrumentId,
+        exchange: input.exchange,
+        symbol: input.symbol,
+        timeframe: CANDLE_TIMEFRAME.day,
+        source: CANDLE_SOURCE.provider,
+        ...candle,
+      })),
+      tx
+    );
+    await upsertCandles(
+      input.weekly.map((candle) => ({
+        instrumentId: input.instrumentId,
+        exchange: input.exchange,
+        symbol: input.symbol,
+        timeframe: CANDLE_TIMEFRAME.week,
+        source: CANDLE_SOURCE.derived,
+        ...candle,
+      })),
+      tx
+    );
+    await upsertCandles(
+      input.monthly.map((candle) => ({
+        instrumentId: input.instrumentId,
+        exchange: input.exchange,
+        symbol: input.symbol,
+        timeframe: CANDLE_TIMEFRAME.month,
+        source: CANDLE_SOURCE.derived,
+        ...candle,
+      })),
+      tx
+    );
+  });
+}
+
+// Backfills full price history for the small (~120), explicitly synced set
+// of index instruments on one index exchange (NSE_IDX or BSE_IDX) — a
+// deliberate, bounded admin action, not proactive bulk backfill for the
+// whole market. Reuses backfillDailyCandles unchanged; it's already
+// exchange-generic. Defaults to NSE_IDX to preserve existing callers.
+export async function backfillIndexCandles(exchange: string = NSE_INDEX_EXCHANGE) {
+  const indexInstruments = await db
+    .select({ symbol: instruments.symbol })
+    .from(instruments)
+    .where(and(eq(instruments.exchange, exchange), eq(instruments.active, true)));
+
+  const from = getDefaultChartHistoryFromDate();
+  const to = new Date().toISOString().slice(0, 10);
+  let backfilled = 0;
+  const failedSymbols: string[] = [];
+
+  // One slow/unhistoried index shouldn't sink backfill for the rest —
+  // continue past a per-symbol failure and report it instead of aborting.
+  for (const row of indexInstruments) {
+    try {
+      await backfillDailyCandles({ symbol: row.symbol, from, to, exchange });
+      backfilled++;
+    } catch (error) {
+      failedSymbols.push(row.symbol);
+      logger.warn(
+        {
+          exchange,
+          symbol: row.symbol,
+          message: error instanceof Error ? error.message : "Backfill failed",
+        },
+        "Index candle backfill failed for symbol"
+      );
+    }
+  }
+
+  return { indexCount: indexInstruments.length, backfilled, failedSymbols };
+}
+
+// Global (not collection-scoped) ranking of one index exchange's indices
+// against each other — reuses computeRelativeStrengthMetrics unchanged,
+// since ranking an index pool by the same combined score is exactly the
+// same computation shape as ranking a stock pool; each index is just its
+// own single row here, no grouping/averaging needed (unlike
+// computeGroupRelativeStrength). Defaults to NSE_IDX to preserve existing
+// callers; pass BSE_IDX for the BSE index box.
+export async function getIndexRelativeStrength(
+  limit: number,
+  exchange: string = NSE_INDEX_EXCHANGE
+) {
+  const indexInstruments = await db
+    .select({
+      symbol: instruments.symbol,
+      name: instruments.name,
+      exchange: instruments.exchange,
+    })
+    .from(instruments)
+    .where(and(eq(instruments.exchange, exchange), eq(instruments.active, true)));
+
+  return computeRelativeStrengthMetrics(indexInstruments, exchange, limit);
 }
 
 const SUPPORTED_EXCHANGES_CACHE_TTL_MS = 24 * 60 * 60_000;
@@ -1410,13 +1612,16 @@ export async function listExchangeRates(): Promise<{ rates: Record<string, numbe
   });
 }
 
-async function deleteCandlesForRefresh(input: {
-  symbol: string;
-  from: string;
-  to: string;
-  exchange: string;
-}) {
-  await db
+async function deleteCandlesForRefresh(
+  input: {
+    symbol: string;
+    from: string;
+    to: string;
+    exchange: string;
+  },
+  dbClient: DbOrTx = db
+) {
+  await dbClient
     .delete(candles)
     .where(
       and(
@@ -1749,8 +1954,12 @@ function getSafeProviderErrorMessage(error: unknown) {
   return firstLine.length > 300 ? `${firstLine.slice(0, 300)}...` : firstLine;
 }
 
-async function getOrCreateInstrument(symbol: string, exchange: string = DEFAULT_EXCHANGE) {
-  const [instrument] = await db
+async function getOrCreateInstrument(
+  symbol: string,
+  exchange: string = DEFAULT_EXCHANGE,
+  dbClient: DbOrTx = db
+) {
+  const [instrument] = await dbClient
     .select()
     .from(instruments)
     .where(
@@ -1764,7 +1973,7 @@ async function getOrCreateInstrument(symbol: string, exchange: string = DEFAULT_
   if (instrument) return instrument;
 
   await ensureInstrumentsForSymbols([symbol], exchange);
-  const [created] = await db
+  const [created] = await dbClient
     .select()
     .from(instruments)
     .where(
@@ -1835,21 +2044,120 @@ async function upsertInstrument(instrument: {
   await upsertInstruments([instrument], adapter.providerKey);
 }
 
-async function upsertInstruments(
-  input: Array<{
-    exchange: string;
-    symbol: string;
-    name: string;
-    instrumentToken: string;
-    segment?: string;
-  }>,
-  provider: string
+export type InstrumentUpsertInput = {
+  exchange: string;
+  symbol: string;
+  name: string;
+  instrumentToken: string;
+  segment?: string;
+};
+
+// `instruments` enforces two unique constraints — (exchange, symbol) and
+// (provider, instrument_token) — but onConflictDoUpdate below can only
+// target one of them. A batch containing two rows that collide on *either*
+// key fails the whole INSERT with "ON CONFLICT DO UPDATE command cannot
+// affect row a second time" (exchange+symbol) or a duplicate-key violation
+// (instrument_token), even though only one row actually collides. This
+// applies both dedup passes before the insert ever runs.
+//
+// Conflict resolution is deterministic: the later row in `inputs` wins,
+// matching dedupeCandleUpsertInputs' existing "last write wins" rule.
+// Symbol-level duplicates are resolved first (using the exchange+symbol
+// identity the ON CONFLICT target relies on), then token-level duplicates
+// are resolved among those survivors — so a genuine vendor anomaly (two
+// different symbols claiming the same instrument token) drops the earlier
+// symbol's row from *this* sync rather than failing the batch; it picks up
+// on the next successful sync once the vendor data is consistent again.
+export function dedupeInstrumentUpsertInputs(inputs: InstrumentUpsertInput[]) {
+  const bySymbolKey = new Map<string, InstrumentUpsertInput>();
+  for (const row of inputs) {
+    bySymbolKey.set(`${row.exchange}:${normalizeSymbol(row.symbol)}`, row);
+  }
+
+  const byToken = new Map<string, InstrumentUpsertInput>();
+  for (const row of bySymbolKey.values()) {
+    byToken.set(row.instrumentToken, row);
+  }
+
+  const deduped = [...byToken.values()];
+  const droppedCount = inputs.length - deduped.length;
+  if (droppedCount > 0) {
+    logger.warn(
+      { inputCount: inputs.length, dedupedCount: deduped.length, droppedCount },
+      "Dropped duplicate instrument rows within a single sync batch"
+    );
+  }
+
+  return deduped;
+}
+
+// dedupeInstrumentUpsertInputs above only catches collisions within *this*
+// batch. A row can still collide with a *different* (exchange, symbol) row
+// already sitting in the DB from an earlier sync — e.g. a provider reusing
+// an instrument_token across two segments — which the ON CONFLICT target
+// (exchange, symbol) doesn't cover, since it never matches an existing row
+// for a brand-new symbol and falls through to a plain INSERT that then
+// fails the separate (provider, instrument_token) unique constraint. Drop
+// those here rather than letting a handful of vendor-anomaly rows abort an
+// entire sync batch.
+async function dropCrossBatchTokenCollisions(
+  inputs: InstrumentUpsertInput[],
+  provider: string,
+  dbClient: DbOrTx
 ) {
-  for (let index = 0; index < input.length; index += INSTRUMENT_UPSERT_CHUNK_SIZE) {
-    const chunk = input.slice(index, index + INSTRUMENT_UPSERT_CHUNK_SIZE);
+  if (inputs.length === 0) return inputs;
+
+  const tokens = inputs.map((row) => row.instrumentToken);
+  const existingRows = await dbClient
+    .select({
+      exchange: instruments.exchange,
+      symbol: instruments.symbol,
+      instrumentToken: instruments.instrumentToken,
+    })
+    .from(instruments)
+    .where(and(eq(instruments.provider, provider), inArray(instruments.instrumentToken, tokens)));
+
+  const existingByToken = new Map(existingRows.map((row) => [row.instrumentToken, row]));
+  const kept: InstrumentUpsertInput[] = [];
+  let droppedCount = 0;
+
+  for (const row of inputs) {
+    const existing = existingByToken.get(row.instrumentToken);
+    const isSameIdentity =
+      existing && existing.exchange === row.exchange && existing.symbol === normalizeSymbol(row.symbol);
+    if (existing && !isSameIdentity) {
+      droppedCount++;
+      continue;
+    }
+    kept.push(row);
+  }
+
+  if (droppedCount > 0) {
+    logger.warn(
+      { provider, droppedCount },
+      "Dropped instrument rows whose token already belongs to a different symbol in the DB"
+    );
+  }
+
+  return kept;
+}
+
+async function upsertInstruments(
+  input: InstrumentUpsertInput[],
+  provider: string,
+  dbClient: DbOrTx = db
+) {
+  const dedupedInput = await dropCrossBatchTokenCollisions(
+    dedupeInstrumentUpsertInputs(input),
+    provider,
+    dbClient
+  );
+
+  for (let index = 0; index < dedupedInput.length; index += INSTRUMENT_UPSERT_CHUNK_SIZE) {
+    const chunk = dedupedInput.slice(index, index + INSTRUMENT_UPSERT_CHUNK_SIZE);
     if (chunk.length === 0) continue;
 
-    await db
+    await dbClient
       .insert(instruments)
       .values(
         chunk.map((instrument) => ({
@@ -1898,7 +2206,49 @@ function getDateYearsAgo(years: number) {
   return date.toISOString().slice(0, 10);
 }
 
-async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT_EXCHANGE) {
+type LatestStockStatsRow = {
+  symbol: string;
+  open: string;
+  close: string;
+  volume: string;
+  time: string;
+};
+
+// Old query (kept here only as the EXPLAIN comparison baseline — no longer
+// called): `SELECT ... FROM candles WHERE exchange=? AND timeframe='1D' AND
+// symbol IN (...) ORDER BY symbol, time DESC` with no LIMIT — Postgres has
+// no way to know only 2 rows per symbol are wanted, so it returns every
+// matching daily candle ever stored for every requested symbol.
+//   EXPLAIN (ANALYZE, BUFFERS)
+//   SELECT symbol, open, close, volume, time FROM candles
+//   WHERE exchange = 'NSE' AND timeframe = '1D' AND symbol = ANY(ARRAY['RELIANCE','TCS'])
+//   ORDER BY symbol, time DESC;
+//   -- healthy-looking plan, but "rows" here is every historical row per
+//   -- symbol (thousands for a multi-year backfill), not the 2 actually used:
+//   --   Index Scan using candles_exchange_symbol_timeframe_time_unique on candles
+//   --     Index Cond: (exchange = 'NSE' AND symbol = ANY(...) AND timeframe = '1D')
+//
+// New query below asks Postgres for exactly the top-2-per-symbol instead,
+// via a window function filtered in an outer query (row_number() can't be
+// filtered directly in WHERE):
+//   EXPLAIN (ANALYZE, BUFFERS)
+//   SELECT symbol, open, close, volume, time FROM (
+//     SELECT symbol, open, close, volume, time,
+//            row_number() OVER (PARTITION BY symbol ORDER BY time DESC) AS rn
+//     FROM candles
+//     WHERE exchange = 'NSE' AND timeframe = '1D' AND symbol = ANY(ARRAY['RELIANCE','TCS'])
+//   ) ranked WHERE rn <= 2 ORDER BY symbol, time DESC;
+//   -- same Index Scan for the inner scan, but WindowAgg + an rn<=2 filter
+//   -- caps actual rows returned to the client at 2 per symbol instead of
+//   -- the symbol's entire stored history.
+// (Both plans reference the existing composite unique index — this is a
+// query-shape fix, not an indexing fix. EXPLAIN not run live: no reachable
+// Postgres instance in this environment: see docs/DATABASE.md.)
+async function getLatestStockStats(
+  symbols: string[],
+  exchange: string = DEFAULT_EXCHANGE,
+  dbClient: DbOrTx = db
+) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   const stats = new Map<
     string,
@@ -1907,30 +2257,35 @@ async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT
 
   if (uniqueSymbols.length === 0) return stats;
 
-  const rows = await db
-    .select({
-      symbol: candles.symbol,
-      open: candles.open,
-      close: candles.close,
-      volume: candles.volume,
-      time: candles.time,
-    })
-    .from(candles)
-    .where(
-      and(
-        eq(candles.exchange, exchange),
-        eq(candles.timeframe, CANDLE_TIMEFRAME.day),
-        inArray(candles.symbol, uniqueSymbols)
-      )
-    )
-    .orderBy(asc(candles.symbol), desc(candles.time));
+  const startedAt = Date.now();
+  const result = await dbClient.execute<LatestStockStatsRow>(sql`
+    SELECT symbol, open, close, volume, time::text AS time FROM (
+      SELECT
+        symbol, open, close, volume, time,
+        row_number() OVER (PARTITION BY symbol ORDER BY time DESC) AS rn
+      FROM candles
+      WHERE exchange = ${exchange}
+        AND timeframe = ${CANDLE_TIMEFRAME.day}
+        AND symbol = ANY(ARRAY[${sql.join(uniqueSymbols.map((symbol) => sql`${symbol}`), sql`, `)}]::text[])
+    ) ranked
+    WHERE rn <= 2
+    ORDER BY symbol, time DESC
+  `);
+  logger.debug(
+    {
+      exchange,
+      symbolCount: uniqueSymbols.length,
+      rowCount: result.rows.length,
+      durationMs: Date.now() - startedAt,
+    },
+    "getLatestStockStats query"
+  );
 
-  const recentRowsBySymbol = new Map<string, typeof rows>();
-  for (const row of rows) {
+  const recentRowsBySymbol = new Map<string, LatestStockStatsRow[]>();
+  for (const row of result.rows) {
     const currentRows = recentRowsBySymbol.get(row.symbol) ?? [];
-    if (currentRows.length < 2) {
-      recentRowsBySymbol.set(row.symbol, [...currentRows, row]);
-    }
+    currentRows.push(row);
+    recentRowsBySymbol.set(row.symbol, currentRows);
   }
 
   for (const [symbol, recentRows] of recentRowsBySymbol.entries()) {
@@ -1961,14 +2316,18 @@ async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT
 // stocks list can filter/sort/read prices directly off the instruments
 // table (fast, works across the whole table) instead of recomputing a
 // 2-row candles lookback per symbol on every read.
-async function refreshLatestInstrumentStats(exchange: string, symbols: string[]) {
+async function refreshLatestInstrumentStats(
+  exchange: string,
+  symbols: string[],
+  dbClient: DbOrTx = db
+) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   if (uniqueSymbols.length === 0) return;
 
-  const stats = await getLatestStockStats(uniqueSymbols, exchange);
+  const stats = await getLatestStockStats(uniqueSymbols, exchange, dbClient);
 
   for (const [symbol, stat] of stats.entries()) {
-    await db
+    await dbClient
       .update(instruments)
       .set({
         latestClose: String(stat.close),
@@ -1996,14 +2355,24 @@ type CandleUpsertInput = {
   source: string;
 };
 
-async function upsertCandles(inputs: CandleUpsertInput[]) {
+async function upsertCandles(inputs: CandleUpsertInput[], dbClient: DbOrTx = db) {
   const dedupedInputs = dedupeCandleUpsertInputs(inputs);
+  if (dedupedInputs.length === 0) return;
+
+  const startedAt = Date.now();
+  let insertedCount = 0;
+  let updatedCount = 0;
 
   for (let index = 0; index < dedupedInputs.length; index += CANDLE_UPSERT_CHUNK_SIZE) {
     const chunk = dedupedInputs.slice(index, index + CANDLE_UPSERT_CHUNK_SIZE);
     if (chunk.length === 0) continue;
 
-    await db
+    // `xmax = 0` is a well-known Postgres idiom for distinguishing an
+    // INSERT from an UPDATE inside a single ON CONFLICT statement: a freshly
+    // inserted row has no prior transaction ID recorded in xmax, an updated
+    // row does. Used only to report accurate insert/update counts below —
+    // never part of application logic.
+    const results = await dbClient
       .insert(candles)
       .values(
         chunk.map((input) => ({
@@ -2031,8 +2400,25 @@ async function upsertCandles(inputs: CandleUpsertInput[]) {
           source: sql`excluded.source`,
           updatedAt: new Date(),
         },
-      });
+      })
+      .returning({ wasInsert: sql<boolean>`(xmax = 0)` });
+
+    for (const row of results) {
+      if (row.wasInsert) insertedCount++;
+      else updatedCount++;
+    }
   }
+
+  logger.debug(
+    {
+      inputCount: inputs.length,
+      dedupedCount: dedupedInputs.length,
+      insertedCount,
+      updatedCount,
+      durationMs: Date.now() - startedAt,
+    },
+    "upsertCandles complete"
+  );
 }
 
 function dedupeCandleUpsertInputs(inputs: CandleUpsertInput[]) {
@@ -2045,5 +2431,14 @@ function dedupeCandleUpsertInputs(inputs: CandleUpsertInput[]) {
     );
   }
 
-  return Array.from(candlesByKey.values());
+  const deduped = Array.from(candlesByKey.values());
+  const droppedCount = inputs.length - deduped.length;
+  if (droppedCount > 0) {
+    logger.warn(
+      { inputCount: inputs.length, dedupedCount: deduped.length, droppedCount },
+      "Dropped duplicate candle rows within a single upsert batch"
+    );
+  }
+
+  return deduped;
 }

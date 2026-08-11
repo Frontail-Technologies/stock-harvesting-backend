@@ -6,10 +6,17 @@ import { asyncHandler, requireAuth, validate } from "../../shared/middleware";
 import {
   candleParamsSchema,
   candleQuerySchema,
+  indexRelativeStrengthQuerySchema,
   stockListQuerySchema,
   type MoveFilter,
 } from "./market-data.schemas";
-import { getChartCandles, listExchangeRates, listStocks, listSupportedExchanges } from "./market-data.service";
+import {
+  getChartCandles,
+  getIndexRelativeStrength,
+  listExchangeRates,
+  listStocks,
+  listSupportedExchanges,
+} from "./market-data.service";
 
 export const marketDataRouter = Router();
 
@@ -22,6 +29,15 @@ marketDataRouter.get("/exchanges", asyncHandler(async (_req, res) => {
 marketDataRouter.get("/exchange-rates", asyncHandler(async (_req, res) => {
   sendData(res, await listExchangeRates());
 }));
+
+marketDataRouter.get(
+  "/index-relative-strength",
+  validate({ query: indexRelativeStrengthQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as { limit: number; exchange: string };
+    sendData(res, { metrics: await getIndexRelativeStrength(query.limit, query.exchange) });
+  })
+);
 
 marketDataRouter.get("/stocks", validate({ query: stockListQuerySchema }), asyncHandler(async (req, res) => {
   const query = req.query as unknown as {

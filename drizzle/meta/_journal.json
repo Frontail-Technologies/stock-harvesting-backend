@@ -36,6 +36,27 @@
       "when": 1784989642041,
       "tag": "0004_red_charles_xavier",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785835153094,
+      "tag": "0005_abandoned_ulik",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786005427123,
+      "tag": "0006_add_sync_jobs_and_scanner_drawings_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786011853770,
+      "tag": "0007_candles_instrument_id_not_null",
+      "breakpoints": true
     }
   ]
 }

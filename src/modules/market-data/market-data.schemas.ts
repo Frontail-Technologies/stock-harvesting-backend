@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { CANDLE_TIMEFRAMES, DEFAULT_CANDLE_TIMEFRAME, DEFAULT_EXCHANGE } from "../../shared/constants";
+import { GLOBAL_DATAFEEDS_INDEX_EXCHANGE } from "../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
+import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 
 // Open rather than a closed enum — the exchange list is dynamic (see
 // listSupportedExchanges), sourced live from EODHD (~70 exchanges) plus
@@ -44,5 +46,16 @@ export const candleQuerySchema = z
     from: z.string().date().optional(),
     to: z.string().date().optional(),
     exchange: exchangeSchema,
+  })
+  .strict();
+
+// Closed whitelist, unlike the general exchangeSchema above — there are
+// only ever a handful of *index* exchanges, and an unrecognized one would
+// silently return an empty ranking rather than erroring, so it's worth
+// rejecting up front instead.
+export const indexRelativeStrengthQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().positive().max(500).default(150),
+    exchange: z.enum([NSE_INDEX_EXCHANGE, GLOBAL_DATAFEEDS_INDEX_EXCHANGE]).default(NSE_INDEX_EXCHANGE),
   })
   .strict();

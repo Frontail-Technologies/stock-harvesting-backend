@@ -6,6 +6,7 @@ import { getOrSetCache, invalidateCacheByPrefix } from "../../shared/cache";
 import { conflict, notFound } from "../../shared/errors";
 import { normalizeSymbol } from "../../shared/normalize";
 import {
+  computeGroupRelativeStrength,
   computeRelativeStrengthMetrics,
   computeWeeklyStrongStocks,
   computeWeeklyStrongStocksBacktest,
@@ -168,15 +169,33 @@ async function getCollectionMembersForCollection(
   });
 }
 
-export async function getCollectionRelativeStrength(input: { code: string; limit: number }) {
+export async function getCollectionRelativeStrength(input: {
+  code: string;
+  limit: number;
+  groupBy?: "sector" | "industry";
+}) {
   const collection = await requireCollectionByCode(input.code);
-  const cacheKey = `collectionRelativeStrength:${collection.code}:${input.limit}`;
+  const cacheKey = `collectionRelativeStrength:${collection.code}:${input.limit}:${input.groupBy ?? ""}`;
 
   return getOrSetCache(cacheKey, COLLECTION_CACHE_TTL_MS, async () => {
     const memberRows = await getActiveMemberInstrumentRows(collection.id);
+
+    if (input.groupBy) {
+      const groups = await computeGroupRelativeStrength(
+        memberRows,
+        collection.exchange,
+        input.groupBy,
+        input.limit
+      );
+      return {
+        collection: { code: collection.code, name: collection.name, exchange: collection.exchange },
+        groups,
+      };
+    }
+
     const metrics = await computeRelativeStrengthMetrics(memberRows, collection.exchange, input.limit);
     return {
-      collection: { code: collection.code, name: collection.name },
+      collection: { code: collection.code, name: collection.name, exchange: collection.exchange },
       metrics,
     };
   });
@@ -219,6 +238,8 @@ async function getActiveMemberInstrumentRows(collectionId: string) {
       symbol: instruments.symbol,
       name: instruments.name,
       exchange: instruments.exchange,
+      sector: instruments.sector,
+      industry: instruments.industry,
     })
     .from(marketCollectionMembers)
     .innerJoin(instruments, eq(marketCollectionMembers.instrumentId, instruments.id))

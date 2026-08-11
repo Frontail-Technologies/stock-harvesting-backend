@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { SUPPORTED_AI_MODEL_CODES, USER_PLANS, USER_ROLES } from "../../shared/constants";
+import { GLOBAL_DATAFEEDS_INDEX_EXCHANGE } from "../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
+import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 import { exchangeSchema } from "../market-data/market-data.schemas";
 
 export const adminUserSortFields = [
@@ -23,6 +25,18 @@ export const adminUsersQuerySchema = z
   })
   .strict();
 
+// Same filters as adminUsersQuerySchema minus page/limit — export always
+// returns every user matching the current filters, not one page of them.
+export const adminUsersExportQuerySchema = z
+  .object({
+    q: z.string().trim().max(160).optional(),
+    role: z.enum(USER_ROLES).optional(),
+    plan: z.enum(USER_PLANS).optional(),
+    sort: z.enum(adminUserSortFields).default("createdAt"),
+    direction: z.enum(["asc", "desc"]).default("desc"),
+  })
+  .strict();
+
 export const providerConnectBodySchema = z
   .object({
     requestToken: z.string().min(1),
@@ -32,6 +46,14 @@ export const providerConnectBodySchema = z
 export const providerSyncBodySchema = z
   .object({
     exchange: exchangeSchema,
+  })
+  .strict();
+
+// Same closed whitelist as indexRelativeStrengthQuerySchema — only ever a
+// handful of real index exchanges, worth rejecting anything else up front.
+export const indexCandleBackfillBodySchema = z
+  .object({
+    exchange: z.enum([NSE_INDEX_EXCHANGE, GLOBAL_DATAFEEDS_INDEX_EXCHANGE]).default(NSE_INDEX_EXCHANGE),
   })
   .strict();
 

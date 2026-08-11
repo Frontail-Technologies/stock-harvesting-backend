@@ -21,6 +21,7 @@ const adaptersByProvider = {
 // so this can't be a closed Record without breaking on every new exchange.
 const providerByExchange: Record<string, keyof typeof adaptersByProvider> = {
   NSE: DATA_PROVIDER_KEY.zerodha,
+  NSE_IDX: DATA_PROVIDER_KEY.zerodha,
   BSE: DATA_PROVIDER_KEY.globalDatafeeds,
   BSE_IDX: DATA_PROVIDER_KEY.globalDatafeeds,
 };

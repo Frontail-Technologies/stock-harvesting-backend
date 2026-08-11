@@ -10,4 +10,6 @@ export const JOB_NAMES = {
 export const SYNC_JOB_TYPES = {
   instrumentSync: "market-data.instrument-sync",
   priceRefresh: "market-data.price-refresh",
+  sectorClassificationSync: "market-data.sector-classification-sync",
+  indexCandleBackfill: "market-data.index-candle-backfill",
 } as const;

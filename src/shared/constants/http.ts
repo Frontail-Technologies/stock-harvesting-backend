@@ -10,4 +10,5 @@ export const HTTP_STATUS = {
   conflict: 409,
   internalServerError: 500,
   badGateway: 502,
+  serviceUnavailable: 503,
 } as const;

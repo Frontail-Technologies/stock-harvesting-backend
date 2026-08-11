@@ -1,18 +1,25 @@
-import { integer, jsonb, pgTable, text, timestamp, uuid, varchar, boolean } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text, timestamp, uuid, varchar, boolean } from "drizzle-orm/pg-core";
 
 import { BRANDING_DEFAULTS, JOB_STATUS } from "../../shared/constants";
 import { jobStatusEnum } from "./enums";
 import { users } from "./users";
 
-export const syncJobs = pgTable("sync_jobs", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  type: varchar("type", { length: 128 }).notNull(),
-  status: jobStatusEnum("status").default(JOB_STATUS.queued).notNull(),
-  payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
-  errorMessage: text("error_message"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const syncJobs = pgTable(
+  "sync_jobs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    type: varchar("type", { length: 128 }).notNull(),
+    status: jobStatusEnum("status").default(JOB_STATUS.queued).notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    // Serves admin.service.ts's listJobs(): `ORDER BY created_at DESC LIMIT 50`.
+    createdAtIdx: index("sync_jobs_created_at_idx").on(table.createdAt.desc()),
+  })
+);
 
 export const brandingSettings = pgTable("branding_settings", {
   id: integer("id").primaryKey(),

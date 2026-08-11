@@ -14,6 +14,34 @@ const KITE_BASE_URL = "https://api.kite.trade";
 const ZERODHA_DEFAULT_EXCHANGE = "NSE";
 const ZERODHA_MAX_DAILY_CANDLE_DAYS = 1_800;
 const NSE_NON_EQ_SERIES_SYMBOL_PATTERN = /-(BE|BZ|SM|ST|SZ|E[0-9]+|N[0-9]+)$/;
+// A virtual exchange code (mirrors GlobalDataFeeds' BSE_IDX elsewhere in this
+// codebase) — Kite has no separate index endpoint, index instruments live
+// mixed into the regular /instruments/NSE dump with segment=INDICES, so
+// this is resolved specially in fetchInstruments below rather than as a
+// real Kite exchange.
+export const NSE_INDEX_EXCHANGE = "NSE_IDX";
+// Non-"sector rotation" noise present in Kite's INDICES segment: leveraged/
+// inverse synthetic products, the volatility index, government-securities/
+// bond indices, a foreign-index tracker, and dividend-point indices (a
+// cumulative points series, not a price series — Kite only populates
+// `close` for these, leaving open/high/low at 0 and breaking the %-based
+// combined score) — confirmed by inspecting the full live list rather than
+// guessing.
+const NSE_INDEX_DENYLIST_PATTERNS = [
+  "LEV",
+  " INV",
+  "INDIA VIX",
+  "NIFTY GS",
+  "BHARATBOND",
+  "HANGSENG",
+  "DIV POINT",
+];
+
+function isTradableNseIndexSymbol(name: string) {
+  const normalized = name.trim().toUpperCase();
+  if (!normalized) return false;
+  return !NSE_INDEX_DENYLIST_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
 
 type KiteErrorBody = {
   status?: string;
@@ -205,7 +233,10 @@ export class ZerodhaDataProviderAdapter implements DataProviderAdapter {
     }
 
     const exchangeCode = input.exchangeCode ?? ZERODHA_DEFAULT_EXCHANGE;
-    const response = await fetch(`${KITE_BASE_URL}/instruments/${exchangeCode}`, {
+    const isIndexRequest = exchangeCode === NSE_INDEX_EXCHANGE;
+    // Indices live in the same NSE dump, not a separate Kite endpoint.
+    const kiteExchange = isIndexRequest ? ZERODHA_DEFAULT_EXCHANGE : exchangeCode;
+    const response = await fetch(`${KITE_BASE_URL}/instruments/${kiteExchange}`, {
       headers: {
         authorization: `token ${env.ZERODHA_API_KEY}:${input.accessToken}`,
         "x-kite-version": "3",
@@ -233,18 +264,25 @@ export class ZerodhaDataProviderAdapter implements DataProviderAdapter {
     const headers = parseCsvLine(headerLine);
     const indexOf = (name: string) => headers.indexOf(name);
 
-    return rows
+    const parsedRows = rows
       .map((row) => parseCsvLine(row))
-      .filter((cols) => cols[indexOf("exchange")] === exchangeCode)
-      .filter((cols) => cols[indexOf("instrument_type")] === "EQ")
-      .filter((cols) => isTradableNseEquitySymbol(cols[indexOf("tradingsymbol")]))
-      .map((cols) => ({
-        exchange: exchangeCode,
-        symbol: cols[indexOf("tradingsymbol")],
-        name: cols[indexOf("name")] || cols[indexOf("tradingsymbol")],
-        instrumentToken: cols[indexOf("instrument_token")],
-        segment: cols[indexOf("segment")],
-      }));
+      .filter((cols) => cols[indexOf("exchange")] === kiteExchange);
+
+    const filteredRows = isIndexRequest
+      ? parsedRows
+          .filter((cols) => cols[indexOf("segment")] === "INDICES")
+          .filter((cols) => isTradableNseIndexSymbol(cols[indexOf("tradingsymbol")]))
+      : parsedRows
+          .filter((cols) => cols[indexOf("instrument_type")] === "EQ")
+          .filter((cols) => isTradableNseEquitySymbol(cols[indexOf("tradingsymbol")]));
+
+    return filteredRows.map((cols) => ({
+      exchange: exchangeCode,
+      symbol: cols[indexOf("tradingsymbol")],
+      name: cols[indexOf("name")] || cols[indexOf("tradingsymbol")],
+      instrumentToken: cols[indexOf("instrument_token")],
+      segment: cols[indexOf("segment")],
+    }));
   }
 
   async fetchDailyCandles(input: {

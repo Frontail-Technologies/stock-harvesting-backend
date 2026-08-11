@@ -28,6 +28,11 @@ export const instruments = pgTable(
     latestVolume: numeric("latest_volume", { precision: 20, scale: 0 }),
     latestChangePct: numeric("latest_change_pct", { precision: 10, scale: 4 }),
     latestPriceAt: date("latest_price_at"),
+    sector: varchar("sector", { length: 255 }),
+    sectorCode: varchar("sector_code", { length: 32 }),
+    industry: varchar("industry", { length: 255 }),
+    industryCode: varchar("industry_code", { length: 32 }),
+    classificationSyncedAt: timestamp("classification_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -56,9 +61,14 @@ export const candles = pgTable(
   "candles",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    instrumentId: uuid("instrument_id").references(() => instruments.id, {
-      onDelete: "cascade",
-    }),
+    // NOT NULL since 2026-08-06 — verified live (0 of 1,357,264 rows were
+    // NULL) via backend/src/scripts/harden-candles-instrument-id.ts before
+    // applying; every write path already always supplies it.
+    instrumentId: uuid("instrument_id")
+      .references(() => instruments.id, {
+        onDelete: "cascade",
+      })
+      .notNull(),
     exchange: varchar("exchange", { length: 16 }).notNull(),
     symbol: varchar("symbol", { length: 64 }).notNull(),
     timeframe: candleTimeframeEnum("timeframe").notNull(),

@@ -28,6 +28,7 @@ export const collectionMembersQuerySchema = z
 export const collectionRelativeStrengthQuerySchema = z
   .object({
     limit: z.coerce.number().int().positive().max(500).default(200),
+    groupBy: z.enum(["sector", "industry"]).optional(),
   })
   .strict();
 

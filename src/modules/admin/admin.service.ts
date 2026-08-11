@@ -18,9 +18,11 @@ import {
 import { badRequest, notFound } from "../../shared/errors";
 import {
   backfillDailyCandles,
+  backfillIndexCandles,
   refreshAllLatestInstrumentPrices,
   syncProviderInstruments,
 } from "../market-data/market-data.service";
+import { syncSectorClassifications } from "../market-data/sector-classification.service";
 import {
   getAllProviderStatuses,
   getProviderConnectUrl,
@@ -28,6 +30,7 @@ import {
   saveProviderToken,
 } from "../data-provider/data-provider.service";
 import { getMarketDataQueue } from "../jobs/queues";
+import { logger } from "../../shared/logger";
 
 export type AdminUserSortField = "name" | "email" | "role" | "plan" | "createdAt";
 
@@ -82,6 +85,74 @@ export async function listAdminUsers(input: {
       totalPages: Math.max(1, Math.ceil(totalUsers / input.limit)),
     },
   };
+}
+
+export async function exportAdminUsersCsv(input: {
+  q?: string;
+  role?: UserRole;
+  plan?: UserPlan;
+  sort: AdminUserSortField;
+  direction: "asc" | "desc";
+}) {
+  const trimmedQuery = input.q?.trim();
+  const filters = [
+    trimmedQuery
+      ? or(
+          ilike(users.name, `%${trimmedQuery}%`),
+          ilike(users.email, `%${trimmedQuery}%`)
+        )
+      : undefined,
+    input.role ? eq(users.role, input.role) : undefined,
+    input.plan ? eq(users.plan, input.plan) : undefined,
+  ].filter(Boolean);
+  const whereClause = filters.length > 0 ? and(...filters) : undefined;
+
+  const rows = await db
+    .select({
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      plan: users.plan,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(whereClause)
+    .orderBy(getAdminUserOrderBy(input.sort, input.direction));
+
+  return buildUsersCsv(rows);
+}
+
+function csvCell(value: string) {
+  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function buildUsersCsv(
+  rows: Array<{
+    name: string | null;
+    email: string;
+    role: string;
+    plan: string;
+    createdAt: Date | string;
+  }>
+) {
+  const header = ["Name", "Email", "Role", "Plan", "Created At"];
+  const lines = [header.join(",")];
+
+  for (const row of rows) {
+    lines.push(
+      [
+        row.name ?? "",
+        row.email,
+        row.role,
+        row.plan,
+        new Date(row.createdAt).toISOString(),
+      ]
+        .map((value) => csvCell(String(value)))
+        .join(",")
+    );
+  }
+
+  return lines.join("\r\n");
 }
 
 function getAdminUserOrderBy(
@@ -211,6 +282,15 @@ export async function triggerInstrumentSync(input: {
         .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
         .where(eq(syncJobs.id, job.id));
     } catch (error) {
+      logger.error(
+        {
+          syncJobId: job.id,
+          type: SYNC_JOB_TYPES.instrumentSync,
+          exchange: input.exchange,
+          message: error instanceof Error ? error.message : "Sync failed",
+        },
+        "Ingestion job failed"
+      );
       await db
         .update(syncJobs)
         .set({
@@ -226,6 +306,109 @@ export async function triggerInstrumentSync(input: {
   await audit(input.actorUserId, "data_provider.instrument_sync_triggered", "sync_job", job.id, {
     exchange: input.exchange,
   });
+  return job;
+}
+
+// Always runs inline rather than via the queue-branch pattern above — the
+// whole sync is ~22 sequential HTTP requests (one per sector) plus a handful
+// of bulk UPDATE statements, finishing in seconds, and there's no registered
+// queue worker for this job type since it's never actually been worth
+// offloading.
+export async function triggerSectorClassificationSync(input: { actorUserId: string }) {
+  const [job] = await db
+    .insert(syncJobs)
+    .values({
+      type: SYNC_JOB_TYPES.sectorClassificationSync,
+      status: JOB_STATUS.running,
+      payload: {},
+    })
+    .returning();
+
+  try {
+    const result = await syncSectorClassifications();
+    await db
+      .update(syncJobs)
+      .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
+      .where(eq(syncJobs.id, job.id));
+  } catch (error) {
+    logger.error(
+      {
+        syncJobId: job.id,
+        type: SYNC_JOB_TYPES.sectorClassificationSync,
+        message: error instanceof Error ? error.message : "Sync failed",
+      },
+      "Ingestion job failed"
+    );
+    await db
+      .update(syncJobs)
+      .set({
+        status: JOB_STATUS.failed,
+        errorMessage: error instanceof Error ? error.message : "Sync failed",
+        updatedAt: new Date(),
+      })
+      .where(eq(syncJobs.id, job.id));
+    throw error;
+  }
+
+  await audit(
+    input.actorUserId,
+    "data_provider.sector_classification_sync_triggered",
+    "sync_job",
+    job.id,
+    {}
+  );
+  return job;
+}
+
+// Same inline pattern as triggerSectorClassificationSync above — run "Sync
+// Indices" (triggerInstrumentSync with exchange: "NSE_IDX", no new code
+// needed there) first so there's something to backfill history for.
+export async function triggerIndexCandleBackfill(input: {
+  actorUserId: string;
+  exchange?: string;
+}) {
+  const [job] = await db
+    .insert(syncJobs)
+    .values({
+      type: SYNC_JOB_TYPES.indexCandleBackfill,
+      status: JOB_STATUS.running,
+      payload: { exchange: input.exchange },
+    })
+    .returning();
+
+  try {
+    const result = await backfillIndexCandles(input.exchange);
+    await db
+      .update(syncJobs)
+      .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
+      .where(eq(syncJobs.id, job.id));
+  } catch (error) {
+    logger.error(
+      {
+        syncJobId: job.id,
+        type: SYNC_JOB_TYPES.indexCandleBackfill,
+        message: error instanceof Error ? error.message : "Backfill failed",
+      },
+      "Ingestion job failed"
+    );
+    await db
+      .update(syncJobs)
+      .set({
+        status: JOB_STATUS.failed,
+        errorMessage: error instanceof Error ? error.message : "Backfill failed",
+        updatedAt: new Date(),
+      })
+      .where(eq(syncJobs.id, job.id));
+    throw error;
+  }
+
+  await audit(
+    input.actorUserId,
+    "data_provider.index_candle_backfill_triggered",
+    "sync_job",
+    job.id,
+    {}
+  );
   return job;
 }
 
@@ -262,6 +445,15 @@ export async function triggerPriceRefresh(input: {
         .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
         .where(eq(syncJobs.id, job.id));
     } catch (error) {
+      logger.error(
+        {
+          syncJobId: job.id,
+          type: SYNC_JOB_TYPES.priceRefresh,
+          exchange: input.exchange,
+          message: error instanceof Error ? error.message : "Price refresh failed",
+        },
+        "Ingestion job failed"
+      );
       await db
         .update(syncJobs)
         .set({
