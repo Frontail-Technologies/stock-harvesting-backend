@@ -7,6 +7,8 @@ export const API_ROUTES = {
   scanner: "/api/scanner",
   admin: "/api/admin",
   ai: "/api/ai",
+  priceAlerts: "/api/price-alerts",
+  pushSubscriptions: "/api/push-subscriptions",
 } as const;
 
 export const AUTH_ROUTES = {

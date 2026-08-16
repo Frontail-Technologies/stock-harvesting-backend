@@ -57,6 +57,13 @@
       "when": 1786011853770,
       "tag": "0007_candles_instrument_id_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786775090607,
+      "tag": "0008_natural_santa_claus",
+      "breakpoints": true
     }
   ]
 }

@@ -6,5 +6,6 @@ export * from "./drawings";
 export * from "./enums";
 export * from "./market-collections";
 export * from "./market-data";
+export * from "./price-alerts";
 export * from "./scanner";
 export * from "./users";

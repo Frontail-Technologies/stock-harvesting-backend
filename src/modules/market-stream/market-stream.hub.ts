@@ -6,6 +6,7 @@ import type {
   MarketStreamSymbol,
   MarketStreamUser,
 } from "./market-stream.types";
+import { evaluatePriceAlertsForQuote } from "../price-alerts/price-alerts.service";
 import { normalizeStreamSymbol, streamSymbolKey } from "./market-stream.utils";
 
 type Client = {

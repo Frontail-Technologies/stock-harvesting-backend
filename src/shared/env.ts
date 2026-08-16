@@ -52,6 +52,9 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_EXTRACTION_MODEL: z.string().trim().min(1).optional(),
   GEMINI_CHAT_MODEL: z.string().trim().min(1).optional(),
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default("mailto:support@stockharvesting.com"),
 });
 
 export const env = envSchema.parse(process.env);

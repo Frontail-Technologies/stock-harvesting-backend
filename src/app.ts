@@ -10,6 +10,8 @@ import { authRouter } from "./modules/auth/auth.routes";
 import { drawingsRouter } from "./modules/drawings/drawings.routes";
 import { marketCollectionsRouter } from "./modules/market-collections/market-collections.routes";
 import { marketDataRouter } from "./modules/market-data/market-data.routes";
+import { priceAlertsRouter } from "./modules/price-alerts/price-alerts.routes";
+import { pushSubscriptionsRouter } from "./modules/push-subscriptions/push-subscriptions.routes";
 import { scannerRouter } from "./modules/scanner/scanner.routes";
 import { usersRouter } from "./modules/users/users.routes";
 import { API_ROUTES, HTTP_STATUS } from "./shared/constants";
@@ -90,6 +92,8 @@ export function createApp() {
   app.use(API_ROUTES.scanner, drawingsRouter);
   app.use(API_ROUTES.admin, adminRouter);
   app.use(API_ROUTES.ai, aiRouter);
+  app.use(API_ROUTES.priceAlerts, priceAlertsRouter);
+  app.use(API_ROUTES.pushSubscriptions, pushSubscriptionsRouter);
 
   app.use((_req, _res, next) => {
     next(notFound("Route not found"));
