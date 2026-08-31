@@ -91,11 +91,19 @@ authRouter.get(
         // No session of either kind was created - completeGoogleLogin
         // rejected the login before ever touching the refresh-token table
         // or setting a cookie. redirectToLogin bounces back to THIS
-        // portal's own /login (never the other portal's origin), where
-        // the reason code drives the "This account uses the Admin
-        // Portal." / "You do not have access to the Admin Portal."
-        // messaging.
-        return redirectToLogin(result.reason);
+        // portal's own /login (never the other portal's origin). The real
+        // reason (wrong-portal account vs. some other rejection) is logged
+        // here for diagnostics only - it must never reach the client-
+        // visible redirect URL, since that would let anyone reading the
+        // URL/network tab learn that the submitted credentials belong to
+        // an account that exists, that it's an admin account, or that a
+        // separate Admin Portal exists for it. Every rejection reads
+        // externally as the exact same generic "invalid-credentials".
+        logger.info(
+          { portal: authPortal, reason: result.reason },
+          "Google login rejected by portal access check"
+        );
+        return redirectToLogin("invalid-credentials");
       }
 
       setRefreshCookie(res, authPortal, result.refreshToken);
