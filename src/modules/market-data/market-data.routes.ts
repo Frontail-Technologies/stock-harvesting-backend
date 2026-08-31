@@ -6,6 +6,7 @@ import { asyncHandler, requireAuth, validate } from "../../shared/middleware";
 import {
   candleParamsSchema,
   candleQuerySchema,
+  chartEligibleStockSearchQuerySchema,
   historyRangeQuerySchema,
   indexRelativeStrengthQuerySchema,
   stockListQuerySchema,
@@ -18,6 +19,7 @@ import {
   listExchangeRates,
   listStocks,
   listSupportedExchanges,
+  searchChartEligibleBseStocks,
 } from "./market-data.service";
 
 export const marketDataRouter = Router();
@@ -66,6 +68,18 @@ marketDataRouter.use(requireAuth);
 marketDataRouter.get("/exchange-rates", asyncHandler(async (_req, res) => {
   sendData(res, await listExchangeRates());
 }));
+
+// Watchlist/Charts stock-selection picker only - see
+// searchChartEligibleBseStocks for why this is a separate, deliberately
+// narrower endpoint than /stocks/search rather than a mode of it.
+marketDataRouter.get(
+  "/stocks/search/chart-eligible",
+  validate({ query: chartEligibleStockSearchQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as { q: string; limit: number };
+    sendData(res, { stocks: await searchChartEligibleBseStocks(query) });
+  })
+);
 
 marketDataRouter.get(
   "/index-relative-strength",

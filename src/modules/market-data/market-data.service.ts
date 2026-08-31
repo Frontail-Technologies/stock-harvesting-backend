@@ -860,6 +860,50 @@ async function readStockRows(input: {
   return rows;
 }
 
+// Watchlist/Charts stock-selection picker only - always BSE, and always
+// restricted to instruments with at least one stored 1D candle row, so a
+// result can never open to an empty chart. Deliberately its own simple
+// query rather than a mode of listStocks(): no provider hydration, no
+// cache, no multi-exchange branching - just an indexed read, so typing
+// in this picker never triggers a provider call. The EXISTS subquery
+// reuses the existing (exchange, symbol, timeframe, time) unique index
+// on candles (its leading three columns already cover this lookup) - no
+// new index needed.
+export async function searchChartEligibleBseStocks(input: { q: string; limit: number }) {
+  const rows = await db
+    .select({
+      symbol: instruments.symbol,
+      name: instruments.name,
+      exchange: instruments.exchange,
+      close: instruments.latestClose,
+      open: instruments.latestOpen,
+      volume: instruments.latestVolume,
+      changePct: instruments.latestChangePct,
+    })
+    .from(instruments)
+    .where(
+      and(
+        eq(instruments.exchange, "BSE"),
+        eq(instruments.active, true),
+        not(ilike(instruments.symbol, "0%")),
+        or(
+          ilike(instruments.symbol, `%${normalizeSymbol(input.q)}%`),
+          ilike(instruments.name, `%${input.q.trim()}%`)
+        ),
+        sql`EXISTS (
+          SELECT 1 FROM ${candles}
+          WHERE ${candles.exchange} = ${instruments.exchange}
+            AND ${candles.symbol} = ${instruments.symbol}
+            AND ${candles.timeframe} = ${CANDLE_TIMEFRAME.day}
+        )`
+      )
+    )
+    .orderBy(asc(instruments.symbol))
+    .limit(input.limit);
+
+  return rows;
+}
+
 async function readUnpricedStockSymbols(
   input: {
     q?: string;

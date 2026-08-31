@@ -43,6 +43,14 @@ export const stockListQuerySchema = z
   })
   .strict();
 
+export const chartEligibleStockSearchQuerySchema = z
+  .object({
+    q: z.string().trim().min(1),
+    limit: z.coerce.number().int().positive().max(20).default(8),
+    exchange: z.literal("BSE").default("BSE"),
+  })
+  .strict();
+
 export const candleParamsSchema = z
   .object({
     symbol: z.string().trim().min(1).max(64),
