@@ -58,7 +58,7 @@ export async function listScannerResults(input: {
     startTime: result.startTime,
     endTime: result.endTime,
     highlightTimes: result.highlightTimes,
-    metrics: result.metrics,
+    metrics: toClientScanMetrics(result.metrics),
   }));
 
   if (savedResults.length > 0) return savedResults;
@@ -157,11 +157,23 @@ async function calculateCurrentNear250WeekHighResult(input: {
     startTime: scan.startTime,
     endTime: scan.endTime,
     highlightTimes: scan.highlightTimes,
-    metrics: {
-      ...scan.metrics,
-      latestMatched: scan.matched,
-    },
+    metrics: { latestMatched: scan.matched },
   };
+}
+
+// API response minimization (see docs/DOMAIN_BOUNDARIES.md) - the client
+// only ever renders `latestMatched` (see
+// src/features/scanner/lib/scanner-result-mappers.ts), never the raw
+// close/high/threshold/percentage values `calculateNear250WeekHighScan`
+// computes internally. Those intermediate values would make the rule's
+// own ratio trivially recoverable from a single API response
+// (threshold85 / highestClose250), so they're dropped here rather than
+// forwarded - this only trims what's sent to the client, not what
+// `calculateNear250WeekHighScan` computes/returns internally.
+export function toClientScanMetrics(metrics: Record<string, unknown>): { latestMatched?: boolean } {
+  return typeof metrics.latestMatched === "boolean"
+    ? { latestMatched: metrics.latestMatched }
+    : {};
 }
 
 

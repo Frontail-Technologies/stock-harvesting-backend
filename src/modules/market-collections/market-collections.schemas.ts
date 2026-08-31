@@ -1,10 +1,20 @@
 import { z } from "zod";
 
-import { exchangeSchema } from "../market-data/market-data.schemas";
-
+// Deliberately NOT the shared exchangeSchema here: that schema carries its
+// own `.default(DEFAULT_EXCHANGE)` ("US") baked in for endpoints where "no
+// exchange specified" should mean "assume the default market" - wrapping
+// it in `.optional()` does NOT suppress that inner default for a genuinely
+// absent key (confirmed empirically: `exchangeSchema.optional().parse({})`
+// still yields "US", not undefined - a real zod-composition gotcha, not a
+// misunderstanding). For THIS endpoint specifically, "no exchange" must
+// mean "don't filter by exchange" (Phase D's country-derivation flow on
+// the Dashboard calls it with no filters at all to see every collection
+// across every country) - a silent "US" filter here made every one of
+// this app's real BSE-only collections invisible.
 export const listCollectionsQuerySchema = z
   .object({
-    exchange: exchangeSchema.optional(),
+    exchange: z.string().trim().min(1).max(16).transform((value) => value.toUpperCase()).optional(),
+    countryCode: z.string().trim().length(2).transform((value) => value.toUpperCase()).optional(),
   })
   .strict();
 
@@ -29,11 +39,5 @@ export const collectionRelativeStrengthQuerySchema = z
   .object({
     limit: z.coerce.number().int().positive().max(500).default(200),
     groupBy: z.enum(["sector", "industry"]).optional(),
-  })
-  .strict();
-
-export const collectionWeeklyStrongBacktestQuerySchema = z
-  .object({
-    weeks: z.coerce.number().int().positive().max(260).default(156),
   })
   .strict();

@@ -7,7 +7,11 @@ export type CandleInput = {
   volume: number;
 };
 
-function getWeekKey(date: Date) {
+// Exported for trading-calendar.ts's completed-week helpers - the whole
+// point is that "is this week done yet" compares against the exact same
+// ISO-week grouping aggregateWeeklyCandles itself uses, not a second,
+// possibly-diverging notion of "week".
+export function getWeekKey(date: Date) {
   const value = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const day = value.getUTCDay() || 7;
   value.setUTCDate(value.getUTCDate() + 4 - day);

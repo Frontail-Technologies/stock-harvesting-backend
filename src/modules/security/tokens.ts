@@ -1,7 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 
 import {
-  ACCESS_TOKEN_TTL_SECONDS,
+  TOKEN_AUDIENCE,
+  type AuthPortal,
   type UserPlan,
   type UserRole,
 } from "../../shared/constants";
@@ -13,9 +14,14 @@ export type AccessTokenPayload = {
   email: string;
   role: UserRole;
   plan: UserPlan;
+  // The portal this token was issued for (mirrors the JWT `aud` claim
+  // below) - protected routes must validate this in addition to role (see
+  // auth.middleware.ts's requireAuth/requireAdminAuth), never role alone.
+  portal: AuthPortal;
 };
 
 type JwtPayload = AccessTokenPayload & {
+  aud: string;
   iat: number;
   exp: number;
 };
@@ -30,14 +36,12 @@ function sign(input: string) {
     .digest("base64url");
 }
 
-export function signAccessToken(
-  payload: AccessTokenPayload,
-  ttlSeconds = ACCESS_TOKEN_TTL_SECONDS
-) {
+export function signAccessToken(payload: AccessTokenPayload, ttlSeconds: number) {
   const now = Math.floor(Date.now() / 1000);
   const header = base64UrlJson({ alg: "HS256", typ: "JWT" });
   const body = base64UrlJson({
     ...payload,
+    aud: TOKEN_AUDIENCE[payload.portal],
     iat: now,
     exp: now + ttlSeconds,
   });
@@ -45,7 +49,11 @@ export function signAccessToken(
   return `${input}.${sign(input)}`;
 }
 
-export function verifyAccessToken(token: string): AccessTokenPayload {
+// expectedAudience is REQUIRED (no default) - every call site must be
+// deliberate about which portal it expects a token to belong to, so a
+// route can never silently accept whichever portal's token happens to be
+// presented (see TOKEN_AUDIENCE).
+export function verifyAccessToken(token: string, expectedAudience: string): AccessTokenPayload {
   const [header, body, signature] = token.split(".");
   if (!header || !body || !signature) {
     throw unauthorized("Invalid access token");
@@ -65,12 +73,16 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
     throw unauthorized("Access token expired");
   }
+  if (payload.aud !== expectedAudience) {
+    throw unauthorized("Access token is not valid for this portal");
+  }
 
   return {
     sub: payload.sub,
     email: payload.email,
     role: payload.role,
     plan: payload.plan,
+    portal: payload.portal,
   };
 }
 

@@ -18,6 +18,11 @@ export const marketCollections = pgTable(
     code: varchar("code", { length: 64 }).notNull(),
     name: varchar("name", { length: 160 }).notNull(),
     exchange: varchar("exchange", { length: 16 }).notNull(),
+    // ISO-3166 alpha-2, e.g. "IN" - every collection in this codebase is
+    // BSE/India today (see the Phase D audit), so the migration backfills
+    // every existing row to "IN" via this column's own NOT NULL DEFAULT
+    // rather than inferring it from the segment name at read time.
+    countryCode: varchar("country_code", { length: 2 }).default("IN").notNull(),
     description: text("description"),
     active: boolean("active").default(true).notNull(),
     sourceName: varchar("source_name", { length: 160 }),

@@ -18,6 +18,7 @@ import {
 } from "../../provider-health";
 import {
   GLOBAL_DATAFEEDS_DEFAULT_EXCHANGE,
+  GLOBAL_DATAFEEDS_HISTORY_REQUEST_TIMEOUT_MS,
   GLOBAL_DATAFEEDS_INDEX_EXCHANGE,
   GLOBAL_DATAFEEDS_MESSAGE_TYPE,
   GLOBAL_DATAFEEDS_PROVIDER_NAME,
@@ -65,14 +66,21 @@ function sleep(ms: number) {
 // GlobalDataFeeds socket (observed both in bulk backfills and on-demand
 // chart fetches) but reliably succeeds on a fresh attempt - a short retry
 // here is cheaper than surfacing a broken chart to the user.
+//
+// `timeoutMs` is an optional PER-CALL override (default: the client's own
+// GLOBAL_DATAFEEDS_REQUEST_TIMEOUT_MS) - fetchDailyCandles passes the
+// shorter GLOBAL_DATAFEEDS_HISTORY_REQUEST_TIMEOUT_MS below, since GetHistory
+// specifically is the flaky one; every other request type here keeps the
+// original default.
 async function requestWithRetry<T extends GlobalDatafeedsResponse = GlobalDatafeedsResponse>(
   request: GlobalDatafeedsRequest,
-  attempts = 2
+  attempts = 2,
+  timeoutMs?: number
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      return await globalDatafeedsClient.request<T>(request);
+      return await globalDatafeedsClient.request<T>(request, timeoutMs);
     } catch (error) {
       lastError = error;
       if (attempt < attempts) await sleep(500);
@@ -249,17 +257,26 @@ export class GlobalDatafeedsDataProviderAdapter implements DataProviderAdapter {
     const exchange = assertExchangeSupported(
       input.exchangeCode ?? GLOBAL_DATAFEEDS_DEFAULT_EXCHANGE
     );
-    const response = await requestWithRetry({
-      MessageType: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory,
-      Exchange: exchange,
-      InstrumentIdentifier: input.instrumentToken || normalizeSymbol(input.symbol),
-      Periodicity: "DAY",
-      Period: 1,
-      From: toEpochSeconds(input.from),
-      To: toEpochSeconds(input.to, true),
-      isShortIdentifier: "False",
-      AdjustSplits: true,
-    });
+    const response = await requestWithRetry(
+      {
+        MessageType: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory,
+        Exchange: exchange,
+        InstrumentIdentifier: input.instrumentToken || normalizeSymbol(input.symbol),
+        Periodicity: "DAY",
+        Period: 1,
+        From: toEpochSeconds(input.from),
+        To: toEpochSeconds(input.to, true),
+        isShortIdentifier: "False",
+        AdjustSplits: true,
+      },
+      2,
+      // Measured live: a stuck GetHistory attempt rode the full 30s
+      // default before its retry could even start (~29-30s total wait on
+      // a user's chart for one bad attempt). fetchLatestDailyCandles
+      // calls this same method, so both the full-backfill and the
+      // incremental-refresh paths get the faster fail+retry too.
+      GLOBAL_DATAFEEDS_HISTORY_REQUEST_TIMEOUT_MS
+    );
 
     return resultArray<GlobalDatafeedsHistoryRow>(response)
       .map(toGlobalDatafeedsDailyCandle)

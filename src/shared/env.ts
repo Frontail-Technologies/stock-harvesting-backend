@@ -5,6 +5,11 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
   WEB_APP_URL: z.string().url().default("http://localhost:3000"),
+  // Only needed if the admin panel is split onto its own host (mirrors the
+  // frontend's NEXT_PUBLIC_ADMIN_HOST). Unset means "no admin portal" -
+  // an admin-portal OAuth login falls back to WEB_APP_URL, same as before
+  // this existed.
+  ADMIN_WEB_APP_URL: z.string().url().optional(),
   API_BASE_URL: z.string().url().default("http://localhost:4000"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   DATABASE_URL: z.string().min(1),
@@ -20,6 +25,17 @@ const envSchema = z.object({
   REDIS_URL: z.string().url().optional(),
   ACCESS_TOKEN_SECRET: z.string().min(32),
   REFRESH_TOKEN_SECRET: z.string().min(32),
+  // Portal-specific session lifetimes (strict portal separation - see
+  // security/tokens.ts and auth.service.ts). Admin sessions are
+  // deliberately much shorter-lived than user sessions; both are
+  // env-driven rather than hardcoded so a deployment can tighten/loosen
+  // them without a code change. Defaults preserve the values this app
+  // already used for everyone before portal separation existed (15m/30d)
+  // for the USER portal; the ADMIN portal gets new, much shorter defaults.
+  USER_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(15 * 60),
+  USER_REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  ADMIN_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(10 * 60),
+  ADMIN_REFRESH_TOKEN_TTL_HOURS: z.coerce.number().positive().default(4),
   ENCRYPTION_MASTER_KEY: z.string().min(32),
   ENCRYPTION_KEY_VERSION: z.string().min(1).default("v1"),
   GOOGLE_CLIENT_ID: z.string().optional(),

@@ -2,22 +2,122 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import { dataProviderConnections } from "../../db/schema";
-import { DATA_PROVIDER_KEY, PROVIDER_STATUS } from "../../shared/constants";
+import { getOrSetCache, invalidateCacheByPrefix } from "../../shared/cache";
+import { DATA_PROVIDER_KEY, PROVIDER_STATUS, type ProviderCapability } from "../../shared/constants";
 import { badRequest, notFound } from "../../shared/errors";
 import { decryptField, encryptField } from "../security/encryption";
 import {
+  adapterSupportsCapability,
+  getCandidateProviderKeysForExchange,
   getConnectableDataProviderAdapter,
   getDataProviderAdapterByProvider,
   getDataProviderAdapterForExchange,
   getEodhdDataProviderAdapter,
   listDataProviderAdapters,
 } from "./data-provider.registry";
+import {
+  getProviderPriority,
+  isProviderEnabled,
+  recordProviderFailure,
+  recordProviderSuccess,
+} from "./data-provider-settings.service";
 import type { DataProviderAdapter, ProviderConnectionStatus } from "./data-provider.types";
 
 export { getDataProviderAdapterForExchange, getEodhdDataProviderAdapter };
 
+const PROVIDER_READY_CACHE_TTL_MS = 15_000;
+
+// isConfigured() alone (env-key presence) is enough for non-OAuth providers,
+// but Zerodha requiresConnection - a present API key doesn't mean there's a
+// live, unexpired access token, so a real usability check needs the same
+// connection-state read getProviderStatus already does. Cached briefly so
+// this doesn't add a DB round trip to every single NSE candle request on
+// top of the one getActiveProviderAccessToken already does downstream.
+async function isProviderReadyToUse(adapter: DataProviderAdapter): Promise<boolean> {
+  if (!adapter.isConfigured()) return false;
+  if (!adapter.requiresConnection) return true;
+
+  return getOrSetCache(
+    `providerEligibility:ready:${adapter.providerKey}`,
+    PROVIDER_READY_CACHE_TTL_MS,
+    async () => {
+      const status = await getProviderStatus(adapter.providerKey);
+      return status.connected;
+    }
+  );
+}
+
+// The one place that answers "which providers can actually be used right
+// now for this exchange+capability" - admin enabled state, real
+// configuration/connection readiness, and capability support all gated
+// together, ordered by admin-configured priority. Today's routing table is
+// 1:1 (see getCandidateProviderKeysForExchange), so this almost always
+// returns 0 or 1 adapters - but every caller goes through this instead of
+// the raw registry lookup, so a future second candidate needs no call-site
+// changes.
+export async function resolveEligibleProviders(input: {
+  exchange: string;
+  capability: ProviderCapability;
+}): Promise<DataProviderAdapter[]> {
+  const candidateKeys = getCandidateProviderKeysForExchange(input.exchange);
+
+  const candidates = await Promise.all(
+    candidateKeys.map(async (key) => {
+      const adapter = getDataProviderAdapterByProvider(key);
+      if (!adapter) return null;
+      if (!adapterSupportsCapability(adapter, input.capability)) return null;
+
+      const [enabled, ready, priority] = await Promise.all([
+        isProviderEnabled(key),
+        isProviderReadyToUse(adapter),
+        getProviderPriority(key),
+      ]);
+      if (!enabled || !ready) return null;
+
+      return { adapter, priority };
+    })
+  );
+
+  return candidates
+    .filter((candidate): candidate is { adapter: DataProviderAdapter; priority: number } =>
+      candidate !== null
+    )
+    .sort((a, b) => a.priority - b.priority)
+    .map((candidate) => candidate.adapter);
+}
+
+export async function getEligibleProviderAdapter(input: {
+  exchange: string;
+  capability: ProviderCapability;
+}): Promise<DataProviderAdapter | null> {
+  const eligible = await resolveEligibleProviders(input);
+  return eligible[0] ?? null;
+}
+
 export function getDataProviderAdapter() {
   return getDataProviderAdapterForExchange();
+}
+
+// This is the same live/real connectivity check the admin "Data Providers"
+// page's per-provider status panels use (checkConnection() ping for
+// non-OAuth providers, stored OAuth connection state for Zerodha) - it's
+// the most accurate signal this codebase has for "is this provider
+// actually working right now." Feeding it into the throttled
+// recordProviderSuccess/recordProviderFailure health tracker means the
+// admin table's Health column reflects real status even for providers
+// that haven't happened to serve a scanner request recently (recordHealth
+// itself is still throttled per key, so viewing this page repeatedly
+// doesn't spam data_provider_settings writes).
+async function recordStatusHealth(
+  providerKey: string,
+  result: ProviderConnectionStatus
+): Promise<ProviderConnectionStatus> {
+  if (result.connected) {
+    void recordProviderSuccess(providerKey);
+  } else if (result.errorMessage) {
+    void recordProviderFailure(providerKey, result.errorMessage);
+  }
+  return result;
 }
 
 export async function getProviderStatus(
@@ -38,13 +138,13 @@ export async function getProviderStatus(
 
   if (!adapter.requiresConnection) {
     if (!providerConfigured) {
-      return {
+      return recordStatusHealth(adapter.providerKey, {
         providerConfigured,
         connected: false,
         status: PROVIDER_STATUS.disconnected,
         lastSyncedAt,
         errorMessage: connection?.errorMessage ?? null,
-      };
+      });
     }
 
     const health = adapter.checkConnection
@@ -55,23 +155,23 @@ export async function getProviderStatus(
           errorMessage: null,
         };
 
-    return {
+    return recordStatusHealth(adapter.providerKey, {
       providerConfigured,
       connected: health.connected,
       status: health.status,
       lastSyncedAt,
       errorMessage: health.errorMessage ?? connection?.errorMessage ?? null,
-    };
+    });
   }
 
   if (!providerConfigured) {
-    return {
+    return recordStatusHealth(adapter.providerKey, {
       providerConfigured,
       connected: false,
       status: PROVIDER_STATUS.disconnected,
       lastSyncedAt,
       errorMessage: connection?.errorMessage ?? null,
-    };
+    });
   }
 
   if (connection?.expiresAt && connection.expiresAt.getTime() <= Date.now()) {
@@ -86,22 +186,22 @@ export async function getProviderStatus(
         .where(eq(dataProviderConnections.id, connection.id));
     }
 
-    return {
+    return recordStatusHealth(adapter.providerKey, {
       providerConfigured,
       connected: false,
       status: PROVIDER_STATUS.expired,
       lastSyncedAt,
       errorMessage: connection.errorMessage ?? "Provider access token expired",
-    };
+    });
   }
 
-  return {
+  return recordStatusHealth(adapter.providerKey, {
     providerConfigured,
     connected: connection?.status === PROVIDER_STATUS.connected,
     status: connection?.status ?? PROVIDER_STATUS.disconnected,
     lastSyncedAt,
     errorMessage: connection?.errorMessage ?? null,
-  };
+  });
 }
 
 export async function markProviderConnectionExpired(provider: string, message?: string) {
@@ -122,6 +222,7 @@ export async function markProviderConnectionExpired(provider: string, message?: 
       updatedAt: new Date(),
     })
     .where(eq(dataProviderConnections.id, connection.id));
+  invalidateCacheByPrefix("providerEligibility");
 }
 
 export async function getAllProviderStatuses() {
@@ -168,6 +269,7 @@ export async function saveProviderToken(input: {
     })
     .returning();
 
+  invalidateCacheByPrefix("providerEligibility");
   return connection;
 }
 

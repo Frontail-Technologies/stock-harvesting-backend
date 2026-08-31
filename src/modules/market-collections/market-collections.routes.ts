@@ -6,14 +6,12 @@ import {
   collectionCodeParamsSchema,
   collectionMembersQuerySchema,
   collectionRelativeStrengthQuerySchema,
-  collectionWeeklyStrongBacktestQuerySchema,
   listCollectionsQuerySchema,
 } from "./market-collections.schemas";
 import {
   getCollectionMembers,
   getCollectionRelativeStrength,
   getCollectionWeeklyStrongStocks,
-  getCollectionWeeklyStrongStocksBacktest,
   listCollections,
 } from "./market-collections.service";
 
@@ -25,7 +23,7 @@ marketCollectionsRouter.get(
   "/",
   validate({ query: listCollectionsQuerySchema }),
   asyncHandler(async (req, res) => {
-    const query = req.query as unknown as { exchange?: string };
+    const query = req.query as unknown as { exchange?: string; countryCode?: string };
     sendData(res, { collections: await listCollections(query) });
   })
 );
@@ -75,15 +73,6 @@ marketCollectionsRouter.get(
   })
 );
 
-marketCollectionsRouter.get(
-  "/:code/weekly-strong-stocks/backtest",
-  validate({ params: collectionCodeParamsSchema, query: collectionWeeklyStrongBacktestQuerySchema }),
-  asyncHandler(async (req, res) => {
-    const params = req.params as { code: string };
-    const query = req.query as unknown as { weeks: number };
-    sendData(
-      res,
-      await getCollectionWeeklyStrongStocksBacktest({ code: params.code, weeks: query.weeks })
-    );
-  })
-);
+// The old .../weekly-strong-stocks/backtest route (count-only, live-
+// computed on every request) has been removed - see the new
+// weekly-strong-backtest module for the persisted replacement (Phase C2).

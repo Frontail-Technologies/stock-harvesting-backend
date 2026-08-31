@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "../../db/client";
-import { priceAlerts } from "../../db/schema";
+import { instruments, priceAlerts } from "../../db/schema";
 import { DEFAULT_EXCHANGE } from "../../shared/constants";
 import { badRequest, forbidden, notFound } from "../../shared/errors";
 import { logger } from "../../shared/logger";
@@ -59,6 +59,24 @@ export async function listPriceAlerts(input: {
   return rows.map(toPriceAlertResponse);
 }
 
+// The client-reported currentPrice is only a UX nicety (it's whatever the
+// user's screen happened to show) - it must never be the sole source of
+// truth for a semantic validation rule, since a stale tab or a modified
+// request could bypass it entirely. instruments.latestClose is this
+// backend's own record of the price, so it's authoritative whenever
+// present; the client value is only a fallback for the rare case a symbol
+// has no stored price yet.
+async function getKnownCurrentPrice(exchange: string, symbol: string): Promise<number | null> {
+  const [row] = await db
+    .select({ latestClose: instruments.latestClose })
+    .from(instruments)
+    .where(and(eq(instruments.exchange, exchange), eq(instruments.symbol, normalizeSymbol(symbol))))
+    .limit(1);
+  if (!row?.latestClose) return null;
+  const value = Number(row.latestClose);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 export async function createPriceAlert(input: {
   userId: string;
   exchange: string;
@@ -67,13 +85,19 @@ export async function createPriceAlert(input: {
   targetPrice: number;
   currentPrice?: number | null;
 }) {
-  const invalidTargetMessage = getInvalidPriceAlertTargetMessage(input);
+  const exchange = input.exchange || DEFAULT_EXCHANGE;
+  const knownCurrentPrice = await getKnownCurrentPrice(exchange, input.symbol);
+  const invalidTargetMessage = getInvalidPriceAlertTargetMessage({
+    condition: input.condition,
+    targetPrice: input.targetPrice,
+    currentPrice: knownCurrentPrice ?? input.currentPrice,
+  });
   if (invalidTargetMessage) throw badRequest(invalidTargetMessage);
   const [row] = await db
     .insert(priceAlerts)
     .values({
       userId: input.userId,
-      exchange: input.exchange || DEFAULT_EXCHANGE,
+      exchange,
       symbol: normalizeSymbol(input.symbol),
       condition: input.condition,
       targetPrice: String(input.targetPrice),

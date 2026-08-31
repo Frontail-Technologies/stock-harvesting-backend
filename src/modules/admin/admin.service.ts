@@ -24,11 +24,26 @@ import {
 } from "../market-data/market-data.service";
 import { syncSectorClassifications } from "../market-data/sector-classification.service";
 import {
+  runWeeklyStrongBacktestBackfill,
+  runWeeklyStrongBacktestHistoricalRebuild,
+} from "../weekly-strong-backtest/weekly-strong-backtest.service";
+import {
   getAllProviderStatuses,
   getProviderConnectUrl,
   getProviderStatus,
   saveProviderToken,
 } from "../data-provider/data-provider.service";
+import {
+  getDataProviderAdapterByProvider,
+  getProviderCapabilities,
+  listDataProviderAdapters,
+} from "../data-provider/data-provider.registry";
+import {
+  listProviderSettings,
+  updateProviderSettings,
+  type DataProviderSettingsRow,
+} from "../data-provider/data-provider-settings.service";
+import { closeMarketStreamProviderByKey } from "../market-stream/market-stream.service";
 import { getMarketDataQueue } from "../jobs/queues";
 import { logger } from "../../shared/logger";
 
@@ -232,6 +247,108 @@ export async function getAdminProviderStatus() {
 
 export async function getAdminProviderStatuses() {
   return getAllProviderStatuses();
+}
+
+export type AdminDataProviderHealth = "disabled" | "healthy" | "error" | "unknown";
+
+export function deriveDataProviderHealth(input: {
+  enabled: boolean;
+  lastSuccessAt: Date | null;
+  lastFailureAt: Date | null;
+}): AdminDataProviderHealth {
+  if (!input.enabled) return "disabled";
+  if (!input.lastSuccessAt && !input.lastFailureAt) return "unknown";
+
+  const mostRecentIsFailure =
+    input.lastFailureAt &&
+    (!input.lastSuccessAt || input.lastFailureAt.getTime() >= input.lastSuccessAt.getTime());
+
+  return mostRecentIsFailure ? "error" : "healthy";
+}
+
+// Operational admin view: enabled (admin decision), configuration (env/OAuth
+// presence, from the existing getProviderStatus), and health (derived from
+// tracked success/failure timestamps) are kept as three explicit, separate
+// fields - never conflated - per the "enabled=ON, health=Error is a valid,
+// meaningful state" requirement.
+export async function getAdminDataProviderSettings() {
+  const [settingsRows, statuses] = await Promise.all([
+    listProviderSettings(),
+    Promise.all(
+      listDataProviderAdapters().map(async (adapter) => ({
+        provider: adapter.providerKey,
+        status: await getProviderStatus(adapter.providerKey),
+      }))
+    ),
+  ]);
+  const statusByProvider = new Map(statuses.map((entry) => [entry.provider, entry.status]));
+
+  return settingsRows
+    .map((row) => {
+      const adapter = getDataProviderAdapterByProvider(row.key);
+      const status = statusByProvider.get(row.key);
+      const configured = adapter
+        ? adapter.requiresConnection
+          ? Boolean(status?.connected)
+          : Boolean(status?.providerConfigured)
+        : false;
+
+      return {
+        key: row.key,
+        displayName: row.displayName,
+        enabled: row.enabled,
+        priority: row.priority,
+        disabledReason: row.disabledReason,
+        configured,
+        capabilities: adapter ? getProviderCapabilities(adapter) : [],
+        health: deriveDataProviderHealth({
+          enabled: row.enabled,
+          lastSuccessAt: row.lastSuccessAt,
+          lastFailureAt: row.lastFailureAt,
+        }),
+        lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,
+        lastFailureAt: row.lastFailureAt?.toISOString() ?? null,
+        lastError: row.lastError,
+        updatedAt: row.updatedAt.toISOString(),
+      };
+    })
+    .sort((a, b) => a.priority - b.priority);
+}
+
+export async function updateAdminDataProviderSettings(input: {
+  actorUserId: string;
+  key: string;
+  enabled?: boolean;
+  priority?: number;
+  disabledReason?: string | null;
+}) {
+  const before: DataProviderSettingsRow | undefined = (await listProviderSettings()).find(
+    (row) => row.key === input.key
+  );
+
+  const updated = await updateProviderSettings(input);
+
+  // A true -> false transition also force-closes any open realtime
+  // connection for this provider immediately, rather than waiting for its
+  // own close/reconnect cycle to notice - see market-stream.service.ts.
+  // Re-enabling doesn't need a matching force-reconnect: subscribe requests
+  // already lazily (re)connect on demand, so the next relevant subscription
+  // naturally picks the provider back up.
+  if (before?.enabled && !updated.enabled) {
+    try {
+      closeMarketStreamProviderByKey(updated.key);
+    } catch (error) {
+      logger.warn(
+        {
+          provider: updated.key,
+          message: error instanceof Error ? error.message : "Unknown error",
+        },
+        "Failed to close realtime connection after provider disable"
+      );
+    }
+  }
+
+  return updated;
 }
 
 export async function createProviderConnectUrl(actorUserId: string) {
@@ -547,6 +664,120 @@ export async function updateBrandingSettings(input: {
   );
   return settings;
 }
+
+// Same queued-if-Redis-else-inline pattern as triggerInstrumentSync above -
+// works identically in an environment without REDIS_URL configured
+// (worker.ts refuses to start there, so runTrackedJob's queue path would
+// never actually execute).
+export async function triggerWeeklyStrongBacktestBackfill(input: {
+  actorUserId: string;
+  collectionId: string;
+  weeks?: number;
+}) {
+  const queue = getMarketDataQueue();
+  const [job] = await db
+    .insert(syncJobs)
+    .values({
+      type: SYNC_JOB_TYPES.weeklyStrongBacktestBackfill,
+      status: queue ? JOB_STATUS.queued : JOB_STATUS.running,
+      payload: { collectionId: input.collectionId, weeks: input.weeks },
+    })
+    .returning();
+
+  if (queue) {
+    await queue.add(JOB_NAMES.weeklyStrongBacktestBackfill, {
+      syncJobId: job.id,
+      collectionId: input.collectionId,
+      weeks: input.weeks,
+    });
+  } else {
+    try {
+      const result = await runWeeklyStrongBacktestBackfill({
+        collectionId: input.collectionId,
+        weeks: input.weeks,
+      });
+      await db
+        .update(syncJobs)
+        .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
+        .where(eq(syncJobs.id, job.id));
+    } catch (error) {
+      await db
+        .update(syncJobs)
+        .set({
+          status: JOB_STATUS.failed,
+          errorMessage: error instanceof Error ? error.message : "Backfill failed",
+          updatedAt: new Date(),
+        })
+        .where(eq(syncJobs.id, job.id));
+      throw error;
+    }
+  }
+
+  await audit(input.actorUserId, "weekly_strong_backtest.backfill_triggered", "market_collection", input.collectionId, {
+    weeks: input.weeks,
+  });
+
+  return { syncJobId: job.id, status: job.status };
+}
+
+// Same queued-if-Redis-else-inline pattern as triggerWeeklyStrongBacktestBackfill
+// above. Reuses runWeeklyStrongBacktestHistoricalRebuild (Phase D) - grouped
+// per resolved membership version, never blindly recomputing every
+// collection.
+export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
+  actorUserId: string;
+  collectionId: string;
+}) {
+  const queue = getMarketDataQueue();
+  const [job] = await db
+    .insert(syncJobs)
+    .values({
+      type: SYNC_JOB_TYPES.weeklyStrongBacktestHistoricalRebuild,
+      status: queue ? JOB_STATUS.queued : JOB_STATUS.running,
+      payload: { collectionId: input.collectionId },
+    })
+    .returning();
+
+  if (queue) {
+    await queue.add(JOB_NAMES.weeklyStrongBacktestHistoricalRebuild, {
+      syncJobId: job.id,
+      collectionId: input.collectionId,
+    });
+  } else {
+    try {
+      const result = await runWeeklyStrongBacktestHistoricalRebuild({ collectionId: input.collectionId });
+      await db
+        .update(syncJobs)
+        .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
+        .where(eq(syncJobs.id, job.id));
+    } catch (error) {
+      await db
+        .update(syncJobs)
+        .set({
+          status: JOB_STATUS.failed,
+          errorMessage: error instanceof Error ? error.message : "Historical rebuild failed",
+          updatedAt: new Date(),
+        })
+        .where(eq(syncJobs.id, job.id));
+      throw error;
+    }
+  }
+
+  await audit(
+    input.actorUserId,
+    "weekly_strong_backtest.historical_rebuild_triggered",
+    "market_collection",
+    input.collectionId,
+    {}
+  );
+
+  return { syncJobId: job.id, status: job.status };
+}
+
+export {
+  getWeeklyStrongBacktestHistoricalStatus,
+  getWeeklyStrongBacktestStatus,
+} from "../weekly-strong-backtest/weekly-strong-backtest.service";
 
 async function audit(
   actorUserId: string | null,

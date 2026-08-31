@@ -88,4 +88,46 @@ describe("price alert target placement", () => {
       })
     ).toBeNull();
   });
+
+  // Mirrors the scanner UI's own test matrix (ABCOTS · BSE, current
+  // ₹209.90) so the two stay in sync if either changes.
+  describe("ABCOTS/BSE example (current 209.90)", () => {
+    const currentPrice = 209.9;
+
+    it("case A: Above 250 is valid", () => {
+      expect(
+        getInvalidPriceAlertTargetMessage({ condition: "ABOVE", targetPrice: 250, currentPrice })
+      ).toBeNull();
+    });
+
+    it("case B: Above 44 is blocked (already satisfied)", () => {
+      expect(
+        getInvalidPriceAlertTargetMessage({ condition: "ABOVE", targetPrice: 44, currentPrice })
+      ).not.toBeNull();
+    });
+
+    it("case C: Below 44 is valid", () => {
+      expect(
+        getInvalidPriceAlertTargetMessage({ condition: "BELOW", targetPrice: 44, currentPrice })
+      ).toBeNull();
+    });
+
+    it("case D: Below 250 is blocked (already satisfied)", () => {
+      expect(
+        getInvalidPriceAlertTargetMessage({ condition: "BELOW", targetPrice: 250, currentPrice })
+      ).not.toBeNull();
+    });
+
+    it("case G: switching condition on the same target flips validity immediately", () => {
+      // Same call, condition is the only thing that changes - this is the
+      // exact reactivity the UI's memo depends on (condition, target, and
+      // current price are the only three inputs).
+      expect(
+        getInvalidPriceAlertTargetMessage({ condition: "ABOVE", targetPrice: 44, currentPrice })
+      ).not.toBeNull();
+      expect(
+        getInvalidPriceAlertTargetMessage({ condition: "BELOW", targetPrice: 44, currentPrice })
+      ).toBeNull();
+    });
+  });
 });

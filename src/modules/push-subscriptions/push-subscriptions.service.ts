@@ -103,7 +103,7 @@ export async function sendPriceAlertNotification(input: {
   const payload = JSON.stringify({
     title,
     body,
-    url: `/scanner?symbol=${encodeURIComponent(input.symbol)}&exchange=${encodeURIComponent(input.exchange)}`,
+    url: `/charts?symbol=${encodeURIComponent(input.symbol)}&exchange=${encodeURIComponent(input.exchange)}`,
     tag: `price-alert:${input.exchange}:${input.symbol}`,
   });
 

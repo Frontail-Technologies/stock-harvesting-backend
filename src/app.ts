@@ -6,14 +6,18 @@ import pinoHttp from "pino-http";
 import { pool } from "./db/client";
 import { adminRouter } from "./modules/admin/admin.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
+import { adminAuthRouter } from "./modules/auth/admin-auth.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { drawingsRouter } from "./modules/drawings/drawings.routes";
 import { marketCollectionsRouter } from "./modules/market-collections/market-collections.routes";
 import { marketDataRouter } from "./modules/market-data/market-data.routes";
+import { monetizationRouter } from "./modules/monetization/monetization.routes";
 import { priceAlertsRouter } from "./modules/price-alerts/price-alerts.routes";
 import { pushSubscriptionsRouter } from "./modules/push-subscriptions/push-subscriptions.routes";
 import { scannerRouter } from "./modules/scanner/scanner.routes";
 import { usersRouter } from "./modules/users/users.routes";
+import { watchlistsRouter } from "./modules/watchlists/watchlists.routes";
+import { weeklyStrongBacktestRouter } from "./modules/weekly-strong-backtest/weekly-strong-backtest.routes";
 import { API_ROUTES, HTTP_STATUS } from "./shared/constants";
 import { corsOrigins } from "./shared/env";
 import { errorHandler, notFound } from "./shared/errors";
@@ -85,6 +89,7 @@ export function createApp() {
   });
 
   app.use(API_ROUTES.auth, authRouter);
+  app.use(API_ROUTES.adminAuth, adminAuthRouter);
   app.use(API_ROUTES.users, usersRouter);
   app.use(API_ROUTES.marketData, marketDataRouter);
   app.use(API_ROUTES.marketCollections, marketCollectionsRouter);
@@ -94,6 +99,9 @@ export function createApp() {
   app.use(API_ROUTES.ai, aiRouter);
   app.use(API_ROUTES.priceAlerts, priceAlertsRouter);
   app.use(API_ROUTES.pushSubscriptions, pushSubscriptionsRouter);
+  app.use(API_ROUTES.watchlists, watchlistsRouter);
+  app.use(API_ROUTES.monetization, monetizationRouter);
+  app.use(API_ROUTES.weeklyStrongBacktest, weeklyStrongBacktestRouter);
 
   app.use((_req, _res, next) => {
     next(notFound("Route not found"));

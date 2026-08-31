@@ -22,40 +22,14 @@ import {
 
 export const marketDataRouter = Router();
 
-marketDataRouter.use(requireAuth);
-
-marketDataRouter.get("/exchanges", asyncHandler(async (_req, res) => {
-  sendData(res, { exchanges: await listSupportedExchanges() });
-}));
-
-marketDataRouter.get("/exchange-rates", asyncHandler(async (_req, res) => {
-  sendData(res, await listExchangeRates());
-}));
-
-marketDataRouter.get(
-  "/index-relative-strength",
-  validate({ query: indexRelativeStrengthQuerySchema }),
-  asyncHandler(async (req, res) => {
-    const query = req.query as unknown as { limit: number; exchange: string };
-    sendData(res, { metrics: await getIndexRelativeStrength(query.limit, query.exchange) });
-  })
-);
-
-marketDataRouter.get("/stocks", validate({ query: stockListQuerySchema }), asyncHandler(async (req, res) => {
-  const query = req.query as unknown as {
-    q?: string;
-    page: number;
-    limit: number;
-    sortBy: "symbol" | "name" | "close" | "changePct" | "volume";
-    sortDirection: "asc" | "desc";
-    exchange: string;
-    moveFilter: MoveFilter;
-    minVolume?: number;
-    includeUnpriced?: boolean;
-  };
-  sendData(res, await listStocks(query));
-}));
-
+// Public: the global stock search (navbar, landing hero, Ctrl+K command
+// panel) must work for signed-out visitors on the public marketing site,
+// not just inside the authenticated app. This is a pure read of public
+// market data (symbol/name/exchange/price) - no user-specific data, no
+// mutation - so it's safe to expose without a session. Registered before
+// the router-wide requireAuth below so only this one route is public;
+// every other market-data route (including the near-identical /stocks
+// list) stays authenticated exactly as before.
 marketDataRouter.get(
   "/stocks/search",
   validate({ query: stockListQuerySchema }),
@@ -74,6 +48,48 @@ marketDataRouter.get(
     sendData(res, await listStocks(query));
   })
 );
+
+// Public for the same reason /stocks/search above is: the landing hero's
+// exchange selector (and every other exchange picker built on
+// MarketSelector) needs this list before a visitor has ever signed in -
+// it's public exchange metadata (code/name/currency/country), not
+// user-specific data. Previously sat after the router-wide requireAuth
+// below, which meant every logged-out visitor's dropdown silently got an
+// empty list and rendered "No exchanges found" even though real options
+// existed.
+marketDataRouter.get("/exchanges", asyncHandler(async (_req, res) => {
+  sendData(res, { exchanges: await listSupportedExchanges() });
+}));
+
+marketDataRouter.use(requireAuth);
+
+marketDataRouter.get("/exchange-rates", asyncHandler(async (_req, res) => {
+  sendData(res, await listExchangeRates());
+}));
+
+marketDataRouter.get(
+  "/index-relative-strength",
+  validate({ query: indexRelativeStrengthQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as { limit: number; exchange: string };
+    sendData(res, await getIndexRelativeStrength(query.limit, query.exchange));
+  })
+);
+
+marketDataRouter.get("/stocks", validate({ query: stockListQuerySchema }), asyncHandler(async (req, res) => {
+  const query = req.query as unknown as {
+    q?: string;
+    page: number;
+    limit: number;
+    sortBy: "symbol" | "name" | "close" | "changePct" | "volume";
+    sortDirection: "asc" | "desc";
+    exchange: string;
+    moveFilter: MoveFilter;
+    minVolume?: number;
+    includeUnpriced?: boolean;
+  };
+  sendData(res, await listStocks(query));
+}));
 
 marketDataRouter.get(
   "/history-range",

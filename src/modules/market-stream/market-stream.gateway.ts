@@ -2,6 +2,7 @@ import type { IncomingMessage, Server } from "http";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 
 import { verifyAccessToken } from "../security/tokens";
+import { TOKEN_AUDIENCE } from "../../shared/constants";
 import { logger } from "../../shared/logger";
 import {
   registerMarketStreamClient,
@@ -54,7 +55,7 @@ export function attachMarketStreamGateway(server: Server) {
 
     let user;
     try {
-      const payload = verifyAccessToken(token);
+      const payload = verifyAccessToken(token, TOKEN_AUDIENCE.user);
       user = {
         id: payload.sub,
         email: payload.email,
