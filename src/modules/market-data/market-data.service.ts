@@ -357,23 +357,11 @@ function hasLikelySplitDiscontinuity(
   return false;
 }
 
-// Charts performance/freshness audit (item 19) - fixes a confirmed bug
-// found via real DB + live measurement: a normal chart open passes no
-// explicit `from` (see getChartCandles's `input.from`), so `requestedFrom`
-// here was always the internal 30-year default (CHART_HISTORY_YEARS) -
-// and no BSE symbol in this system actually has 30 years of daily history
-// (verified: TCS/RELIANCE/INFY all start 2007-01-02). That made
-// `oldest > requestedFrom` unconditionally TRUE on every default request,
-// triggering the expensive FULL multi-year backfill below on every single
-// chart open regardless of freshness - not just once, forever - which is
-// exactly what the comment on isLatestDailyCandleStale's own call site
-// says should NOT happen ("once a symbol has any daily history, this is
-// the only check that keeps serving it forever"). This check only makes
-// sense at all when the caller explicitly asked for MORE history than is
-// currently stored - it now only runs in that case; a normal, unbounded
-// default request has no "did we backfill far enough back" question to
-// ask in the first place, so it correctly falls through to the cheap
-// isLatestDailyCandleStale incremental check instead.
+// Only meaningful when the caller explicitly requested more history than
+// is currently stored (explicitFrom set) - a normal, unbounded default
+// request has no "did we backfill far enough back" question to ask, and
+// must fall through to the cheap isLatestDailyCandleStale check instead of
+// triggering a full multi-year backfill on every open.
 function shouldBackfillRequestedHistory(
   rows: Array<{ time: string }>,
   requestedFrom: string,
@@ -399,13 +387,11 @@ export function isLatestDailyCandleStale(
 
 export type ChartCandleFreshnessAction = "backfill" | "incremental-refresh" | "none";
 
-// The exact freshness/completeness decision getChartCandles makes before
-// deciding whether (and how) to call the provider - extracted as its own
-// pure function so the decision itself is directly testable without a live
-// DB/provider (see market-data.freshness.test.ts). Order matters:
-// missing/discontinuous/incomplete-history conditions take priority over
-// mere staleness - a symbol with no usable history needs a full re-fetch,
-// not just the latest few days.
+// getChartCandles' freshness decision, pure and directly testable (see
+// market-data.freshness.test.ts). Order matters: missing/discontinuous/
+// incomplete-history conditions take priority over mere staleness, since a
+// symbol with no usable history needs a full re-fetch, not just the latest
+// few days.
 export function decideChartCandleFreshnessAction(
   dailyRows: Array<{ time: string; close: string | number }>,
   from: string,
@@ -494,22 +480,14 @@ export { replaceCandlesAtomically };
 export { backfillDailyCandles, backfillIndexCandles };
 
 // Global (not collection-scoped) ranking of one index exchange's indices
-// against each other - reuses computeAllRelativeStrengthMetrics unchanged,
-// since ranking an index pool by the same combined score is exactly the
-// same computation shape as ranking a stock pool; each index is just its
-// own single row here, no grouping/averaging needed (unlike
-// computeGroupRelativeStrength). Defaults to NSE_IDX to preserve existing
-// callers; pass BSE_IDX for the BSE index box.
+// against each other - reuses computeAllRelativeStrengthMetrics, each
+// index as its own row (no grouping/averaging needed). Defaults to
+// NSE_IDX; pass BSE_IDX for the BSE index box.
 //
-// This used to call computeRelativeStrengthMetrics (a live, uncached,
-// years-of-candles computation) on EVERY request, unlike the
-// collection-scoped RS surfaces which at least had a short in-process
-// cache. Now reads a persisted snapshot (scope "index_exchange", keyed by
-// the exchange code - indices aren't members of any market_collection, so
-// there's no collectionId to key this by) and derives the limited/sorted
-// view from it via pickTopRelativeStrengthRows - pure, no candle I/O. On a
-// miss it computes once and persists before returning (the same
-// exception/bootstrap path as the collection-scoped version above).
+// Reads a persisted snapshot (scope "index_exchange", keyed by exchange
+// code since indices aren't members of any market_collection) and derives
+// the limited/sorted view from it - pure, no candle I/O. On a miss it
+// computes once and persists before returning.
 export async function getIndexRelativeStrength(
   limit: number,
   exchange: string = NSE_INDEX_EXCHANGE
@@ -567,12 +545,9 @@ const GLOBAL_DATAFEEDS_PROVIDER_EXCHANGES: ProviderExchange[] = [
 ];
 
 // EODHD's exchange list is the source of truth for everything except NSE
-// (Zerodha-only, not covered by EODHD at all - confirmed live). Cached for
-// 24h since the underlying exchange metadata essentially never changes; the
-// per-provider enabled checks below are what keep this responsive to admin
-// data-provider toggles (data-provider-settings.service.ts invalidates this
-// same cache prefix on every settings change, so the 24h TTL never actually
-// delays a disable/enable from taking effect).
+// (Zerodha-only). Cached 24h since exchange metadata rarely changes;
+// data-provider-settings.service.ts invalidates this cache prefix on every
+// admin toggle, so disable/enable still takes effect immediately.
 export async function listSupportedExchanges(): Promise<ProviderExchange[]> {
   return getOrSetCache("supportedExchanges", SUPPORTED_EXCHANGES_CACHE_TTL_MS, async () => {
     const eodhdAdapter = getEodhdDataProviderAdapter();

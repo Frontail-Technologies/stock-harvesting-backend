@@ -1,36 +1,11 @@
-// The canonical "Weekly Strong" / near-multi-year-high breakout evaluator.
-//
-// Consolidated into one module after an audit found the same
-// two-condition decision (latest daily close within `ratio` of its
-// trailing `dailyLookbackBars`-bar high, AND latest weekly close within
-// `ratio` of its trailing `weeklyLookbackBars`-bar high - both windows
-// inclusive of the bar being evaluated itself) was independently
-// reimplemented in FOUR places in market-data.service.ts:
-//   1. computeWeeklyStrongStocks           - live list, "latest" point only
-//   2. computeWeeklyStrongStocksBacktest   - full historical series, fixed
-//                                            250/1252-bar windows
-//   3. computeSymbolBreakoutBacktest       - full historical series, single
-//                                            symbol, CALLER-CHOSEN window
-//                                            sizes (Scanner's lookback
-//                                            multiplier) - a genuinely
-//                                            different use case, kept as
-//                                            its own orchestration below,
-//                                            not folded into the fixed
-//                                            250/1252 default
-//   4. computeAllRelativeStrengthMetrics   - only the WEEKLY half, as a
-//                                            pre-filter before ranking by
-//                                            combinedScore - intentionally
-//                                            a different (weekly-only)
-//                                            decision, not the full
-//                                            two-condition screen; kept
-//                                            that way here too (see
-//                                            passesNearHigh, used directly
-//                                            by the RS pipeline instead of
-//                                            the full evaluateWeeklyStrong*
-//                                            functions)
-//
-// None of the thresholds/constants/window sizes below changed value during
-// this consolidation - only their number of independent implementations.
+// The canonical "Weekly Strong" / near-multi-year-high breakout evaluator -
+// the single source of truth for this decision; every caller (live list,
+// backtest, Scanner overlay) goes through the functions below rather than
+// reimplementing the check. computeSymbolBreakoutBacktest deliberately uses
+// caller-chosen window sizes (Scanner's lookback multiplier) instead of the
+// fixed defaults; computeAllRelativeStrengthMetrics deliberately uses only
+// the weekly half (via passesNearHigh) as an unrelated pre-filter, not the
+// full two-condition screen.
 
 import { isCompletedTradingWeek } from "./trading-calendar";
 
@@ -48,12 +23,10 @@ export const WEEKLY_STRONG_EVALUATOR_VERSION = "weekly-strong-v1";
 export const WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS = 250;
 export const WEEKLY_STRONG_DAILY_LOOKBACK_BARS = 1252;
 export const WEEKLY_STRONG_NEAR_HIGH_RATIO = 0.85;
-// Floor below the full lookback windows above - enough of a sample that a
-// symbol's own trailing close isn't trivially just its own recent close.
-// This is the Weekly Strong condition's OWN minimum - deliberately
-// separate from computeAllRelativeStrengthMetrics's own (54/35-bar)
-// minimum, which guards that function's other metrics (55-day change,
-// monthly change, MACD), not this condition, and is left exactly as-is.
+// Floor below the full lookback windows - enough of a sample that a
+// symbol's trailing close isn't trivially just its own recent close.
+// Deliberately separate from computeAllRelativeStrengthMetrics's own
+// minimum, which guards unrelated metrics, not this condition.
 export const MIN_WEEKLY_STRONG_DAILY_BARS = 50;
 export const MIN_WEEKLY_STRONG_WEEKLY_BARS = 20;
 
@@ -66,20 +39,12 @@ export function hasSufficientWeeklyStrongHistory(
   );
 }
 
-// Every Weekly Strong evaluation (the live list, the backtest chart, the
-// Scanner overlay) calls this on its weekly candle series BEFORE
-// evaluating - drops a trailing in-progress week if the daily feed has
-// already synced into the current week, so an incomplete week can never
-// be evaluated as if it were a finished one, live or historical. There
-// can be at most one incomplete trailing week at any time (weeks fill in
-// chronological order), so this only ever needs to check the last entry.
-// See trading-calendar.ts's isCompletedTradingWeek for the actual rule.
-//
-// Scoped deliberately to the Weekly Strong pipeline only -
-// computeAllRelativeStrengthMetrics's own weekly pre-filter (which powers
-// the separate, unchanged Relative Strength Index/Sector/Industry cards)
-// does not call this; that calculation path is explicitly out of scope
-// here.
+// Drops a trailing in-progress week so it's never evaluated as finished,
+// live or historical. At most one incomplete trailing week can exist
+// (weeks fill in chronological order), so only the last entry needs
+// checking - see trading-calendar.ts's isCompletedTradingWeek for the rule.
+// Scoped to the Weekly Strong pipeline only; the separate Relative Strength
+// cards' own weekly pre-filter does not call this.
 export function excludeIncompleteTradingWeek<T extends { time: string }>(
   weeklyRows: T[],
   exchange: string,
@@ -91,11 +56,8 @@ export function excludeIncompleteTradingWeek<T extends { time: string }>(
 }
 
 // Sliding-window maximum: result[i] = max(values[i - windowSize + 1 .. i]),
-// inclusive of the bar at i itself. Moved here unchanged from
-// market-data.service.ts's original rollingMax - used by the series
-// evaluators below (computeWeeklyStrongStocksBacktest/
-// computeSymbolBreakoutBacktest's replacements), which need every index's
-// value in O(n) total rather than one index at a time.
+// inclusive of i. O(n) total via a monotonic deque, so the series
+// evaluators below can get every index's value without an O(n*windowSize) scan.
 export function rollingMax(values: number[], windowSize: number): number[] {
   const result = new Array<number>(values.length);
   const deque: number[] = [];
@@ -117,13 +79,9 @@ export function rollingMax(values: number[], windowSize: number): number[] {
   return result;
 }
 
-// The literal shared formula: is closes[index] within `ratio` of the
-// highest close in the trailing `lookbackBars` window ending at (and
-// including) index itself? This single function is what "near its own
-// multi-year high" means everywhere in the product - the full two-leg
-// evaluator below and the RS pipeline's weekly-only pre-filter are both
-// built directly on top of it, so there is exactly one place this
-// arithmetic is written.
+// The single definition of "near its own multi-year high" - both the
+// full two-leg evaluator below and the RS pipeline's weekly-only
+// pre-filter are built on this one function.
 export function passesNearHigh(
   closes: number[],
   index: number,
@@ -144,12 +102,8 @@ export type WeeklyStrongDecision = {
   passesWeekly: boolean;
 };
 
-// The full two-condition decision at the LATEST available bar of each
-// series - replaces computeWeeklyStrongStocks's per-symbol inner logic
-// exactly (same "last element of each array" access pattern, no daily/
-// weekly date alignment needed since both series are "as of now").
-// Caller is responsible for the MIN_WEEKLY_STRONG_*_BARS history check
-// (hasSufficientWeeklyStrongHistory) before calling this.
+// The full two-condition decision at the latest bar of each series. Caller
+// must check hasSufficientWeeklyStrongHistory before calling this.
 export function evaluateWeeklyStrongLatest(
   dailyCloses: number[],
   weeklyCloses: number[],
@@ -169,14 +123,11 @@ export function evaluateWeeklyStrongLatest(
   return { passes: passesDaily && passesWeekly, passesDaily, passesWeekly };
 }
 
-// Window-size derivation for the Scanner's own caller-chosen lookback (its
-// lookback-multiplier UI control) - as opposed to the fixed 250/1252-bar
-// Weekly Strong screen elsewhere, which never calls this. Written once so
-// the Scanner's live near-high scan and its backtest overlay can't drift
-// apart on window SIZE the way they previously drifted on the pass/fail
-// RULE itself (see near-250-week-high.ts and computeSymbolBreakoutBacktest -
-// both call this now instead of each deriving the 1:5 daily/weekly bar
-// ratio independently).
+// Window-size derivation for the Scanner's caller-chosen lookback (its
+// lookback-multiplier control), separate from the fixed-window Weekly
+// Strong screen. Both near-250-week-high.ts and computeSymbolBreakoutBacktest
+// call this so the live scan and its backtest overlay can't drift apart
+// on window size.
 export function deriveScannerLookbackBars(lookbackWeeks: number): {
   dailyLookbackBars: number;
   weeklyLookbackBars: number;
@@ -194,13 +145,9 @@ export type WeeklyStrongSeriesPoint = {
   passesWeekly: boolean;
 };
 
-// The full two-condition decision at EVERY weekly bar in the series -
-// replaces the identical daily/weekly alignment-walk + rollingMax logic
-// that used to be duplicated between computeWeeklyStrongStocksBacktest and
-// computeSymbolBreakoutBacktest. dailyCandles/weeklyCandles must both be
-// chronologically ascending (what readDailyAndWeeklyMetricCandles/
-// deriveWeeklyMetricCandlesFromDaily already return everywhere in this
-// codebase) - the alignment walk assumes that ordering.
+// The full two-condition decision at every weekly bar in the series.
+// dailyCandles/weeklyCandles must both be chronologically ascending - the
+// alignment walk below assumes that ordering.
 export function evaluateWeeklyStrongSeries(
   dailyCandles: WeeklyStrongCandle[],
   weeklyCandles: WeeklyStrongCandle[],
@@ -225,9 +172,7 @@ export function evaluateWeeklyStrongSeries(
   for (let weeklyIndex = 0; weeklyIndex < weeklyCandles.length; weeklyIndex++) {
     const weeklyRow = weeklyCandles[weeklyIndex];
 
-    // Advance the daily pointer to the last daily bar that's still <= this
-    // weekly bar's own time - same two-pointer walk both original
-    // implementations used, now written once.
+    // Advance to the last daily bar still <= this weekly bar's time.
     while (
       dailyIndex + 1 < dailyCandles.length &&
       dailyCandles[dailyIndex + 1].time <= weeklyRow.time

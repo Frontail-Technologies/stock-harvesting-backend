@@ -10,19 +10,13 @@ import {
   getEligibleProviderAdapter,
 } from "../data-provider/data-provider.service";
 
-// Instrument-table DB operations (lookup, fallback creation, bulk upsert,
-// latest-stats writes) that don't need provider-search/backfill
+// Instrument-table DB operations that don't need provider-search/backfill
 // orchestration. getOrCreateInstrument lives in market-data.instrument-sync.ts
-// instead of here because it falls back to ensureInstrumentsForSymbols
-// (a provider-orchestration function) on a miss.
+// instead, since it falls back to provider-orchestration on a miss.
 
 const INSTRUMENT_UPSERT_CHUNK_SIZE = 500;
-// 6 params/row (symbol + 5 stat columns; updatedAt uses now(), not a
-// per-row param) x 500 = 3,000 params/statement - comfortably under
-// Postgres's 65,535-parameter protocol limit, matching every other bulk
-// chunk size already used in this file/module (CANDLE_UPSERT_CHUNK_SIZE,
-// INSTRUMENT_UPSERT_CHUNK_SIZE, sector-classification.service.ts's
-// CLASSIFICATION_UPDATE_CHUNK_SIZE).
+// 6 params/row x 500 = 3,000 params/statement - comfortably under
+// Postgres's 65,535-parameter protocol limit.
 const INSTRUMENT_STATS_UPDATE_CHUNK_SIZE = 500;
 
 export async function getInstrumentsBySymbol(symbols: string[], exchange: string = DEFAULT_EXCHANGE) {
@@ -39,10 +33,8 @@ export async function getInstrumentsBySymbol(symbols: string[], exchange: string
 
 export async function createFallbackInstrument(symbol: string, exchange: string = DEFAULT_EXCHANGE) {
   const normalizedSymbol = normalizeSymbol(symbol);
-  // Tagging (which provider's instrument-token format this row uses) is
-  // separate from "which provider may we actually call right now" - the
-  // static registry mapping is fine for the tag even when the provider is
-  // currently disabled, but the token itself is only ever fetched from an
+  // The provider tag (token format) can use the static registry even when
+  // that provider is disabled; the token itself always comes from an
   // eligible adapter.
   const staticAdapter = getDataProviderAdapterForExchange(exchange);
   const eligibleAdapter = await getEligibleProviderAdapter({
@@ -94,22 +86,12 @@ export type InstrumentUpsertInput = {
   segment?: string;
 };
 
-// `instruments` enforces two unique constraints - (exchange, symbol) and
-// (provider, instrument_token) - but onConflictDoUpdate below can only
-// target one of them. A batch containing two rows that collide on *either*
-// key fails the whole INSERT with "ON CONFLICT DO UPDATE command cannot
-// affect row a second time" (exchange+symbol) or a duplicate-key violation
-// (instrument_token), even though only one row actually collides. This
-// applies both dedup passes before the insert ever runs.
-//
-// Conflict resolution is deterministic: the later row in `inputs` wins,
-// matching dedupeCandleUpsertInputs' existing "last write wins" rule.
-// Symbol-level duplicates are resolved first (using the exchange+symbol
-// identity the ON CONFLICT target relies on), then token-level duplicates
-// are resolved among those survivors - so a genuine vendor anomaly (two
-// different symbols claiming the same instrument token) drops the earlier
-// symbol's row from *this* sync rather than failing the batch; it picks up
-// on the next successful sync once the vendor data is consistent again.
+// `instruments` enforces two unique constraints (exchange+symbol and
+// provider+instrument_token), but onConflictDoUpdate can only target one -
+// a batch with two rows colliding on *either* key fails the whole INSERT.
+// Both dedup passes run before the insert; last-write-wins, symbol-level
+// first then token-level, so a vendor anomaly (two symbols claiming the
+// same token) only drops a row from this sync, not the whole batch.
 export function dedupeInstrumentUpsertInputs(inputs: InstrumentUpsertInput[]) {
   const bySymbolKey = new Map<string, InstrumentUpsertInput>();
   for (const row of inputs) {
@@ -133,15 +115,12 @@ export function dedupeInstrumentUpsertInputs(inputs: InstrumentUpsertInput[]) {
   return deduped;
 }
 
-// dedupeInstrumentUpsertInputs above only catches collisions within *this*
-// batch. A row can still collide with a *different* (exchange, symbol) row
-// already sitting in the DB from an earlier sync - e.g. a provider reusing
-// an instrument_token across two segments - which the ON CONFLICT target
-// (exchange, symbol) doesn't cover, since it never matches an existing row
-// for a brand-new symbol and falls through to a plain INSERT that then
-// fails the separate (provider, instrument_token) unique constraint. Drop
-// those here rather than letting a handful of vendor-anomaly rows abort an
-// entire sync batch.
+// dedupeInstrumentUpsertInputs only catches collisions within this batch.
+// A row can still collide with a different (exchange, symbol) already in
+// the DB from an earlier sync (e.g. a provider reusing a token across
+// segments), which the (exchange, symbol) ON CONFLICT target doesn't
+// cover. Drop those here rather than letting vendor anomalies abort the
+// whole sync.
 async function dropCrossBatchTokenCollisions(
   inputs: InstrumentUpsertInput[],
   provider: string,
@@ -230,35 +209,10 @@ type LatestStockStatsRow = {
   time: string;
 };
 
-// Old query (kept here only as the EXPLAIN comparison baseline - no longer
-// called): `SELECT ... FROM candles WHERE exchange=? AND timeframe='1D' AND
-// symbol IN (...) ORDER BY symbol, time DESC` with no LIMIT - Postgres has
-// no way to know only 2 rows per symbol are wanted, so it returns every
-// matching daily candle ever stored for every requested symbol.
-//   EXPLAIN (ANALYZE, BUFFERS)
-//   SELECT symbol, open, close, volume, time FROM candles
-//   WHERE exchange = 'NSE' AND timeframe = '1D' AND symbol = ANY(ARRAY['RELIANCE','TCS'])
-//   ORDER BY symbol, time DESC;
-//   -- healthy-looking plan, but "rows" here is every historical row per
-//   -- symbol (thousands for a multi-year backfill), not the 2 actually used:
-//   --   Index Scan using candles_exchange_symbol_timeframe_time_unique on candles
-//   --     Index Cond: (exchange = 'NSE' AND symbol = ANY(...) AND timeframe = '1D')
-//
-// New query below asks Postgres for exactly the top-2-per-symbol instead,
-// via a window function filtered in an outer query (row_number() can't be
-// filtered directly in WHERE):
-//   EXPLAIN (ANALYZE, BUFFERS)
-//   SELECT symbol, open, close, volume, time FROM (
-//     SELECT symbol, open, close, volume, time,
-//            row_number() OVER (PARTITION BY symbol ORDER BY time DESC) AS rn
-//     FROM candles
-//     WHERE exchange = 'NSE' AND timeframe = '1D' AND symbol = ANY(ARRAY['RELIANCE','TCS'])
-//   ) ranked WHERE rn <= 2 ORDER BY symbol, time DESC;
-//   -- same Index Scan for the inner scan, but WindowAgg + an rn<=2 filter
-//   -- caps actual rows returned to the client at 2 per symbol instead of
-//   -- the symbol's entire stored history.
-// (Both plans reference the existing composite unique index - this is a
-// query-shape fix, not an indexing fix.)
+// Uses a row_number() window function (filtered in an outer query, since
+// row_number() can't be filtered directly in WHERE) to fetch exactly the
+// latest 2 rows per symbol, instead of ORDER BY with no LIMIT - which would
+// return each symbol's entire stored history just to read its last 2 rows.
 async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT_EXCHANGE, dbClient: DbOrTx = db) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   const stats = new Map<
@@ -320,25 +274,11 @@ async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT
   return stats;
 }
 
-// Persists the per-request stats computed above onto `instruments` so the
-// stocks list can filter/sort/read prices directly off the instruments
-// table (fast, works across the whole table) instead of recomputing a
-// 2-row candles lookback per symbol on every read.
-//
-// Batched as UPDATE ... FROM (VALUES ...) - the same proven pattern
-// sector-classification.service.ts's bulkUpdateClassification already
-// uses - instead of one UPDATE per symbol. A full-market refresh
-// (refreshAllLatestInstrumentPrices's 200-symbol chunks, up to ~9,900
-// NSE instruments) previously issued up to ~9,900 sequential round trips
-// for this step alone; this issues at most ceil(symbolCount / 500).
-//
-// latestChangePct is nullable (a symbol's first-ever synced day has no
-// prior close to diff against) - explicitly cast to ::numeric in the
-// VALUES list so Postgres can't fail to infer that column's type on a
-// chunk where every row happens to be NULL (a real, if rare, case for a
-// newly-hydrated batch of symbols). All other value casts are there for
-// the same reason, applied uniformly rather than only where currently
-// required, so this stays correct if a future chunk's row order changes.
+// Persists the computed stats onto `instruments` so the stocks list can
+// read/sort/filter prices directly off that table instead of recomputing a
+// candles lookback per symbol on every read. Batched as
+// UPDATE ... FROM (VALUES ...) (at most ceil(symbolCount / 500) statements)
+// rather than one UPDATE per symbol.
 export async function refreshLatestInstrumentStats(exchange: string, symbols: string[], dbClient: DbOrTx = db) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   if (uniqueSymbols.length === 0) return;
@@ -355,13 +295,10 @@ export type LatestInstrumentStat = {
   time: string;
 };
 
-// The actual bulk write, split out from refreshLatestInstrumentStats above
-// so it's directly testable (see
-// market-data.instrument-stats-bulk-update.test.ts) against a fake
-// dbClient without needing to also fake getLatestStockStats's own
-// candles window-function query - this function's own contract is "given
-// already-computed stats, apply them", independent of how they were
-// computed.
+// Split out from refreshLatestInstrumentStats so the bulk write is
+// directly testable against a fake dbClient (see
+// market-data.instrument-stats-bulk-update.test.ts) independent of
+// getLatestStockStats's own query.
 export async function applyLatestInstrumentStats(
   exchange: string,
   stats: Map<string, LatestInstrumentStat>,
@@ -373,6 +310,8 @@ export async function applyLatestInstrumentStats(
   for (let index = 0; index < statRows.length; index += INSTRUMENT_STATS_UPDATE_CHUNK_SIZE) {
     const chunk = statRows.slice(index, index + INSTRUMENT_STATS_UPDATE_CHUNK_SIZE);
 
+    // Explicit ::numeric casts so Postgres can't fail to infer changePct's
+    // type on a chunk where it happens to be NULL for every row.
     const values = sql.join(
       chunk.map(
         ([symbol, stat]) =>

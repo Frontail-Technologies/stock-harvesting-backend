@@ -21,14 +21,9 @@ import {
 } from "./weekly-strong-evaluator";
 
 // Analytical data preparation/orchestration for Relative Strength and
-// Weekly Strong: fetches+prepares the daily/weekly candle series each
-// needs (with the same seed-backfill fallback both already relied on), then
-// composes that input with the CANONICAL decision logic in
-// weekly-strong-evaluator.ts. Deliberately does NOT own that decision logic
-// itself - never duplicate/inline evaluator rules here, only call them.
-// Depends on market-data.candles.ts (low-level candle reads),
-// market-data.candle-sync.ts (provider-backed seed backfill), and
-// market-data.dates.ts - never on market-data.service.ts.
+// Weekly Strong: fetches/prepares candle series, then composes them with
+// the canonical decision logic in weekly-strong-evaluator.ts - never
+// duplicates or inlines evaluator rules here, only calls them.
 
 export type { MetricCandle };
 
@@ -112,14 +107,10 @@ export async function readDailyAndWeeklyMetricCandles(input: {
   return { dailyCandles, weeklyCandles };
 }
 
-// THE canonical 55-day change calculation (item 1) - the ONLY formula any
-// of the 4 relative-strength Dashboard widgets (Index/Sector/Industry/
-// Stock) derives its ranking from. 55 daily observations inclusive of the
-// latest close: the close 54 trading sessions before it, using actual
-// daily candle rows (not calendar days), so weekends/holidays never skew
-// the lookback.
-// Exported for direct regression testing only (pure function, no other
-// caller needs it outside this file) - see market-data.55-day-change.test.ts.
+// THE canonical 55-day change calculation - the only formula every
+// relative-strength Dashboard widget ranks by. Compares the latest close
+// to the close 54 trading sessions earlier (actual daily candles, not
+// calendar days, so weekends/holidays don't skew the lookback).
 export const CHANGE_55D_LOOKBACK_BARS = 54;
 
 export function calculate55DayChange(dailyRows: MetricCandle[]): number {
@@ -152,23 +143,14 @@ export type RelativeStrengthInstrumentInput = {
   industry?: string | null;
 };
 
-// Computes the single relative-strength metric (55-day change %, see
-// calculate55DayChange) over an arbitrary instrument pool, for every
-// instrument that has enough daily history - no top-N slicing here, unlike
-// computeRelativeStrengthMetrics below. computeGroupRelativeStrength needs
-// every qualifying row (to average per sector/industry), not just the
-// global top N. Deliberately does not filter the pool by any other
-// condition (e.g. a near-high breakout check) - every active instrument in
-// the pool with enough history gets a row, matching "use the actual
-// complete segment membership" for the 4 top Dashboard widgets. That is a
-// deliberate difference from computeWeeklyStrongStocks below, which is a
-// separate, unrelated breakout screen.
+// Computes the 55-day change metric for every instrument in the pool with
+// enough history - no top-N slicing (unlike computeRelativeStrengthMetrics
+// below) and no other filtering, since computeGroupRelativeStrength needs
+// every qualifying row to average per sector/industry.
 //
-// This is THE expensive step (candle I/O per member) - exported so
-// dashboard-snapshots.service.ts can call it exactly once per invalidation
-// cycle and persist the result, instead of the Dashboard's read path
-// (getCollectionRelativeStrength/getIndexRelativeStrength) each running it
-// independently on every cache-cold request.
+// The expensive step (candle I/O per member) - exported so
+// dashboard-snapshots.service.ts can call it once per invalidation cycle
+// and persist the result, rather than every read recomputing it.
 export async function computeAllRelativeStrengthMetrics(
   instrumentRows: RelativeStrengthInstrumentInput[],
   exchange: string
@@ -217,12 +199,9 @@ export async function computeAllRelativeStrengthMetrics(
     .filter((row): row is RelativeStrengthMetricRow => Boolean(row));
 }
 
-// All 4 dashboard cards rank by the same 55-day change % now (see
-// RelativeStrengthMetricRow.change55dPct), so this is a single top-N
-// selection rather than a union across 4 separately-ranked metrics.
-// Exported so dashboard-snapshots.service.ts can slice a
-// STORED base metrics array the same way this always sliced a freshly-
-// computed one - pure/cheap (no candle I/O), safe to call on read.
+// All 4 Dashboard cards rank by the same 55-day change %, so this is a
+// single top-N selection. Pure/cheap (no candle I/O) - safe to call on
+// read against a stored snapshot.
 export function pickTopRelativeStrengthRows(
   rows: RelativeStrengthMetricRow[],
   limit: number
@@ -245,19 +224,10 @@ export type GroupRelativeStrengthRow = {
   memberCount: number;
 };
 
-// "Sector rotation" style ranking: instead of ranking individual stocks, rank
-// the sector/industry categories themselves by the mean 55-day change % of
-// their member stocks within this instrument pool. Requires instrumentRows
-// to carry real sector/industry classification (from the sector-classification
-// sync) - instruments with no classification yet are silently excluded
-// rather than lumped into a misleading "unclassified" group.
-// Pure/cheap (no candle I/O) - extracted so dashboard-snapshots.service.ts
-// can group a STORED base metrics array
-// the same way this always grouped a freshly-computed one. Averages the
-// 55-day change % of every metric row sharing a sector/industry; a row
-// with no classification for the requested groupBy is silently excluded
-// (never lumped into a misleading "unclassified" group), matching the
-// previous inline behavior exactly.
+// "Sector rotation" ranking: ranks sector/industry categories by the mean
+// 55-day change % of their member stocks. A row with no classification for
+// the requested groupBy is silently excluded, never lumped into a
+// misleading "unclassified" group. Pure/cheap (no candle I/O).
 export function groupRelativeStrengthMetrics(
   allMetrics: RelativeStrengthMetricRow[],
   groupBy: "sector" | "industry",
@@ -383,17 +353,12 @@ export async function computeWeeklyStrongStocks(
   return rows.sort((a, b) => b.changePct - a.changePct);
 }
 
-// Re-runs the same weekly-strong breakout check at every historical week
-// over the backtest window, instead of just today, and counts how many pool
-// members passed at each point - powers the persisted backtest backfill.
-// Superseded computeWeeklyStrongStocksBacktest (count-only, live-computed
-// on every Dashboard page load) - that function has been removed now that
-// the Dashboard reads persisted weekly_strong_backtest_runs/_members
-// instead of recomputing on read.
+// Re-runs the weekly-strong breakout check at every historical week
+// (instead of just today) and counts how many pool members passed at each
+// point - powers the persisted backtest backfill.
 export const WEEKLY_STRONG_BACKTEST_DEFAULT_WEEKS = 250;
-// Fetch window needs to cover both the oldest backtest week's own trailing
-// evaluator lookback (see weekly-strong-evaluator.ts's own constants) AND
-// the backtest range itself - comfortably over both at 10 years.
+// 10 years comfortably covers both the oldest backtest week's own trailing
+// evaluator lookback and the backtest range itself.
 const WEEKLY_STRONG_BACKTEST_FETCH_YEARS = 10;
 
 export type WeeklyStrongBacktestMemberRow = {
@@ -409,12 +374,9 @@ export type WeeklyStrongBacktestWeekMembers = {
   passing: WeeklyStrongBacktestMemberRow[];
 };
 
-// Fetches each pool member's full historical daily+weekly series exactly
-// ONCE (not once per week evaluated), then runs the canonical evaluator's
-// full-series pass in one call per instrument - this is the "don't fetch
-// the same instrument history 250 separate times" requirement. The
-// backfill job calls this directly and persists its output; nothing
-// recomputes this on a Dashboard read.
+// Fetches each pool member's full history once, then runs the evaluator's
+// full-series pass per instrument, instead of fetching per week evaluated.
+// The backfill job persists this output; nothing recomputes it on read.
 export async function computeWeeklyStrongBacktestMembers(
   instrumentRows: Array<{
     symbol: string;
@@ -503,14 +465,9 @@ export type SymbolWeeklyStrongSeriesInput = {
 };
 
 // Shared fetch+gate step for any per-symbol Weekly Strong evaluation - the
-// Scanner's live near-high scan (scanner/rules/near-250-week-high.ts, via
-// scanner.service.ts) and this file's own backtest below both need exactly
-// this: the same daily+weekly series, the same completed-week trim, the
-// same minimum-history gate. Factored out so the two call sites fetch and
-// gate identically and can't silently diverge on WHAT data they evaluate -
-// only computeSymbolBreakoutBacktest used to do this inline, and the live
-// scan used to run its own, different (weekly-only) query entirely. See
-// docs/KNOWN_ISSUES.md for the discrepancy this closes.
+// Scanner's live scan and this file's own backtest both need the same
+// daily+weekly series, completed-week trim, and minimum-history gate, so
+// they can't silently diverge on what data they evaluate.
 export async function getSymbolWeeklyStrongSeriesInput(
   symbol: string,
   exchange: string
@@ -539,12 +496,9 @@ export async function getSymbolWeeklyStrongSeriesInput(
   return { dailyRows, weeklyRows };
 }
 
-// Trade-by-trade backtest of the SAME two-condition breakout rule as
-// computeWeeklyStrongStocks above, for one symbol over its full available
-// history - this is what the Scanner's backtest stats overlay should be
-// showing. It previously used a weekly-only simplification (see
-// scanner/rules/near-250-week-high.ts) that silently dropped the daily
-// confirmation condition, which is why its numbers didn't match "our logic".
+// Trade-by-trade backtest of the same two-condition breakout rule as
+// computeWeeklyStrongStocks, for one symbol over its full available
+// history - powers the Scanner's backtest stats overlay.
 export async function computeSymbolBreakoutBacktest(
   symbol: string,
   exchange: string,
@@ -554,20 +508,15 @@ export async function computeSymbolBreakoutBacktest(
   if (!seriesInput) return null;
   const { dailyRows, weeklyRows } = seriesInput;
 
-  // lookbackWeeks is caller-chosen (Scanner's own lookback multiplier) -
-  // genuinely different orchestration from the fixed-window Weekly Strong
-  // screen elsewhere, so this window-size formula (unchanged from before)
-  // is preserved exactly rather than folded into the fixed defaults. Only
-  // the shared per-bar decision logic is now common.
+  // lookbackWeeks is caller-chosen (Scanner's lookback multiplier), kept
+  // separate from the fixed-window Weekly Strong screen elsewhere.
   const { dailyLookbackBars, weeklyLookbackBars } = deriveScannerLookbackBars(lookbackWeeks);
   const seriesPoints = evaluateWeeklyStrongSeries(dailyRows, weeklyRows, {
     dailyLookbackBars,
     weeklyLookbackBars,
   });
-  // Re-aligned back to weeklyRows' own indices by time, since the series
-  // evaluator (like the original loop here) can skip a leading stretch of
-  // weeks with no corresponding daily data yet - those stay `false`,
-  // matching the original matched[] array's default-false fill exactly.
+  // Re-aligned to weeklyRows by time - the evaluator can skip a leading
+  // stretch of weeks with no daily data yet; those default to `false`.
   const passesByTime = new Map(seriesPoints.map((point) => [point.time, point.passes]));
   const matched: boolean[] = weeklyRows.map((row) => passesByTime.get(row.time) ?? false);
 

@@ -70,13 +70,10 @@ export type WeeklyStrongBacktestBackfillResult = {
   totalMembersPersisted: number;
 };
 
-// One pass over each active member's full history (see
-// computeWeeklyStrongBacktestMembers - fetched once per instrument, not
-// once per week), then one transaction per week to persist. Idempotent:
-// rerunning upserts the run row and replaces its members, never
-// duplicates (see the unique constraint on collectionId+weekEnding+
-// membershipMode, and persistWeeklyStrongBacktestWeek's delete-then-insert
-// of members).
+// One pass over each member's full history (computeWeeklyStrongBacktestMembers
+// fetches once per instrument, not per week), then one transaction per
+// week. Idempotent: rerunning upserts the run row and replaces its members
+// (unique constraint on collectionId+weekEnding+membershipMode).
 export async function runWeeklyStrongBacktestBackfill(input: {
   collectionId: string;
   weeks?: number;
@@ -121,17 +118,13 @@ export async function runWeeklyStrongBacktestBackfill(input: {
 
 // ---------------------------------------------------------------------
 // Historical-membership rebuild (admin-triggered). Reuses this
-// collection's own already-persisted current_membership week list as the
-// reference week set (never inventing a second date-derivation path) -
-// a current_membership backfill must have run at least once first. For
-// each reference week, resolves the version actually effective then via
-// getCollectionMembershipAt, groups weeks by resolved version so each
-// distinct version's member pool is fetched/evaluated exactly once (same
-// "don't refetch per week" principle as the backfill above), and persists
-// historical_membership runs stamped with that exact membershipVersionId.
-// Weeks with no resolvable version (predate the earliest available
-// version) are reported in uncoveredWeeks and never fabricated from
-// today's active members.
+// collection's already-persisted current_membership week list as the
+// reference set - a current_membership backfill must run first. Resolves
+// the version effective for each week via getCollectionMembershipAt,
+// groups weeks by resolved version so each version's member pool is
+// evaluated once, and persists historical_membership runs stamped with
+// that version. Weeks that predate the earliest version are reported in
+// uncoveredWeeks, never fabricated from today's active members.
 // ---------------------------------------------------------------------
 
 export type WeeklyStrongBacktestHistoricalRebuildResult = {
@@ -248,15 +241,12 @@ export async function runWeeklyStrongBacktestHistoricalRebuild(input: {
 }
 
 // ---------------------------------------------------------------------
-// Weekly incremental (hooked into the existing 30-min instrument-sync job
-// - see worker.ts. Only touches collections that already have at least
-// one persisted current_membership run; never recomputes the full range.
-// Always keeps producing current_membership runs (cheap, always
-// available, used as the audit/fallback series). If the collection ALSO
-// has at least one membership version, additionally resolves the version
-// effective for that same newly-completed week and persists a
-// historical_membership run for it - never using today's active
-// membership blindly for that second run.
+// Weekly incremental (hooked into the 30-min instrument-sync job, see
+// worker.ts). Only touches collections with at least one persisted
+// current_membership run; never recomputes the full range. If the
+// collection also has a membership version, additionally resolves the
+// version effective for that week and persists a historical_membership
+// run for it - never using today's active membership for that run.
 // ---------------------------------------------------------------------
 
 export type WeeklyStrongBacktestIncrementalResult = {
@@ -385,11 +375,9 @@ export async function syncWeeklyStrongBacktestIncremental(
 // call this per week)
 // ---------------------------------------------------------------------
 
-// dbClient defaults to the real db - every real caller gets identical
-// behavior to before this parameter existed. It exists so this function's
-// idempotent-upsert transaction is directly testable with a fake client
-// (see weekly-strong-backtest.persistence.test.ts), the same tiny-seam
-// pattern replaceCandlesAtomically uses in market-data.service.ts.
+// dbClient defaults to the real db so real callers are unaffected; it
+// exists to make this idempotent-upsert transaction testable against a
+// fake client (see weekly-strong-backtest.persistence.test.ts).
 export async function persistWeeklyStrongBacktestWeek(
   collectionId: string,
   point: WeeklyStrongBacktestWeekMembers,

@@ -1,44 +1,26 @@
 import { date, index, jsonb, pgEnum, pgTable, timestamp, unique, uuid, varchar } from "drizzle-orm/pg-core";
 
-// The persisted, shared, multi-instance-safe store for "current" Dashboard
-// results (Relative Strength,
-// Weekly Strong) - the expensive years-of-candles computation now happens
-// at most once per invalidation cycle (a real market-data sync, an admin
-// import, or this row simply not existing yet) and gets READ from here on
-// every normal Dashboard request, instead of every request recomputing it
-// live. This intentionally reuses the project's existing shared database
-// (Neon Postgres) rather than introducing a new cache tier (e.g. Redis-as-
-// cache) - Postgres is already this app's one shared, persistent,
-// multi-instance-safe store (candles, backtest runs, membership versions
-// all already live here), and the existing Redis usage is scoped to the
-// BullMQ job queue only, and is itself optional/degraded in some
-// deployments (see worker.ts) - unsuitable as the SOURCE OF TRUTH for
-// something that must survive a restart.
+// Persisted, shared store for "current" Dashboard results (Relative
+// Strength, Weekly Strong) - the expensive candles computation runs at most
+// once per invalidation cycle and is read from here on every normal
+// request. Uses Postgres rather than a new cache tier since Redis here is
+// scoped to the BullMQ queue and is optional/degraded in some deployments
+// (see worker.ts) - unsuitable as a source of truth that must survive a restart.
 //
-// Two independent "pools" get snapshotted under this one table, hence the
-// generic scopeType/scopeKey pair rather than a bare collectionId column:
-//  - "collection": a market_collections row's own active-member pool
-//    (scopeKey = that collection's id) - backs the Sector/Industry cards
-//    and the Weekly Strong table/card.
-//  - "index_exchange": the index-instrument pool for one virtual index
-//    exchange, e.g. "BSE_IDX" (scopeKey = that exchange code) - backs the
-//    Index card. Indices aren't members of any market_collection, so this
-//    can't be keyed by collectionId at all.
+// scopeType/scopeKey is generic rather than a bare collectionId because two
+// independent pools are snapshotted here: "collection" (a market_collections
+// row's active-member pool, scopeKey = collection id) and "index_exchange"
+// (a virtual index exchange's instrument pool, scopeKey = exchange code -
+// indices aren't members of any market_collection).
 export const dashboardSnapshotScopeTypeEnum = pgEnum("dashboard_snapshot_scope_type", [
   "collection",
   "index_exchange",
 ]);
 
-// "relative_strength" holds the FULL base metrics array
-// (RelativeStrengthMetricRow[], pre-limit/pre-groupBy) - the Index card
-// (scope "index_exchange"), and the Sector/Industry cards (scope
-// "collection") are all cheaply DERIVED from this same stored base at read
-// time (pickTopRelativeStrengthRows / groupRelativeStrengthMetrics -
-// pure, no candle I/O), rather than each being its own separately
-// persisted/recomputed slice - the whole point is that the expensive base
-// calculation happens ONCE, not once per derived view.
-// "weekly_strong" (scope "collection" only) holds the passing-stocks
-// array (WeeklyStrongStockRow[]) computeWeeklyStrongStocks produces.
+// "relative_strength" holds the full base metrics array; the Index/Sector/
+// Industry cards each cheaply derive their own view from this one stored
+// base at read time, rather than each persisting its own recomputed slice.
+// "weekly_strong" holds the passing-stocks array (collection scope only).
 export const dashboardSnapshotMetricTypeEnum = pgEnum("dashboard_snapshot_metric_type", [
   "relative_strength",
   "weekly_strong",
@@ -49,52 +31,32 @@ export const dashboardMetricSnapshots = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     scopeType: dashboardSnapshotScopeTypeEnum("scope_type").notNull(),
-    // A collection id (uuid, stored as text) or an index exchange code
-    // ("BSE_IDX") depending on scopeType - never both meanings in the same
-    // row, enforced at the application layer (not a DB constraint, since
-    // Postgres has no clean way to make a text column conditionally FK
-    // one of two different tables).
+    // A collection id or index exchange code depending on scopeType -
+    // enforced at the application layer, not a DB constraint (Postgres
+    // can't conditionally FK one of two different tables).
     scopeKey: varchar("scope_key", { length: 64 }).notNull(),
     metricType: dashboardSnapshotMetricTypeEnum("metric_type").notNull(),
-    // The real equity exchange candles were actually read from (e.g.
-    // "BSE") - kept for traceability/debugging even though it's usually
-    // derivable from the collection, since "index_exchange" scope rows
+    // The equity exchange candles were actually read from - kept for
+    // traceability, and required for "index_exchange" scope rows, which
     // have no collection to derive it from.
     exchange: varchar("exchange", { length: 16 }).notNull(),
-    // The latest expected trading day as of generation - not a formula
-    // detail, just "what market date does this snapshot reflect", so a
-    // stale-looking snapshot can be reasoned about without re-deriving it
-    // from generatedAt (which is a wall-clock timestamp, not a market
-    // date).
+    // The market date this snapshot reflects (not derivable from
+    // generatedAt, a wall-clock timestamp).
     asOfDate: date("as_of_date").notNull(),
-    // A version tag for whichever calculation produced this snapshot
-    // (e.g. "relative-strength-v1", or the shared
-    // WEEKLY_STRONG_EVALUATOR_VERSION for metricType="weekly_strong") -
-    // not a hash of the proprietary formula, just an identifier so a
-    // future intentional logic change can tell old and new snapshots
-    // apart and never silently serves a result computed by a superseded
-    // formula version.
+    // Identifies which calculation version produced this snapshot - not a
+    // hash of the proprietary formula, just a label so a future logic
+    // change can't silently serve a result from a superseded version.
     evaluatorVersion: varchar("evaluator_version", { length: 32 }).notNull(),
-    // The actual computed result (RelativeStrengthMetricRow[] or
-    // WeeklyStrongStockRow[], depending on metricType) - never the
-    // calculation logic itself, only its numeric output. Typed only as
-    // `unknown[]` here (not the specific row union) rather than importing
-    // those row types from market-data.service.ts, which would recreate
-    // the exact import cycle this file's own module-level comment already
-    // explains it avoids - schema files sit below almost every other
-    // module, including market-data.service.ts itself via db/schema's
-    // barrel. Callers narrow to the real row type with a generic `as T`
-    // (see dashboard-snapshot-store.ts's readDashboardSnapshot<T>) - this
-    // annotation's job is only to guarantee "always an array", which is
-    // true for both known payload kinds and wasn't enforced at all before.
+    // The computed result only, never calculation logic. Typed as
+    // `unknown[]` rather than importing market-data's row types, which
+    // would create an import cycle (schema sits below most other modules);
+    // callers narrow with `as T` (see dashboard-snapshot-store.ts).
     payload: jsonb("payload").$type<unknown[]>().notNull(),
     generatedAt: timestamp("generated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    // One current snapshot per (scope, metric) - this table holds "the
-    // current result", not a history (Backtest already covers the
-    // historical dimension separately) - a fresh compute upserts in
-    // place rather than accumulating rows.
+    // One current snapshot per (scope, metric) - holds "the current
+    // result" only; a fresh compute upserts in place.
     scopeMetricUnique: unique().on(table.scopeType, table.scopeKey, table.metricType),
     scopeIdx: index("dashboard_metric_snapshots_scope_idx").on(table.scopeType, table.scopeKey),
   })

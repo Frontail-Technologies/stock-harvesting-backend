@@ -33,23 +33,17 @@ export type CollectionMembershipAt = {
 
 export type CollectionVersionEffectiveFromRow = { id: string; effectiveFrom: string };
 
-// The point-in-time decision as a pure function, directly unit-testable
-// (see market-collection-versions.test.ts) without a live database: among
-// versions belonging to one collection, pick the one with the latest
-// effectiveFrom that is still <= asOfDate. Returns null - never falling
-// back to some other version - when asOfDate predates every available
-// version's effectiveFrom, never a silent current-membership fallback.
+// Pure point-in-time decision (see market-collection-versions.test.ts):
+// among a collection's versions, picks the one with the latest
+// effectiveFrom that is still <= asOfDate, or null if none qualify - never
+// a silent fallback to some other version.
 //
-// NOT used by the single-lookup path below (getCollectionMembershipAt) -
-// that stays a single, efficient, server-side WHERE+ORDER+LIMIT(1) query,
-// since Postgres doing that comparison is strictly better than fetching
-// every version and comparing in JS for a single date. This function's
-// real production caller is the BATCH resolver further down
-// (resolveMembershipVersionsForDates), which genuinely benefits from
-// fetching a collection's full version list ONCE (always small - a
-// handful over a collection's lifetime, never thousands) and then
-// resolving up to 250 dates against it in memory, instead of running the
-// single-lookup query up to 250 times.
+// Not used by the single-lookup path below (getCollectionMembershipAt) -
+// that stays a single server-side WHERE+ORDER+LIMIT(1) query, strictly
+// cheaper than fetching every version for one date. This powers the BATCH
+// resolver instead (resolveMembershipVersionsForDates), which fetches a
+// collection's full version list once and resolves many dates against it
+// in memory rather than one query per date.
 export function selectApplicableVersion(
   versions: CollectionVersionEffectiveFromRow[],
   asOfDate: string
@@ -66,12 +60,9 @@ async function fetchMembersForVersion(
   version: CollectionVersionEffectiveFromRow,
   dbClient: DbOrTx
 ): Promise<CollectionMembershipAt> {
-  // sector/industry are joined live from `instruments` - "best current
-  // classification knowledge" - deliberately not frozen at import time
-  // (see the schema file's own comment). This mirrors exactly how
-  // getActiveMemberInstrumentRows already joins instruments for the
-  // current_membership path, so a historical run's sector grouping is
-  // computed the same way a current run's is.
+  // sector/industry are joined live from `instruments` (best current
+  // classification, deliberately not frozen at import time), matching how
+  // getActiveMemberInstrumentRows joins for the current_membership path.
   const members = await dbClient
     .select({
       instrumentId: marketCollectionVersionMembers.instrumentId,
@@ -88,11 +79,8 @@ async function fetchMembersForVersion(
   return { versionId: version.id, effectiveFrom: version.effectiveFrom, members };
 }
 
-// dbClient defaults to the real db - every real caller gets identical
-// behavior to before this parameter existed. It exists so this function's
-// members-join query is directly testable with a fake client, the same
-// tiny-seam pattern replaceCandlesAtomically already uses in
-// market-data.service.ts.
+// dbClient defaults to the real db so real callers are unaffected; it
+// exists to make this testable against a fake client.
 export async function getCollectionMembershipAt(
   collectionId: string,
   asOfDate: string,
@@ -118,16 +106,11 @@ export async function getCollectionMembershipAt(
   return fetchMembersForVersion(version, dbClient);
 }
 
-// Batch form for the historical rebuild: given several distinct dates,
-// resolves the applicable version (and its full members) for each one, so
-// the rebuild service can group weeks by resolved version without one
-// query per week. Unlike getCollectionMembershipAt, this DOES fetch every
-// version for the collection up front (always small - a handful over a
-// collection's lifetime) via selectApplicableVersion, since resolving up
-// to 250 dates one-SQL-query-at-a-time would be up to 250 round trips
-// against the same small version set. Member rows are then fetched once
-// per DISTINCT resolved version (not once per date), since many dates
-// commonly resolve to the same version.
+// Batch form for the historical rebuild: resolves the applicable version
+// (and members) for several dates without one query per date. Fetches a
+// collection's version list once (always small) via selectApplicableVersion,
+// then fetches member rows once per distinct resolved version, since many
+// dates commonly resolve to the same version.
 export async function resolveMembershipVersionsForDates(
   collectionId: string,
   asOfDates: string[],
@@ -195,11 +178,9 @@ export async function listCollectionVersions(collectionId: string): Promise<Coll
     .orderBy(desc(marketCollectionVersions.effectiveFrom));
 
   const todayIso = new Date().toISOString().slice(0, 10);
-  // Rows are newest-first. The first row whose effectiveFrom <= today is
-  // "current" (the exact same selection getCollectionMembershipAt would
-  // make for asOfDate = today); everything before it in this order has a
-  // future effectiveFrom ("scheduled"); everything after it is
-  // "superseded".
+  // Rows are newest-first: the first with effectiveFrom <= today is
+  // "current" (same selection getCollectionMembershipAt makes for today);
+  // rows before it are "scheduled" (future), after it are "superseded".
   const currentIndex = rows.findIndex((row) => row.effectiveFrom <= todayIso);
 
   return rows.map((row, index) => ({
@@ -249,12 +230,10 @@ export async function getCollectionVersionMembers(collectionId: string, versionI
 }
 
 // ---------------------------------------------------------------------
-// Explicit replace/correction workflow - the ONLY sanctioned
-// way to change an already-created version's member list. Never called
-// implicitly by a normal upload (importCollectionCsv rejects re-use of an
-// existing effectiveFrom instead - see market-collections.service.ts).
-// effectiveFrom itself is never editable here, by design: a correction
-// fixes what the constituent list *was*, not when it took effect.
+// Explicit replace/correction workflow - the only sanctioned way to
+// change an already-created version's member list. effectiveFrom is never
+// editable here: a correction fixes what the list *was*, not when it took
+// effect.
 // ---------------------------------------------------------------------
 
 export async function replaceCollectionVersionMembers(input: {
@@ -285,14 +264,10 @@ export async function replaceCollectionVersionMembers(input: {
   const unmatched = candidateSymbols.filter((symbol) => !instrumentIdBySymbol.has(symbol));
   const matchedSymbols = candidateSymbols.filter((symbol) => instrumentIdBySymbol.has(symbol));
 
-  // Weeks that were evaluated against this version's OLD member list are
-  // now wrong - safeguard: delete those historical_membership runs (their
-  // own members cascade with them via runId) rather than leave stale/
-  // incorrect data on the Dashboard. This is a targeted invalidation
-  // scoped to exactly this version - rebuilding only the necessary
-  // historical range, never blindly recomputing every collection - and
-  // not an automatic recompute either: admin must explicitly re-run "Rebuild
-  // Historical Backtest" afterward to regenerate these weeks.
+  // Weeks evaluated against this version's old member list are now wrong -
+  // delete those historical_membership runs (members cascade via runId)
+  // rather than leave stale data. Scoped to just this version; not an
+  // automatic recompute - admin must re-run "Rebuild Historical Backtest".
   const affectedRuns = await db
     .select({ weekEnding: weeklyStrongBacktestRuns.weekEnding })
     .from(weeklyStrongBacktestRuns)

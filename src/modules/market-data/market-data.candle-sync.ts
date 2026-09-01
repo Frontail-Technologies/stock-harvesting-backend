@@ -18,14 +18,11 @@ import { ensureInstrumentsForSymbols, getOrCreateInstrument } from "./market-dat
 import { getDateDaysAgo, getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
 import { deleteDashboardSnapshots } from "./dashboard-snapshot-store";
 
-// Provider-backed candle synchronization / refresh orchestration: full-range
+// Provider-backed candle synchronization/refresh orchestration: full-range
 // backfill, latest-daily-candle sync, full-market price refresh, and the
-// in-flight/cooldown single-flight wrappers the chart-read facade
-// (getChartCandles, still in market-data.service.ts) calls into. Deliberately
-// does NOT own: the freshness DECISION (decideChartCandleFreshnessAction and
-// friends stay pure and local to the service, unchanged), metric-input
-// composition, FX, or listStocks orchestration - those still call into this
-// module rather than the other way around.
+// in-flight/cooldown single-flight wrappers getChartCandles calls into.
+// Does not own the freshness decision itself (stays pure in the service) or
+// metric-input/FX/listStocks orchestration - those call into this module.
 
 async function safeProviderAction<T>(action: string, run: () => Promise<T>): Promise<T | null> {
   try {
@@ -375,13 +372,10 @@ const INDEX_EXCHANGE_BY_EQUITY_EXCHANGE: Record<string, string> = {
   BSE: GLOBAL_DATAFEEDS_INDEX_EXCHANGE,
 };
 
-// The authoritative invalidation trigger: clears every
-// persisted Dashboard snapshot whose underlying candle pool could have
-// just changed for this equity exchange - every active collection on it,
-// plus its corresponding index-exchange snapshot. Deletes only; the next
-// actual Dashboard read for each affected scope recomputes and
-// re-persists on its own (see dashboard-snapshots.service.ts /
-// market-data.service.ts's getIndexRelativeStrength).
+// Clears every persisted Dashboard snapshot whose candle pool could have
+// changed for this exchange - every active collection plus its
+// index-exchange snapshot. Deletes only; the next read recomputes and
+// re-persists on its own.
 async function invalidateDashboardSnapshotsForExchange(exchange: string) {
   const collectionRows = await db
     .select({ id: marketCollections.id })
@@ -417,23 +411,10 @@ export async function refreshAllLatestInstrumentPrices(exchange: string = DEFAUL
     refreshed += result?.insertedDaily ?? 0;
   }
 
-  // This is what actually changes the candle data the
-  // Dashboard's persisted "current" snapshots (Relative Strength, Weekly
-  // Strong - see dashboard-snapshot-store.ts) are derived from.
-  // Invalidating them HERE, right after a real refresh, is the
-  // AUTHORITATIVE trigger the report calls for - not a fixed TTL. Deletes
-  // rather than recomputes inline: this runs as part of the existing
-  // sync job (already a background/admin-triggered operation, not a
-  // request a viewer is waiting on), so eagerly recomputing every
-  // affected collection here - including ones nobody is currently
-  // viewing, like the large auto-generated BSE-CLASSIFIED pool - would
-  // waste real work. Deleting means the very next Dashboard read (for
-  // whichever collection a real viewer actually opens) recomputes once
-  // and re-persists; collections nobody opens between syncs never pay
-  // the cost at all. Only invalidating when at least one candle actually
-  // changed (`refreshed > 0`) avoids doing even that for a sync that
-  // found nothing new (e.g. outside market hours, or every symbol
-  // failed).
+  // Authoritative invalidation trigger for the Dashboard's persisted
+  // snapshots (not a fixed TTL) - deletes rather than recomputes inline, so
+  // collections nobody opens between syncs never pay the recompute cost.
+  // Only invalidates when a candle actually changed.
   if (refreshed > 0) {
     await invalidateDashboardSnapshotsForExchange(exchange);
   }
