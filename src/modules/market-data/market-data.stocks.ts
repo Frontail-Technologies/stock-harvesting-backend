@@ -10,12 +10,12 @@ import type { MoveFilter } from "./market-data.schemas";
 // response-row shaping - the pure DB-read half of "list/search stocks".
 // Deliberately does NOT own: the on-demand provider hydration decisions
 // (listStocks/listStocksUncached in market-data.service.ts) - those need
-// safeProviderAction/hydrateDefaultMarketInstruments/
-// syncProviderInstrumentSearch/syncLatestDailyCandlesForSymbols, which stay
-// in the service (provider-sync orchestration), so moving the orchestration
-// wrapper here would create a market-data.stocks.ts -> market-data.service.ts
-// -> market-data.stocks.ts import cycle. The service calls into this
-// module's reads; this module never calls back into the service.
+// safeProviderAction and syncLatestDailyCandlesForSymbols, which still stay
+// directly in the service (candle-sync/backfill orchestration, not yet
+// extracted), so moving the orchestration wrapper here would create a
+// market-data.stocks.ts -> market-data.service.ts -> market-data.stocks.ts
+// import cycle. The service calls into this module's reads; this module
+// never calls back into the service.
 
 export type StockSortField = "symbol" | "name" | "close" | "changePct" | "volume";
 export type StockSortDirection = "asc" | "desc";

@@ -12,10 +12,9 @@ import {
 
 // Instrument-table DB operations (lookup, fallback creation, bulk upsert,
 // latest-stats writes) that don't need provider-search/backfill
-// orchestration. getOrCreateInstrument stays in market-data.service.ts
+// orchestration. getOrCreateInstrument lives in market-data.instrument-sync.ts
 // instead of here because it falls back to ensureInstrumentsForSymbols
-// (a provider-orchestration function) on a miss - moving it here would
-// create a module → service → module import cycle.
+// (a provider-orchestration function) on a miss.
 
 const INSTRUMENT_UPSERT_CHUNK_SIZE = 500;
 // 6 params/row (symbol + 5 stat columns; updatedAt uses now(), not a

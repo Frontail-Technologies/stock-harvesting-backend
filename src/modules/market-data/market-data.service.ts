@@ -48,14 +48,19 @@ import {
 } from "./market-data.candles";
 import {
   applyLatestInstrumentStats,
-  createFallbackInstrument,
   dedupeInstrumentUpsertInputs,
   getInstrumentsBySymbol,
   refreshLatestInstrumentStats,
-  upsertInstruments,
   type InstrumentUpsertInput,
   type LatestInstrumentStat,
 } from "./market-data.instruments";
+import {
+  ensureInstrumentsForSymbols,
+  getOrCreateInstrument,
+  hydrateDefaultMarketInstruments,
+  syncProviderInstrumentSearch,
+  syncProviderInstruments,
+} from "./market-data.instrument-sync";
 import {
   countStockRows,
   NSE_NORMAL_EQUITY_SYMBOL_PATTERN,
@@ -84,31 +89,7 @@ import {
 } from "./weekly-strong-evaluator";
 
 const CHART_HISTORY_YEARS = 30;
-const DEFAULT_MARKET_SYMBOLS_BY_EXCHANGE: Record<string, readonly string[]> = {
-  US: ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "JPM", "V", "UNH", "XOM", "AVGO"],
-  NSE: [
-    "RELIANCE",
-    "TCS",
-    "INFY",
-    "HDFCBANK",
-    "ICICIBANK",
-    "SBIN",
-    "BHARTIARTL",
-    "ITC",
-    "LT",
-    "HINDUNILVR",
-    "KOTAKBANK",
-    "AXISBANK",
-  ],
-};
 const FAILED_LATEST_CANDLE_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
-const INSTRUMENT_UPSERT_CHUNK_SIZE = 500;
-// 6 params/row (symbol + 5 stat columns; updatedAt uses now(), not a
-// per-row param) x 500 = 3,000 params/statement - comfortably under
-// Postgres's 65,535-parameter protocol limit, matching every other bulk
-// chunk size already used in this file/module (CANDLE_UPSERT_CHUNK_SIZE,
-// INSTRUMENT_UPSERT_CHUNK_SIZE, sector-classification.service.ts's
-// CLASSIFICATION_UPDATE_CHUNK_SIZE).
 const MIN_FULL_MARKET_INSTRUMENTS = 1_000;
 const RELATIVE_STRENGTH_SEED_BACKFILL_LIMIT = 20;
 const LIST_STOCKS_CACHE_TTL_MS = 20_000;
@@ -1279,27 +1260,9 @@ export function calculate55DayChange(dailyRows: MetricCandle[]): number {
   return ((latest.close - base.close) * 100) / base.close;
 }
 
-export async function syncProviderInstruments(exchange: string = DEFAULT_EXCHANGE) {
-  const adapter = await getEligibleProviderAdapter({ exchange, capability: "instrument_sync" });
-  if (!adapter) return { count: 0 };
-
-  const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
-  let providerInstruments;
-  try {
-    providerInstruments = await adapter.fetchInstruments({
-      accessToken,
-      exchangeCode: exchange,
-    });
-    void recordProviderSuccess(adapter.providerKey);
-  } catch (error) {
-    void recordProviderFailure(adapter.providerKey, error);
-    throw error;
-  }
-
-  await upsertInstruments(providerInstruments, adapter.providerKey);
-
-  return { count: providerInstruments.length };
-}
+// Implementation lives in market-data.instrument-sync.ts; re-exported here
+// so existing imports (admin.service.ts, worker.ts) keep working.
+export { syncProviderInstruments };
 
 export async function backfillDailyCandles(
   input: {
@@ -1842,113 +1805,6 @@ function markLatestCandleSyncFailed(symbol: string) {
   failedLatestCandleSyncAtBySymbol.set(normalizeSymbol(symbol), Date.now());
 }
 
-async function ensureInstrumentsForSymbols(
-  symbols: string[],
-  exchange: string = DEFAULT_EXCHANGE
-) {
-  const existing = await getInstrumentsBySymbol(symbols, exchange);
-  const missingSymbols = symbols.filter((symbol) => !existing.has(symbol));
-
-  if (missingSymbols.length === 0) return;
-
-  for (const symbol of missingSymbols) {
-    await syncProviderInstrumentSearch(symbol, exchange);
-  }
-
-  const synced = await getInstrumentsBySymbol(missingSymbols, exchange);
-  const stillMissingSymbols = missingSymbols.filter((symbol) => !synced.has(symbol));
-  if (!(await canCreateFallbackInstrument(exchange))) return;
-
-  for (const symbol of stillMissingSymbols) {
-    await createFallbackInstrument(symbol, exchange);
-  }
-}
-
-async function syncProviderInstrumentSearch(
-  query: string,
-  exchange: string = DEFAULT_EXCHANGE
-) {
-  const searchQuery = normalizeSymbol(query);
-  // No eligible provider AND "eligible but doesn't implement search" (e.g.
-  // Zerodha for NSE) both land here - either way, the existing fallback is
-  // the same: a full instrument sync through this exchange's own primary
-  // provider, which is itself independently eligibility-gated already.
-  const adapter = await getEligibleProviderAdapter({ exchange, capability: "instrument_search" });
-  if (!adapter || !adapter.searchInstruments) {
-    await syncProviderInstruments(exchange);
-    return { count: 0 };
-  }
-
-  let providerInstruments;
-  try {
-    providerInstruments = await adapter.searchInstruments(searchQuery, exchange);
-    void recordProviderSuccess(adapter.providerKey);
-  } catch (error) {
-    void recordProviderFailure(adapter.providerKey, error);
-    throw error;
-  }
-
-  if (providerInstruments.length === 0) {
-    if (!(await canCreateFallbackInstrument(exchange))) return { count: 0 };
-    await createFallbackInstrument(searchQuery, exchange);
-    return { count: 1 };
-  }
-
-  await upsertInstruments(providerInstruments, adapter.providerKey);
-
-  return { count: providerInstruments.length };
-}
-
-async function hydrateDefaultFallbackInstruments(exchange: string = DEFAULT_EXCHANGE) {
-  if (!(await canCreateFallbackInstrument(exchange))) return { count: 0 };
-
-  // Only a curated list for this exact exchange is safe to seed - falling
-  // back to DEFAULT_EXCHANGE's list here would silently seed US tickers
-  // (AAPL, MSFT, ...) onto an unrelated exchange. The primary path (a full
-  // syncProviderInstruments pull) already handles real seeding for any
-  // exchange without needing a curated list at all; this fallback only
-  // exists for the handful of exchanges with a hand-picked list.
-  const defaultSymbols = DEFAULT_MARKET_SYMBOLS_BY_EXCHANGE[exchange];
-  if (!defaultSymbols) return { count: 0 };
-
-  let count = 0;
-
-  for (const symbol of defaultSymbols) {
-    try {
-      const result = await syncProviderInstrumentSearch(symbol, exchange);
-      count += result.count;
-    } catch {
-      await createFallbackInstrument(symbol, exchange);
-      count++;
-    }
-  }
-
-  return { count };
-}
-
-async function canCreateFallbackInstrument(exchange: string) {
-  const adapter = await getEligibleProviderAdapter({ exchange, capability: "instrument_token" });
-  return Boolean(adapter?.getInstrumentToken);
-}
-
-async function hydrateDefaultMarketInstruments(exchange: string = DEFAULT_EXCHANGE) {
-  try {
-    const result = await syncProviderInstruments(exchange);
-    if (result.count > 0) return result;
-  } catch (error) {
-    // Best-effort by design: falls back to the static default list rather
-    // than failing the request - this is still worth a low-noise trace so
-    // a persistently-failing provider sync isn't completely invisible.
-    logger.warn(
-      { exchange, message: getErrorMessage(error) },
-      "Provider instrument sync failed; falling back to default instrument list"
-    );
-    return hydrateDefaultFallbackInstruments(exchange);
-  }
-
-  return hydrateDefaultFallbackInstruments(exchange);
-}
-
 async function safeProviderAction<T>(
   action: string,
   run: () => Promise<T>
@@ -2025,39 +1881,6 @@ function getSafeProviderErrorMessage(error: unknown) {
   if (!sqlLikeMessage) return message;
 
   return firstLine.length > 300 ? `${firstLine.slice(0, 300)}...` : firstLine;
-}
-
-async function getOrCreateInstrument(
-  symbol: string,
-  exchange: string = DEFAULT_EXCHANGE,
-  dbClient: DbOrTx = db
-) {
-  const [instrument] = await dbClient
-    .select()
-    .from(instruments)
-    .where(
-      and(
-        eq(instruments.exchange, exchange),
-        eq(instruments.symbol, normalizeSymbol(symbol))
-      )
-    )
-    .limit(1);
-
-  if (instrument) return instrument;
-
-  await ensureInstrumentsForSymbols([symbol], exchange);
-  const [created] = await dbClient
-    .select()
-    .from(instruments)
-    .where(
-      and(
-        eq(instruments.exchange, exchange),
-        eq(instruments.symbol, normalizeSymbol(symbol))
-      )
-    )
-    .limit(1);
-
-  return created;
 }
 
 function getTodayDate() {
