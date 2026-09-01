@@ -57,6 +57,16 @@ import {
   type LatestInstrumentStat,
 } from "./market-data.instruments";
 import {
+  countStockRows,
+  NSE_NORMAL_EQUITY_SYMBOL_PATTERN,
+  readStockRows,
+  readUnpricedStockSymbols,
+  searchChartEligibleBseStocks,
+  toStockListResponse,
+  type StockSortDirection,
+  type StockSortField,
+} from "./market-data.stocks";
+import {
   deleteDashboardSnapshots,
   readDashboardSnapshotWithMeta,
   RELATIVE_STRENGTH_SNAPSHOT_VERSION,
@@ -99,25 +109,17 @@ const INSTRUMENT_UPSERT_CHUNK_SIZE = 500;
 // chunk size already used in this file/module (CANDLE_UPSERT_CHUNK_SIZE,
 // INSTRUMENT_UPSERT_CHUNK_SIZE, sector-classification.service.ts's
 // CLASSIFICATION_UPDATE_CHUNK_SIZE).
-const INSTRUMENT_STATS_UPDATE_CHUNK_SIZE = 500;
 const MIN_FULL_MARKET_INSTRUMENTS = 1_000;
 const RELATIVE_STRENGTH_SEED_BACKFILL_LIMIT = 20;
 const LIST_STOCKS_CACHE_TTL_MS = 20_000;
-export const NSE_NORMAL_EQUITY_SYMBOL_PATTERN = "^[A-Z][A-Z0-9&-]*$";
-// Bond/NCD "New" series tickers (e.g. "AAFS27A-N0", "826TN25-N3") all end in
-// -N<digits> regardless of what precedes it - the previous pattern required
-// the symbol to also start with a digit, so letter-prefixed debt series
-// tickers slipped through the exclusion entirely.
-const NSE_DEBT_SERIES_SYMBOL_PATTERN = "-N[0-9]+$";
-const NSE_NON_EQ_SERIES_SYMBOL_PATTERN = "-(BE|BZ|SM|ST|SZ|E[0-9]+)$";
+// Implementation now lives in market-data.stocks.ts; re-exported here so
+// existing imports (e.g. market-collections.service.ts) keep working.
+export { NSE_NORMAL_EQUITY_SYMBOL_PATTERN };
 const failedLatestCandleSyncAtBySymbol = new Map<string, number>();
 const chartBackfillPromises = new Map<string, Promise<unknown>>();
 const completedChartBackfillAtByKey = new Map<string, number>();
 const COMPLETED_CHART_BACKFILL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const latestCandleRefreshPromises = new Map<string, Promise<unknown>>();
-
-type StockSortField = "symbol" | "name" | "close" | "changePct" | "volume";
-type StockSortDirection = "asc" | "desc";
 
 function isRealtimePricedStockListExchange(exchange: string) {
   return exchange === "BSE" || exchange === "BSE_IDX";
@@ -283,15 +285,7 @@ async function listStocksUncached(input: {
   }
 
   return {
-    stocks: rows.map((row) => ({
-      symbol: row.symbol,
-      name: row.name,
-      exchange: row.exchange,
-      close: row.close === null ? undefined : Number(row.close),
-      changePct: row.changePct === null ? undefined : Number(row.changePct),
-      volume: row.volume === null ? undefined : Number(row.volume),
-      open: row.open === null ? undefined : Number(row.open),
-    })),
+    stocks: toStockListResponse(rows),
     pagination: {
       page: input.page,
       limit: input.limit,
@@ -779,53 +773,6 @@ function buildBreakoutTrade(
   };
 }
 
-function buildStockFilters(input: {
-  q?: string;
-  exchange: string;
-  moveFilter?: MoveFilter;
-  minVolume?: number;
-  includeUnpriced?: boolean;
-}) {
-  const filters = [
-    eq(instruments.exchange, input.exchange),
-    eq(instruments.active, true),
-    // Excludes Morningstar-style fund identifiers (e.g. "0P0001Y872") that
-    // the provider's instrument search occasionally returns alongside real
-    // tradeable tickers - no genuine stock symbol starts with a digit.
-    not(ilike(instruments.symbol, "0%")),
-    input.includeUnpriced ? undefined : gt(instruments.latestClose, "0"),
-    input.exchange === "NSE"
-      ? eq(instruments.provider, DATA_PROVIDER_KEY.zerodha)
-      : undefined,
-    input.exchange === "NSE"
-      ? sql`${instruments.symbol} ~ ${NSE_NORMAL_EQUITY_SYMBOL_PATTERN}`
-      : undefined,
-    input.exchange === "NSE"
-      ? not(sql`${instruments.symbol} ~ ${NSE_DEBT_SERIES_SYMBOL_PATTERN}`)
-      : undefined,
-    input.exchange === "NSE"
-      ? not(sql`${instruments.symbol} ~ ${NSE_NON_EQ_SERIES_SYMBOL_PATTERN}`)
-      : undefined,
-    input.q
-      ? or(
-          ilike(instruments.symbol, `%${normalizeSymbol(input.q)}%`),
-          ilike(instruments.name, `%${input.q.trim()}%`)
-        )
-      : undefined,
-    // NULL latestChangePct (not yet computed) naturally falls out of all
-    // three comparisons below, so a stock without complete data is never
-    // miscategorized as a gainer/decliner/unchanged.
-    input.moveFilter === "gainers" ? gt(instruments.latestChangePct, "0") : undefined,
-    input.moveFilter === "decliners" ? lt(instruments.latestChangePct, "0") : undefined,
-    input.moveFilter === "unchanged" ? eq(instruments.latestChangePct, "0") : undefined,
-    input.minVolume !== undefined
-      ? gte(instruments.latestVolume, String(input.minVolume))
-      : undefined,
-  ].filter(Boolean);
-
-  return and(...filters);
-}
-
 // All 4 dashboard cards rank by the same 55-day change % now (see
 // RelativeStrengthMetricRow.change55dPct), so this is a single top-N
 // selection rather than a union across 4 separately-ranked metrics.
@@ -839,140 +786,10 @@ export function pickTopRelativeStrengthRows(
   return [...rows].sort((a, b) => b.change55dPct - a.change55dPct).slice(0, limit);
 }
 
-async function countStockRows(input: {
-  q?: string;
-  exchange: string;
-  moveFilter?: MoveFilter;
-  minVolume?: number;
-  includeUnpriced?: boolean;
-}) {
-  const [result] = await db
-    .select({ total: count() })
-    .from(instruments)
-    .where(buildStockFilters(input));
-
-  return result?.total ?? 0;
-}
-
-function buildStockOrderBy(sortBy: StockSortField = "name", sortDirection: StockSortDirection = "asc") {
-  const direction = sortDirection === "desc" ? desc : asc;
-  const primaryColumn =
-    sortBy === "symbol"
-      ? instruments.symbol
-      : sortBy === "name"
-        ? instruments.name
-        : sortBy === "close"
-          ? instruments.latestClose
-          : sortBy === "changePct"
-            ? instruments.latestChangePct
-            : instruments.latestVolume;
-  const tiebreakerColumn = instruments.symbol;
-
-  return [direction(primaryColumn), asc(tiebreakerColumn)];
-}
-
-async function readStockRows(input: {
-  q?: string;
-  page: number;
-  limit: number;
-  sortBy?: StockSortField;
-  sortDirection?: StockSortDirection;
-  exchange: string;
-  moveFilter?: MoveFilter;
-  minVolume?: number;
-  includeUnpriced?: boolean;
-}) {
-  const offset = (input.page - 1) * input.limit;
-
-  const rows = await db
-    .select({
-      symbol: instruments.symbol,
-      name: instruments.name,
-      exchange: instruments.exchange,
-      close: instruments.latestClose,
-      open: instruments.latestOpen,
-      volume: instruments.latestVolume,
-      changePct: instruments.latestChangePct,
-    })
-    .from(instruments)
-    .where(buildStockFilters(input))
-    .orderBy(...buildStockOrderBy(input.sortBy, input.sortDirection))
-    .limit(input.limit)
-    .offset(offset);
-
-  return rows;
-}
-
-// Watchlist/Charts stock-selection picker only - always BSE, and always
-// restricted to instruments with at least one stored 1D candle row, so a
-// result can never open to an empty chart. Deliberately its own simple
-// query rather than a mode of listStocks(): no provider hydration, no
-// cache, no multi-exchange branching - just an indexed read, so typing
-// in this picker never triggers a provider call. The EXISTS subquery
-// reuses the existing (exchange, symbol, timeframe, time) unique index
-// on candles (its leading three columns already cover this lookup) - no
-// new index needed.
-export async function searchChartEligibleBseStocks(input: { q: string; limit: number }) {
-  const rows = await db
-    .select({
-      symbol: instruments.symbol,
-      name: instruments.name,
-      exchange: instruments.exchange,
-      close: instruments.latestClose,
-      open: instruments.latestOpen,
-      volume: instruments.latestVolume,
-      changePct: instruments.latestChangePct,
-    })
-    .from(instruments)
-    .where(
-      and(
-        eq(instruments.exchange, "BSE"),
-        eq(instruments.active, true),
-        not(ilike(instruments.symbol, "0%")),
-        or(
-          ilike(instruments.symbol, `%${normalizeSymbol(input.q)}%`),
-          ilike(instruments.name, `%${input.q.trim()}%`)
-        ),
-        sql`EXISTS (
-          SELECT 1 FROM ${candles}
-          WHERE ${candles.exchange} = ${instruments.exchange}
-            AND ${candles.symbol} = ${instruments.symbol}
-            AND ${candles.timeframe} = ${CANDLE_TIMEFRAME.day}
-        )`
-      )
-    )
-    .orderBy(asc(instruments.symbol))
-    .limit(input.limit);
-
-  return rows;
-}
-
-async function readUnpricedStockSymbols(
-  input: {
-    q?: string;
-    exchange: string;
-    moveFilter?: MoveFilter;
-    minVolume?: number;
-  },
-  limit: number
-) {
-  const rows = await db
-    .select({ symbol: instruments.symbol })
-    .from(instruments)
-    .where(
-      and(
-        buildStockFilters({ ...input, includeUnpriced: true }),
-        or(
-          sql`${instruments.latestClose} IS NULL`,
-          lte(instruments.latestClose, "0")
-        )
-      )
-    )
-    .orderBy(asc(instruments.symbol))
-    .limit(limit);
-
-  return rows.map((row) => row.symbol);
-}
+// Watchlist/Charts stock-selection picker (BSE-only, candle-eligible
+// only). Implementation lives in market-data.stocks.ts; re-exported here
+// so existing imports (e.g. market-data.routes.ts) keep working.
+export { searchChartEligibleBseStocks };
 
 export async function getChartHistoryRange(input: {
   symbol: string;
