@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gt, gte, ilike, inArray, lt, lte, not, or, s
 
 import { db } from "../../db/client";
 import { candles, instruments } from "../../db/schema";
-import { getDateDaysAgo, getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
+import { getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
 import { getOrSetCache } from "../../shared/cache";
 import { logger } from "../../shared/logger";
 import { getErrorMessage } from "../../shared/errors";
@@ -607,85 +607,6 @@ export async function listSupportedExchanges(): Promise<ProviderExchange[]> {
   });
 }
 
-const FOREX_EXCHANGE = "FOREX";
-const EXCHANGE_RATES_CACHE_TTL_MS = 15 * 60_000;
-
-async function getLatestForexClose(pairSymbol: string): Promise<number | null> {
-  const [row] = await db
-    .select({ close: instruments.latestClose })
-    .from(instruments)
-    .where(and(eq(instruments.exchange, FOREX_EXCHANGE), eq(instruments.symbol, pairSymbol)))
-    .limit(1);
-
-  if (!row || row.close === null) return null;
-  return Number(row.close);
-}
-
-// FOREX pairs are just regular instruments on the "FOREX" exchange (same
-// pipeline as every other exchange) - no dedicated rates table. A pair with
-// no candles yet gets a background sync kicked off and a neutral 1:1 rate
-// for this request; the next call picks up the real rate once it lands.
-async function ensureForexPairSyncing(pairSymbol: string) {
-  void safeProviderAction("market-data.forex-pair-sync", () =>
-    backfillDailyCandles({
-      symbol: pairSymbol,
-      exchange: FOREX_EXCHANGE,
-      from: getDateDaysAgo(14),
-      to: getTodayDate(),
-    })
-  );
-}
-
-export async function getUsdRate(currency: string): Promise<number> {
-  const normalizedCurrency = currency.trim().toUpperCase();
-  if (!normalizedCurrency || normalizedCurrency === "USD") return 1;
-
-  const directPair = `${normalizedCurrency}USD`;
-  const directClose = await getLatestForexClose(directPair);
-  if (directClose !== null) return directClose;
-
-  const inversePair = `USD${normalizedCurrency}`;
-  const inverseClose = await getLatestForexClose(inversePair);
-  if (inverseClose !== null && inverseClose > 0) return 1 / inverseClose;
-
-  await ensureForexPairSyncing(directPair);
-  return 1;
-}
-
-export async function convertAmount(
-  amount: number,
-  fromCurrency: string,
-  toCurrency: string
-): Promise<number> {
-  const from = fromCurrency.trim().toUpperCase();
-  const to = toCurrency.trim().toUpperCase();
-  if (!from || !to || from === to) return amount;
-
-  const [fromRate, toRate] = await Promise.all([getUsdRate(from), getUsdRate(to)]);
-  if (toRate === 0) return amount;
-
-  return (amount * fromRate) / toRate;
-}
-
-export async function listExchangeRates(): Promise<{ rates: Record<string, number>; base: "USD" }> {
-  return getOrSetCache("exchangeRates", EXCHANGE_RATES_CACHE_TTL_MS, async () => {
-    const exchanges = await listSupportedExchanges();
-    const currencies = [
-      ...new Set(exchanges.map((exchange) => exchange.currency.trim().toUpperCase()).filter(Boolean)),
-    ];
-    const rates: Record<string, number> = { USD: 1 };
-
-    await Promise.all(
-      currencies
-        .filter((currency) => currency !== "USD")
-        .map(async (currency) => {
-          rates[currency] = await getUsdRate(currency);
-        })
-    );
-
-    return { rates, base: "USD" as const };
-  });
-}
 
 // Implementations live in market-data.candle-sync.ts; re-exported here so
 // existing imports (admin.service.ts, worker.ts) keep working.

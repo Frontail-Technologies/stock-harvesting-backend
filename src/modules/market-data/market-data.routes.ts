@@ -16,7 +16,6 @@ import {
   getChartCandles,
   getChartHistoryRange,
   getIndexRelativeStrength,
-  listExchangeRates,
   listStocks,
   listSupportedExchanges,
   searchChartEligibleBseStocks,
@@ -64,10 +63,6 @@ marketDataRouter.get("/exchanges", asyncHandler(async (_req, res) => {
 }));
 
 marketDataRouter.use(requireAuth);
-
-marketDataRouter.get("/exchange-rates", asyncHandler(async (_req, res) => {
-  sendData(res, await listExchangeRates());
-}));
 
 // Watchlist/Charts stock-selection picker only - see
 // searchChartEligibleBseStocks for why this is a separate, deliberately
