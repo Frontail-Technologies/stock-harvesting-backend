@@ -1346,8 +1346,22 @@ async function readChartCandles(input: {
     input.to ? lte(candles.time, input.to) : undefined,
   ].filter(Boolean);
 
+  // Narrowed projection, not `.select()` — every consumer of this function
+  // (getChartCandles' response mapping, deriveStoredCandlesForTimeframe's
+  // weekly/monthly aggregation) only ever reads these 7 columns; the rest
+  // (id, exchange, symbol, timeframe, source, createdAt, updatedAt) are
+  // dead weight on what can be a several-thousand-row result for a chart's
+  // full history.
   const rows = await db
-    .select()
+    .select({
+      instrumentId: candles.instrumentId,
+      time: candles.time,
+      open: candles.open,
+      high: candles.high,
+      low: candles.low,
+      close: candles.close,
+      volume: candles.volume,
+    })
     .from(candles)
     .where(and(...filters))
     .orderBy(asc(candles.time));
