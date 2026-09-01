@@ -46,15 +46,10 @@ import {
 import {
   applyLatestInstrumentStats,
   dedupeInstrumentUpsertInputs,
-  refreshLatestInstrumentStats,
   type InstrumentUpsertInput,
   type LatestInstrumentStat,
 } from "./market-data.instruments";
-import {
-  hydrateDefaultMarketInstruments,
-  syncProviderInstrumentSearch,
-  syncProviderInstruments,
-} from "./market-data.instrument-sync";
+import { syncProviderInstruments } from "./market-data.instrument-sync";
 import {
   backfillDailyCandles,
   backfillIndexCandles,
@@ -62,17 +57,11 @@ import {
   runChartBackfillOnce,
   runLatestCandleRefreshOnce,
   safeProviderAction,
-  syncLatestDailyCandlesForSymbols,
 } from "./market-data.candle-sync";
 import {
-  countStockRows,
+  listStocks,
   NSE_NORMAL_EQUITY_SYMBOL_PATTERN,
-  readStockRows,
-  readUnpricedStockSymbols,
   searchChartEligibleBseStocks,
-  toStockListResponse,
-  type StockSortDirection,
-  type StockSortField,
 } from "./market-data.stocks";
 import {
   deleteDashboardSnapshots,
@@ -91,20 +80,11 @@ import {
   WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS,
 } from "./weekly-strong-evaluator";
 
-const MIN_FULL_MARKET_INSTRUMENTS = 1_000;
 const RELATIVE_STRENGTH_SEED_BACKFILL_LIMIT = 20;
-const LIST_STOCKS_CACHE_TTL_MS = 20_000;
-// Implementation now lives in market-data.stocks.ts; re-exported here so
-// existing imports (e.g. market-collections.service.ts) keep working.
+// Implementations now live in market-data.stocks.ts; re-exported here so
+// existing imports (e.g. market-collections.service.ts, ai.service.ts,
+// market-data.routes.ts) keep working.
 export { NSE_NORMAL_EQUITY_SYMBOL_PATTERN };
-
-function isRealtimePricedStockListExchange(exchange: string) {
-  return exchange === "BSE" || exchange === "BSE_IDX";
-}
-
-function isPriceSortField(sortBy?: StockSortField) {
-  return sortBy === "close" || sortBy === "changePct" || sortBy === "volume";
-}
 
 export type RelativeStrengthMetricRow = {
   symbol: string;
@@ -122,155 +102,9 @@ export type RelativeStrengthMetricRow = {
 
 export type { MetricCandle };
 
-export async function listStocks(input: {
-  q?: string;
-  page: number;
-  limit: number;
-  sortBy?: StockSortField;
-  sortDirection?: StockSortDirection;
-  exchange?: string;
-  moveFilter?: MoveFilter;
-  minVolume?: number;
-  includeUnpriced?: boolean;
-}) {
-  const exchange = input.exchange ?? DEFAULT_EXCHANGE;
-  const cacheKey = [
-    "listStocks",
-    exchange,
-    input.q ?? "",
-    input.page,
-    input.limit,
-    input.sortBy ?? "",
-    input.sortDirection ?? "",
-    input.moveFilter ?? "",
-    input.minVolume ?? "",
-    input.includeUnpriced ? "includeUnpriced" : "",
-  ].join(":");
-
-  return getOrSetCache(cacheKey, LIST_STOCKS_CACHE_TTL_MS, () =>
-    listStocksUncached({ ...input, exchange })
-  );
-}
-
-async function listStocksUncached(input: {
-  q?: string;
-  page: number;
-  limit: number;
-  sortBy?: StockSortField;
-  sortDirection?: StockSortDirection;
-  exchange: string;
-  moveFilter?: MoveFilter;
-  minVolume?: number;
-  includeUnpriced?: boolean;
-}) {
-  const exchange = input.exchange;
-  const realtimePricedList = isRealtimePricedStockListExchange(exchange);
-  const queryInput = realtimePricedList
-    ? {
-        ...input,
-        exchange,
-        includeUnpriced: true,
-        moveFilter: undefined,
-        minVolume: undefined,
-        sortBy: isPriceSortField(input.sortBy) ? "symbol" : input.sortBy,
-      }
-    : { ...input, exchange };
-  let rows = await readStockRows(queryInput);
-  let total = await countStockRows(queryInput);
-
-  const hydratedTotal = input.q?.trim()
-    ? total
-    : await countStockRows({ ...queryInput, includeUnpriced: true });
-
-  if (!input.q?.trim() && hydratedTotal < MIN_FULL_MARKET_INSTRUMENTS) {
-    await safeProviderAction("market-data.full-instrument-hydration", () =>
-      hydrateDefaultMarketInstruments(exchange)
-    );
-    rows = await readStockRows(queryInput);
-    total = await countStockRows(queryInput);
-  }
-
-  if (rows.length === 0) {
-    if (input.q?.trim()) {
-      await safeProviderAction("market-data.instrument-search", () =>
-        syncProviderInstrumentSearch(input.q ?? "", exchange)
-      );
-      if (!queryInput.includeUnpriced && !realtimePricedList) {
-        await safeProviderAction("market-data.search-price-hydration", async () => {
-          const unpricedSymbols = await readUnpricedStockSymbols(
-            queryInput,
-            Math.min(input.limit, 12)
-          );
-
-          if (unpricedSymbols.length > 0) {
-            await syncLatestDailyCandlesForSymbols(unpricedSymbols, exchange);
-          }
-        });
-      }
-    } else {
-      await safeProviderAction("market-data.default-instrument-hydration", () =>
-        hydrateDefaultMarketInstruments(exchange)
-      );
-    }
-    rows = await readStockRows(queryInput);
-    total = await countStockRows(queryInput);
-  }
-
-  if (
-    !queryInput.includeUnpriced &&
-    !realtimePricedList &&
-    hydratedTotal > total &&
-    total <= input.page * input.limit
-  ) {
-    const unpricedSymbols = await readUnpricedStockSymbols(queryInput, input.limit);
-
-    if (unpricedSymbols.length > 0) {
-      await safeProviderAction("market-data.next-page-price-hydration", () =>
-        syncLatestDailyCandlesForSymbols(unpricedSymbols, exchange)
-      );
-      rows = await readStockRows(queryInput);
-      total = await countStockRows(queryInput);
-    }
-  }
-
-  const rowsMissingPrices = rows.filter((row) => row.close === null);
-  if (realtimePricedList && rowsMissingPrices.length > 0) {
-    await refreshLatestInstrumentStats(
-      exchange,
-      rowsMissingPrices.map((row) => row.symbol)
-    );
-    rows = await readStockRows(queryInput);
-  }
-
-  if (!queryInput.includeUnpriced && !realtimePricedList && rowsMissingPrices.length > 0) {
-    await safeProviderAction("market-data.latest-candle-sync", () =>
-      syncLatestDailyCandlesForSymbols(
-        rowsMissingPrices.map((row) => row.symbol),
-        exchange
-      )
-    );
-    rows = await readStockRows(queryInput);
-  }
-
-  if (queryInput.includeUnpriced && !realtimePricedList && rowsMissingPrices.length > 0) {
-    void safeProviderAction("market-data.visible-price-hydration", () =>
-      syncLatestDailyCandlesForSymbols(
-        rowsMissingPrices.slice(0, 8).map((row) => row.symbol),
-        exchange
-      )
-    );
-  }
-
-  return {
-    stocks: toStockListResponse(rows),
-    pagination: {
-      page: input.page,
-      limit: input.limit,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / input.limit)),
-    },
-  };
-}
+// Implementation lives in market-data.stocks.ts; re-exported here so
+// existing imports (ai.service.ts, market-data.routes.ts) keep working.
+export { listStocks };
 
 export type RelativeStrengthInstrumentInput = {
   symbol: string;

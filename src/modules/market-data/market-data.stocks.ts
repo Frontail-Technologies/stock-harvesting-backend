@@ -2,20 +2,22 @@ import { and, asc, count, desc, eq, gt, gte, ilike, lt, lte, not, or, sql } from
 
 import { db, type DbOrTx } from "../../db/client";
 import { candles, instruments } from "../../db/schema";
-import { CANDLE_TIMEFRAME, DATA_PROVIDER_KEY } from "../../shared/constants";
+import { getOrSetCache } from "../../shared/cache";
+import { CANDLE_TIMEFRAME, DATA_PROVIDER_KEY, DEFAULT_EXCHANGE } from "../../shared/constants";
 import { normalizeSymbol } from "../../shared/normalize";
 import type { MoveFilter } from "./market-data.schemas";
+import { safeProviderAction, syncLatestDailyCandlesForSymbols } from "./market-data.candle-sync";
+import { hydrateDefaultMarketInstruments, syncProviderInstrumentSearch } from "./market-data.instrument-sync";
+import { refreshLatestInstrumentStats } from "./market-data.instruments";
 
-// Stock-list/search query construction, filtering, sorting, pagination, and
-// response-row shaping - the pure DB-read half of "list/search stocks".
-// Deliberately does NOT own: the on-demand provider hydration decisions
-// (listStocks/listStocksUncached in market-data.service.ts) - those need
-// safeProviderAction and syncLatestDailyCandlesForSymbols, which still stay
-// directly in the service (candle-sync/backfill orchestration, not yet
-// extracted), so moving the orchestration wrapper here would create a
-// market-data.stocks.ts -> market-data.service.ts -> market-data.stocks.ts
-// import cycle. The service calls into this module's reads; this module
-// never calls back into the service.
+// Complete stock-list/search ownership: query construction, filtering,
+// sorting, pagination, response-row shaping, AND the on-demand provider
+// hydration orchestration around them (listStocks/listStocksUncached).
+// The hydration orchestration depends on market-data.candle-sync.ts and
+// market-data.instrument-sync.ts, neither of which import from this module
+// or from market-data.service.ts - so this module can own the full
+// responsibility with no import cycle. market-data.service.ts calls into
+// this module; this module never calls back into the service.
 
 export type StockSortField = "symbol" | "name" | "close" | "changePct" | "volume";
 export type StockSortDirection = "asc" | "desc";
@@ -221,4 +223,165 @@ export function toStockListResponse(
     volume: row.volume === null ? undefined : Number(row.volume),
     open: row.open === null ? undefined : Number(row.open),
   }));
+}
+
+const MIN_FULL_MARKET_INSTRUMENTS = 1_000;
+const LIST_STOCKS_CACHE_TTL_MS = 20_000;
+
+function isRealtimePricedStockListExchange(exchange: string) {
+  return exchange === "BSE" || exchange === "BSE_IDX";
+}
+
+function isPriceSortField(sortBy?: StockSortField) {
+  return sortBy === "close" || sortBy === "changePct" || sortBy === "volume";
+}
+
+export async function listStocks(input: {
+  q?: string;
+  page: number;
+  limit: number;
+  sortBy?: StockSortField;
+  sortDirection?: StockSortDirection;
+  exchange?: string;
+  moveFilter?: MoveFilter;
+  minVolume?: number;
+  includeUnpriced?: boolean;
+}) {
+  const exchange = input.exchange ?? DEFAULT_EXCHANGE;
+  const cacheKey = [
+    "listStocks",
+    exchange,
+    input.q ?? "",
+    input.page,
+    input.limit,
+    input.sortBy ?? "",
+    input.sortDirection ?? "",
+    input.moveFilter ?? "",
+    input.minVolume ?? "",
+    input.includeUnpriced ? "includeUnpriced" : "",
+  ].join(":");
+
+  return getOrSetCache(cacheKey, LIST_STOCKS_CACHE_TTL_MS, () =>
+    listStocksUncached({ ...input, exchange })
+  );
+}
+
+async function listStocksUncached(input: {
+  q?: string;
+  page: number;
+  limit: number;
+  sortBy?: StockSortField;
+  sortDirection?: StockSortDirection;
+  exchange: string;
+  moveFilter?: MoveFilter;
+  minVolume?: number;
+  includeUnpriced?: boolean;
+}) {
+  const exchange = input.exchange;
+  const realtimePricedList = isRealtimePricedStockListExchange(exchange);
+  const queryInput = realtimePricedList
+    ? {
+        ...input,
+        exchange,
+        includeUnpriced: true,
+        moveFilter: undefined,
+        minVolume: undefined,
+        sortBy: isPriceSortField(input.sortBy) ? "symbol" : input.sortBy,
+      }
+    : { ...input, exchange };
+  let rows = await readStockRows(queryInput);
+  let total = await countStockRows(queryInput);
+
+  const hydratedTotal = input.q?.trim()
+    ? total
+    : await countStockRows({ ...queryInput, includeUnpriced: true });
+
+  if (!input.q?.trim() && hydratedTotal < MIN_FULL_MARKET_INSTRUMENTS) {
+    await safeProviderAction("market-data.full-instrument-hydration", () =>
+      hydrateDefaultMarketInstruments(exchange)
+    );
+    rows = await readStockRows(queryInput);
+    total = await countStockRows(queryInput);
+  }
+
+  if (rows.length === 0) {
+    if (input.q?.trim()) {
+      await safeProviderAction("market-data.instrument-search", () =>
+        syncProviderInstrumentSearch(input.q ?? "", exchange)
+      );
+      if (!queryInput.includeUnpriced && !realtimePricedList) {
+        await safeProviderAction("market-data.search-price-hydration", async () => {
+          const unpricedSymbols = await readUnpricedStockSymbols(
+            queryInput,
+            Math.min(input.limit, 12)
+          );
+
+          if (unpricedSymbols.length > 0) {
+            await syncLatestDailyCandlesForSymbols(unpricedSymbols, exchange);
+          }
+        });
+      }
+    } else {
+      await safeProviderAction("market-data.default-instrument-hydration", () =>
+        hydrateDefaultMarketInstruments(exchange)
+      );
+    }
+    rows = await readStockRows(queryInput);
+    total = await countStockRows(queryInput);
+  }
+
+  if (
+    !queryInput.includeUnpriced &&
+    !realtimePricedList &&
+    hydratedTotal > total &&
+    total <= input.page * input.limit
+  ) {
+    const unpricedSymbols = await readUnpricedStockSymbols(queryInput, input.limit);
+
+    if (unpricedSymbols.length > 0) {
+      await safeProviderAction("market-data.next-page-price-hydration", () =>
+        syncLatestDailyCandlesForSymbols(unpricedSymbols, exchange)
+      );
+      rows = await readStockRows(queryInput);
+      total = await countStockRows(queryInput);
+    }
+  }
+
+  const rowsMissingPrices = rows.filter((row) => row.close === null);
+  if (realtimePricedList && rowsMissingPrices.length > 0) {
+    await refreshLatestInstrumentStats(
+      exchange,
+      rowsMissingPrices.map((row) => row.symbol)
+    );
+    rows = await readStockRows(queryInput);
+  }
+
+  if (!queryInput.includeUnpriced && !realtimePricedList && rowsMissingPrices.length > 0) {
+    await safeProviderAction("market-data.latest-candle-sync", () =>
+      syncLatestDailyCandlesForSymbols(
+        rowsMissingPrices.map((row) => row.symbol),
+        exchange
+      )
+    );
+    rows = await readStockRows(queryInput);
+  }
+
+  if (queryInput.includeUnpriced && !realtimePricedList && rowsMissingPrices.length > 0) {
+    void safeProviderAction("market-data.visible-price-hydration", () =>
+      syncLatestDailyCandlesForSymbols(
+        rowsMissingPrices.slice(0, 8).map((row) => row.symbol),
+        exchange
+      )
+    );
+  }
+
+  return {
+    stocks: toStockListResponse(rows),
+    pagination: {
+      page: input.page,
+      limit: input.limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / input.limit)),
+    },
+  };
 }
