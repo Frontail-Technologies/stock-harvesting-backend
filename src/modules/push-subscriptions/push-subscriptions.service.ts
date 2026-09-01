@@ -108,32 +108,41 @@ export async function sendPriceAlertNotification(input: {
     tag: `price-alert:${input.exchange}:${input.symbol}`,
   });
 
-  for (const row of rows) {
-    try {
-      await webPush.sendNotification(
-        {
-          endpoint: row.endpoint,
-          keys: {
-            p256dh: row.p256dh,
-            auth: row.auth,
+  // Fanned out with allSettled, not a sequential loop: this is bounded by
+  // one user's own device count (typically a handful of subscriptions),
+  // each send is fully independent (a different endpoint/keys pair), and
+  // per-row error handling (stale-subscription cleanup vs. a logged
+  // warning) already tolerates any one send failing without affecting the
+  // others - there was never an ordering or shared-state reason for these
+  // to run one at a time.
+  await Promise.allSettled(
+    rows.map(async (row) => {
+      try {
+        await webPush.sendNotification(
+          {
+            endpoint: row.endpoint,
+            keys: {
+              p256dh: row.p256dh,
+              auth: row.auth,
+            },
           },
-        },
-        payload
-      );
-    } catch (error) {
-      const statusCode = typeof error === "object" && error && "statusCode" in error
-        ? Number((error as { statusCode?: unknown }).statusCode)
-        : null;
-      if (statusCode === 404 || statusCode === 410) {
-        await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, row.id));
-        continue;
+          payload
+        );
+      } catch (error) {
+        const statusCode = typeof error === "object" && error && "statusCode" in error
+          ? Number((error as { statusCode?: unknown }).statusCode)
+          : null;
+        if (statusCode === 404 || statusCode === 410) {
+          await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, row.id));
+          return;
+        }
+        logger.warn(
+          { subscriptionId: row.id, message: getErrorMessage(error, "Unknown push error") },
+          "Push notification send failed"
+        );
       }
-      logger.warn(
-        { subscriptionId: row.id, message: getErrorMessage(error, "Unknown push error") },
-        "Push notification send failed"
-      );
-    }
-  }
+    })
+  );
 }
 
 function toPushSubscriptionResponse(row: typeof pushSubscriptions.$inferSelect) {

@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gt, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 
-import { db } from "../../db/client";
+import { db, type DbOrTx } from "../../db/client";
 import {
   auditLogs,
   instruments,
@@ -40,6 +40,17 @@ import {
 // requests for the same collection within the same few seconds, not the
 // source of freshness truth the way it used to have to be).
 const COLLECTION_CACHE_TTL_MS = 60_000;
+
+// 3 params/row (collectionId + instrumentId + active; updatedAt uses now(),
+// not a per-row param) x 500 = 1,500 params/statement for the matched-member
+// bulk upsert, and 1 param/row (instrumentId, batched via inArray alongside
+// one shared collectionId param) x 500 = 501 params/statement for the
+// deactivation batch - both comfortably under Postgres's 65,535-parameter
+// protocol limit, matching the same 500-row convention already used
+// elsewhere in this codebase (CANDLE_UPSERT_CHUNK_SIZE,
+// INSTRUMENT_UPSERT_CHUNK_SIZE, CLASSIFICATION_UPDATE_CHUNK_SIZE,
+// INSTRUMENT_STATS_UPDATE_CHUNK_SIZE).
+const COLLECTION_MEMBER_WRITE_CHUNK_SIZE = 500;
 
 type MemberStatus = "new" | "already-active" | "reactivate";
 
@@ -399,29 +410,8 @@ export async function importCollectionCsv(input: {
         );
       }
 
-      for (const row of report.matched) {
-        if (row.status === "already-active") continue;
-
-        await tx
-          .insert(marketCollectionMembers)
-          .values({ collectionId: collection.id, instrumentId: row.instrumentId, active: true })
-          .onConflictDoUpdate({
-            target: [marketCollectionMembers.collectionId, marketCollectionMembers.instrumentId],
-            set: { active: true, updatedAt: new Date() },
-          });
-      }
-
-      for (const row of report.toDeactivate) {
-        await tx
-          .update(marketCollectionMembers)
-          .set({ active: false, updatedAt: new Date() })
-          .where(
-            and(
-              eq(marketCollectionMembers.collectionId, collection.id),
-              eq(marketCollectionMembers.instrumentId, row.instrumentId)
-            )
-          );
-      }
+      await upsertMatchedCollectionMembers(tx, collection.id, report.matched);
+      await deactivateCollectionMembers(tx, collection.id, report.toDeactivate.map((row) => row.instrumentId));
 
       await tx
         .update(marketCollections)
@@ -560,6 +550,47 @@ export async function importCollectionCsv(input: {
     invalidatedCurrentMembershipRuns,
     invalidatedHistoricalWeeks,
   };
+}
+
+// Bulk upsert, replacing what used to be one INSERT ... ON CONFLICT per
+// matched row: same conflict target (collectionId, instrumentId), same set
+// clause (active: true + updatedAt: now), same exclusion of already-active
+// rows (they need no write at all) - just batched into bounded chunks
+// instead of one round trip per symbol. Split out from importCollectionCsv
+// so it's directly testable (see
+// market-collections.import-bulk-writes.test.ts) against a fake tx.
+export async function upsertMatchedCollectionMembers(
+  tx: DbOrTx,
+  collectionId: string,
+  matched: Array<{ instrumentId: string; status: MemberStatus }>
+) {
+  const rowsToUpsert = matched.filter((row) => row.status !== "already-active");
+  for (let index = 0; index < rowsToUpsert.length; index += COLLECTION_MEMBER_WRITE_CHUNK_SIZE) {
+    const chunk = rowsToUpsert.slice(index, index + COLLECTION_MEMBER_WRITE_CHUNK_SIZE);
+    await tx
+      .insert(marketCollectionMembers)
+      .values(chunk.map((row) => ({ collectionId, instrumentId: row.instrumentId, active: true })))
+      .onConflictDoUpdate({
+        target: [marketCollectionMembers.collectionId, marketCollectionMembers.instrumentId],
+        set: { active: true, updatedAt: new Date() },
+      });
+  }
+}
+
+// Bulk deactivation, replacing what used to be one UPDATE per deactivated
+// row: the collectionId equality stays a real filter (not just part of an
+// IN-list) specifically so this predicate can never cross-affect another
+// collection's membership row for the same instrument, matching the old
+// per-row query's exact scoping. Split out for the same testability reason
+// as upsertMatchedCollectionMembers above.
+export async function deactivateCollectionMembers(tx: DbOrTx, collectionId: string, instrumentIds: string[]) {
+  for (let index = 0; index < instrumentIds.length; index += COLLECTION_MEMBER_WRITE_CHUNK_SIZE) {
+    const chunk = instrumentIds.slice(index, index + COLLECTION_MEMBER_WRITE_CHUNK_SIZE);
+    await tx
+      .update(marketCollectionMembers)
+      .set({ active: false, updatedAt: new Date() })
+      .where(and(eq(marketCollectionMembers.collectionId, collectionId), inArray(marketCollectionMembers.instrumentId, chunk)));
+  }
 }
 
 async function classifyCollectionImport(

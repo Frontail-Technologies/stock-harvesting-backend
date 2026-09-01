@@ -72,6 +72,13 @@ const DEFAULT_MARKET_SYMBOLS_BY_EXCHANGE: Record<string, readonly string[]> = {
 const FAILED_LATEST_CANDLE_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
 const CANDLE_UPSERT_CHUNK_SIZE = 500;
 const INSTRUMENT_UPSERT_CHUNK_SIZE = 500;
+// 6 params/row (symbol + 5 stat columns; updatedAt uses now(), not a
+// per-row param) x 500 = 3,000 params/statement - comfortably under
+// Postgres's 65,535-parameter protocol limit, matching every other bulk
+// chunk size already used in this file/module (CANDLE_UPSERT_CHUNK_SIZE,
+// INSTRUMENT_UPSERT_CHUNK_SIZE, sector-classification.service.ts's
+// CLASSIFICATION_UPDATE_CHUNK_SIZE).
+const INSTRUMENT_STATS_UPDATE_CHUNK_SIZE = 500;
 const MIN_FULL_MARKET_INSTRUMENTS = 1_000;
 const RELATIVE_STRENGTH_SEED_BACKFILL_LIMIT = 20;
 const LIST_STOCKS_CACHE_TTL_MS = 20_000;
@@ -2778,6 +2785,21 @@ async function getLatestStockStats(
 // stocks list can filter/sort/read prices directly off the instruments
 // table (fast, works across the whole table) instead of recomputing a
 // 2-row candles lookback per symbol on every read.
+//
+// Batched as UPDATE ... FROM (VALUES ...) - the same proven pattern
+// sector-classification.service.ts's bulkUpdateClassification already
+// uses - instead of one UPDATE per symbol. A full-market refresh
+// (refreshAllLatestInstrumentPrices's 200-symbol chunks, up to ~9,900
+// NSE instruments) previously issued up to ~9,900 sequential round trips
+// for this step alone; this issues at most ceil(symbolCount / 500).
+//
+// latestChangePct is nullable (a symbol's first-ever synced day has no
+// prior close to diff against) - explicitly cast to ::numeric in the
+// VALUES list so Postgres can't fail to infer that column's type on a
+// chunk where every row happens to be NULL (a real, if rare, case for a
+// newly-hydrated batch of symbols). All other value casts are there for
+// the same reason, applied uniformly rather than only where currently
+// required, so this stays correct if a future chunk's row order changes.
 async function refreshLatestInstrumentStats(
   exchange: string,
   symbols: string[],
@@ -2787,19 +2809,55 @@ async function refreshLatestInstrumentStats(
   if (uniqueSymbols.length === 0) return;
 
   const stats = await getLatestStockStats(uniqueSymbols, exchange, dbClient);
+  await applyLatestInstrumentStats(exchange, stats, dbClient);
+}
 
-  for (const [symbol, stat] of stats.entries()) {
-    await dbClient
-      .update(instruments)
-      .set({
-        latestClose: String(stat.close),
-        latestOpen: String(stat.open),
-        latestVolume: String(stat.volume),
-        latestChangePct: stat.changePct === null ? null : String(stat.changePct),
-        latestPriceAt: stat.time,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(instruments.exchange, exchange), eq(instruments.symbol, symbol)));
+export type LatestInstrumentStat = {
+  close: number;
+  open: number;
+  volume: number;
+  changePct: number | null;
+  time: string;
+};
+
+// The actual bulk write, split out from refreshLatestInstrumentStats above
+// so it's directly testable (see
+// market-data.instrument-stats-bulk-update.test.ts) against a fake
+// dbClient without needing to also fake getLatestStockStats's own
+// candles window-function query - this function's own contract is "given
+// already-computed stats, apply them", independent of how they were
+// computed.
+export async function applyLatestInstrumentStats(
+  exchange: string,
+  stats: Map<string, LatestInstrumentStat>,
+  dbClient: DbOrTx = db
+) {
+  const statRows = [...stats.entries()];
+  if (statRows.length === 0) return;
+
+  for (let index = 0; index < statRows.length; index += INSTRUMENT_STATS_UPDATE_CHUNK_SIZE) {
+    const chunk = statRows.slice(index, index + INSTRUMENT_STATS_UPDATE_CHUNK_SIZE);
+
+    const values = sql.join(
+      chunk.map(
+        ([symbol, stat]) =>
+          sql`(${symbol}::text, ${stat.close}::numeric, ${stat.open}::numeric, ${stat.volume}::numeric, ${stat.changePct}::numeric, ${stat.time}::date)`
+      ),
+      sql`, `
+    );
+
+    await dbClient.execute(sql`
+      UPDATE instruments AS i
+      SET
+        latest_close = v.close,
+        latest_open = v.open,
+        latest_volume = v.volume,
+        latest_change_pct = v.change_pct,
+        latest_price_at = v.price_at,
+        updated_at = now()
+      FROM (VALUES ${values}) AS v(symbol, close, open, volume, change_pct, price_at)
+      WHERE i.exchange = ${exchange} AND i.symbol = v.symbol
+    `);
   }
 }
 
