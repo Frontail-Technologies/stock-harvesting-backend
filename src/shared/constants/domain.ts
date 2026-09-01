@@ -47,9 +47,8 @@ export const SUPPORTED_EXCHANGE_CODES = SUPPORTED_EXCHANGES.map(
   (exchange) => exchange.code
 ) as SupportedExchangeCode[];
 
-// Closed, deliberately small allow-list (Phase D) - every market
-// collection in this codebase is India/BSE today, and section 3 of the
-// Phase D brief is explicit: "Do not invent unsupported countries." Add a
+// Closed, deliberately small allow-list - every market collection in this
+// codebase is India/BSE today; do not invent unsupported countries. Add a
 // new entry here only when there is real backend support (instruments,
 // exchanges, and a collection) for that country - the Dashboard's country
 // selector reads this transitively via /api/market-collections, not a

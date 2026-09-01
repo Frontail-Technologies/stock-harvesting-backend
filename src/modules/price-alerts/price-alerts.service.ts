@@ -3,7 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "../../db/client";
 import { instruments, priceAlerts } from "../../db/schema";
 import { DEFAULT_EXCHANGE } from "../../shared/constants";
-import { badRequest, forbidden, notFound } from "../../shared/errors";
+import { badRequest, forbidden, getErrorMessage, notFound } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import { normalizeSymbol } from "../../shared/normalize";
 import { sendPriceAlertNotification } from "../push-subscriptions/push-subscriptions.service";
@@ -186,7 +186,7 @@ export async function evaluatePriceAlertsForQuote(input: {
       });
     } catch (error) {
       logger.warn(
-        { alertId: alert.id, message: error instanceof Error ? error.message : "Unknown push error" },
+        { alertId: alert.id, message: getErrorMessage(error, "Unknown push error") },
         "Price alert push notification failed"
       );
     }

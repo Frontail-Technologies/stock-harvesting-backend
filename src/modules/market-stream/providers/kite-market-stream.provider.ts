@@ -5,6 +5,7 @@ import { db } from "../../../db/client";
 import { instruments } from "../../../db/schema";
 import { DATA_PROVIDER_KEY } from "../../../shared/constants";
 import { env } from "../../../shared/env";
+import { getErrorMessage } from "../../../shared/errors";
 import { logger } from "../../../shared/logger";
 import { getActiveProviderAccessToken } from "../../data-provider/data-provider.service";
 import { applyTickToCandles } from "../market-stream-candles";
@@ -75,7 +76,7 @@ export class KiteMarketStreamProvider {
       logger.warn(
         {
           provider: DATA_PROVIDER_KEY.zerodha,
-          message: error instanceof Error ? error.message : "Unable to load access token",
+          message: getErrorMessage(error, "Unable to load access token"),
         },
         "Kite market stream not connected"
       );

@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import { AUTH_ROUTES, OAUTH_PORTAL_COOKIE_NAME, OAUTH_STATE_COOKIE_NAME } from "../../shared/constants";
 import { env } from "../../shared/env";
-import { unauthorized } from "../../shared/errors";
+import { getErrorMessage, unauthorized } from "../../shared/errors";
 import { sendData } from "../../shared/http";
 import { logger } from "../../shared/logger";
 import { asyncHandler, getAuthUserId, requireAuth, validate } from "../../shared/middleware";
@@ -114,7 +114,7 @@ authRouter.get(
       // rejected, profile fetch failed, DB error on user upsert, etc).
       logger.error(
         {
-          message: error instanceof Error ? error.message : "Unknown error",
+          message: getErrorMessage(error, "Unknown error"),
           stack: error instanceof Error ? error.stack : undefined,
         },
         "Google OAuth callback failed"

@@ -75,4 +75,4 @@ marketCollectionsRouter.get(
 
 // The old .../weekly-strong-stocks/backtest route (count-only, live-
 // computed on every request) has been removed - see the new
-// weekly-strong-backtest module for the persisted replacement (Phase C2).
+// weekly-strong-backtest module for the persisted replacement.

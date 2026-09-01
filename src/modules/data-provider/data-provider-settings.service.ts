@@ -4,7 +4,7 @@ import { db } from "../../db/client";
 import { auditLogs, dataProviderSettings } from "../../db/schema";
 import { getOrSetCache, invalidateCacheByPrefix } from "../../shared/cache";
 import { DATA_PROVIDER_SETTINGS_SEEDS } from "../../shared/constants";
-import { notFound } from "../../shared/errors";
+import { getErrorMessage, notFound } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 
 const SETTINGS_CACHE_KEY = "dataProviderSettings:map";
@@ -64,7 +64,7 @@ async function getProviderSettingsMap(): Promise<Map<string, DataProviderSetting
       loggedSettingsReadFailure = true;
       logger.warn(
         {
-          message: error instanceof Error ? error.message : "Unknown error",
+          message: getErrorMessage(error, "Unknown error"),
           usingLastKnownGood: lastKnownGoodSettingsMap !== null,
         },
         "Failed to read data_provider_settings - falling back rather than failing the caller"
@@ -174,7 +174,7 @@ async function recordHealth(
     invalidateProviderSettingsCache();
   } catch (error) {
     logger.warn(
-      { key, message: error instanceof Error ? error.message : "Unknown error" },
+      { key, message: getErrorMessage(error, "Unknown error") },
       "Failed to record data provider health"
     );
   }

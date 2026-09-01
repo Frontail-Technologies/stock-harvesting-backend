@@ -1,6 +1,6 @@
 import { DATA_PROVIDER_KEY, HTTP_STATUS, PROVIDER_STATUS } from "../../../shared/constants";
 import { env } from "../../../shared/env";
-import { AppError, ERROR_CODES, ERROR_MESSAGES } from "../../../shared/errors";
+import { AppError, ERROR_CODES, ERROR_MESSAGES, getErrorMessage } from "../../../shared/errors";
 import { logger } from "../../../shared/logger";
 import { normalizeSymbol } from "../../../shared/normalize";
 import type {
@@ -18,7 +18,10 @@ import {
   providerHealthFromError,
 } from "../provider-health";
 
-const EODHD_BASE_URL = "https://eodhd.com/api";
+// Exported so eodhd-provider-diagnostics.ts (a standalone CLI script, not
+// part of the request path) can reuse the same value instead of its own
+// duplicate literal.
+export const EODHD_BASE_URL = "https://eodhd.com/api";
 const EODHD_SETTINGS_URL = "https://eodhd.com/cp/settings";
 const EODHD_TEST_SYMBOLS = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN"] as const;
 
@@ -117,7 +120,7 @@ async function readJsonResponse<T>(response: Response, failureMessage: string) {
   if (!response.ok) {
     throw new AppError(
       HTTP_STATUS.badGateway,
-      ERROR_CODES.badRequest,
+      ERROR_CODES.providerError,
       `${failureMessage} (${response.status})`
     );
   }
@@ -127,7 +130,7 @@ async function readJsonResponse<T>(response: Response, failureMessage: string) {
   if (typeof json === "object" && json !== null && "errors" in json) {
     throw new AppError(
       HTTP_STATUS.badGateway,
-      ERROR_CODES.badRequest,
+      ERROR_CODES.providerError,
       failureMessage
     );
   }
@@ -315,7 +318,7 @@ export class EodhdDataProviderAdapter implements DataProviderAdapter {
 
     throw new AppError(
       HTTP_STATUS.badGateway,
-      ERROR_CODES.badRequest,
+      ERROR_CODES.providerError,
       "Unable to fetch daily candles",
       { failedTickers }
     );
@@ -392,7 +395,7 @@ export class EodhdDataProviderAdapter implements DataProviderAdapter {
         logger.debug(
           {
             symbol,
-            message: error instanceof Error ? error.message : "Unknown provider error",
+            message: getErrorMessage(error, "Unknown provider error"),
           },
           "EODHD latest candle history fallback skipped symbol"
         );
@@ -429,7 +432,7 @@ export class EodhdDataProviderAdapter implements DataProviderAdapter {
       logger.info(
         {
           fallbackExchangeCode: getConfiguredEodhdExchangeCode(),
-          message: error instanceof Error ? error.message : "Unknown discovery error",
+          message: getErrorMessage(error, "Unknown discovery error"),
         },
         "EODHD coverage discovery unavailable; using configured exchange fallback"
       );
@@ -446,7 +449,7 @@ export class EodhdDataProviderAdapter implements DataProviderAdapter {
 
     throw new AppError(
       HTTP_STATUS.badGateway,
-      ERROR_CODES.badRequest,
+      ERROR_CODES.providerError,
       "Unable to resolve EODHD exchange code"
     );
   }
@@ -577,7 +580,7 @@ async function discoverEodhdCoverage(): Promise<EodhdCoverageDiscovery> {
 
   throw new AppError(
     HTTP_STATUS.badGateway,
-    ERROR_CODES.badRequest,
+    ERROR_CODES.providerError,
     "Unable to discover EODHD market coverage from exchanges-list and test symbols"
   );
 }
@@ -695,7 +698,7 @@ async function fetchSymbolsForExchange(exchangeCode: string) {
       {
         exchangeCode,
         status: error instanceof AppError ? error.status : undefined,
-        message: error instanceof Error ? error.message : "Unknown provider error",
+        message: getErrorMessage(error, "Unknown provider error"),
       },
       "EODHD coverage discovery: symbol list probe failed"
     );
@@ -743,7 +746,7 @@ async function logCandleProbe(exchangeCode: string, symbolRow: EodhdSymbolRow) {
         candleTestUrl: toSafeProviderUrl(url),
         ticker,
         status,
-        message: error instanceof Error ? error.message : "Unknown provider error",
+        message: getErrorMessage(error, "Unknown provider error"),
       },
       "EODHD coverage discovery: candle test"
     );

@@ -17,7 +17,7 @@ import {
 // Proprietary threshold regression guard - these values must never drift
 // silently during a refactor. If one of these ever needs to change, it
 // should be a deliberate, visible edit to this test, not a side effect.
-describe("Weekly Strong constants - unchanged by the Phase C1/C1.5 refactors", () => {
+describe("Weekly Strong constants - unchanged by the consolidation refactor", () => {
   it("keeps the exact proprietary window sizes, ratio, and history floors", () => {
     expect(WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS).toBe(250);
     expect(WEEKLY_STRONG_DAILY_LOOKBACK_BARS).toBe(1252);
@@ -77,10 +77,12 @@ describe("passesNearHigh (single-timeframe predicate)", () => {
   });
 
   it("is a strict inequality - exactly at the threshold does not pass", () => {
-    // Deliberately differs from Scanner's near-250-week-high.ts chart-highlight
-    // rule, which uses >= and does match at exactly the threshold - these are
-    // two intentionally different rules (see the Phase C1 audit report), not
-    // duplicates that should agree at the boundary.
+    // Scanner's near-250-week-high.ts chart-highlight rule now delegates to
+    // this same evaluateWeeklyStrongSeries (see market-data.service.ts's
+    // getSymbolWeeklyStrongSeriesInput and docs/KNOWN_ISSUES.md) - it used
+    // to run its own independent weekly-only threshold check that could
+    // disagree with this one; that's fixed, so this strict inequality is
+    // now authoritative for both surfaces, not just this one.
     const closes = [1000, 850]; // 850 is exactly 85% of 1000
     expect(passesNearHigh(closes, 1, 2, WEEKLY_STRONG_NEAR_HIGH_RATIO)).toBe(false);
   });
@@ -244,8 +246,7 @@ describe("evaluateWeeklyStrongSeries (the backtest chart / Scanner overlay's dec
 
 // These two functions power two different UI surfaces (the live
 // WeeklyStrongStockTable and the WeeklyStrongBacktestChart/Scanner overlay)
-// that must agree on "does this symbol pass, right now" - this is the
-// consistency guarantee the Phase C1 brief calls for.
+// that must agree on "does this symbol pass, right now".
 describe("cross-consumer consistency: live list vs backtest, same underlying data", () => {
   it("produce identical pass/fail for several symbol-shaped series, including boundary cases", () => {
     // daily/weekly share the same 80-bar time axis in every case (see the

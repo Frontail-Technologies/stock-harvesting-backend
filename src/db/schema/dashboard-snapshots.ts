@@ -1,7 +1,7 @@
 import { date, index, jsonb, pgEnum, pgTable, timestamp, unique, uuid, varchar } from "drizzle-orm/pg-core";
 
-// Phase D.10 performance architecture: the persisted, shared, multi-
-// instance-safe store for "current" Dashboard results (Relative Strength,
+// The persisted, shared, multi-instance-safe store for "current" Dashboard
+// results (Relative Strength,
 // Weekly Strong) - the expensive years-of-candles computation now happens
 // at most once per invalidation cycle (a real market-data sync, an admin
 // import, or this row simply not existing yet) and gets READ from here on
@@ -35,8 +35,8 @@ export const dashboardSnapshotScopeTypeEnum = pgEnum("dashboard_snapshot_scope_t
 // "collection") are all cheaply DERIVED from this same stored base at read
 // time (pickTopRelativeStrengthRows / groupRelativeStrengthMetrics -
 // pure, no candle I/O), rather than each being its own separately
-// persisted/recomputed slice - the whole point of Phase D.10 #1 was that
-// the expensive base calculation happens ONCE, not once per derived view.
+// persisted/recomputed slice - the whole point is that the expensive base
+// calculation happens ONCE, not once per derived view.
 // "weekly_strong" (scope "collection" only) holds the passing-stocks
 // array (WeeklyStrongStockRow[]) computeWeeklyStrongStocks produces.
 export const dashboardSnapshotMetricTypeEnum = pgEnum("dashboard_snapshot_metric_type", [
@@ -77,8 +77,17 @@ export const dashboardMetricSnapshots = pgTable(
     evaluatorVersion: varchar("evaluator_version", { length: 32 }).notNull(),
     // The actual computed result (RelativeStrengthMetricRow[] or
     // WeeklyStrongStockRow[], depending on metricType) - never the
-    // calculation logic itself, only its numeric output.
-    payload: jsonb("payload").notNull(),
+    // calculation logic itself, only its numeric output. Typed only as
+    // `unknown[]` here (not the specific row union) rather than importing
+    // those row types from market-data.service.ts, which would recreate
+    // the exact import cycle this file's own module-level comment already
+    // explains it avoids - schema files sit below almost every other
+    // module, including market-data.service.ts itself via db/schema's
+    // barrel. Callers narrow to the real row type with a generic `as T`
+    // (see dashboard-snapshot-store.ts's readDashboardSnapshot<T>) - this
+    // annotation's job is only to guarantee "always an array", which is
+    // true for both known payload kinds and wasn't enforced at all before.
+    payload: jsonb("payload").$type<unknown[]>().notNull(),
     generatedAt: timestamp("generated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({

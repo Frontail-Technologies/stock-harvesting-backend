@@ -24,7 +24,7 @@ import {
   pickTopRelativeStrengthRows,
 } from "../market-data/market-data.service";
 
-// Phase D.10 - getCollectionRelativeStrength/getCollectionWeeklyStrongStocks
+// getCollectionRelativeStrength/getCollectionWeeklyStrongStocks
 // used to wrap the EXPENSIVE live computation directly
 // (computeRelativeStrengthMetrics/computeGroupRelativeStrength/
 // computeWeeklyStrongStocks - years of candle history per active member,
@@ -203,9 +203,9 @@ async function getCollectionMembersForCollection(
   });
 }
 
-// Phase D.10 #1 - Sector and Industry (and, before this pass, an entirely
-// unused third `limit:200` call from the Dashboard's own `rsQuery` - see
-// the Phase D.10 report) each used to independently re-run the full
+// Sector and Industry (and, before this fix, an entirely unused third
+// `limit:200` call from the Dashboard's own `rsQuery`) each used to
+// independently re-run the full
 // candle-driven base computation. getOrComputeCollectionRelativeStrengthBase
 // runs it ONCE per invalidation cycle (persisted) - deriving the
 // requested view (a plain top-N list, or a sector/industry grouping) from
@@ -247,10 +247,11 @@ export async function getCollectionRelativeStrength(input: {
   });
 }
 
-// ChartInk-style "within 15% of its own multi-year closing high" breakout
-// screen, scoped to this collection's active members. Phase D.10: reads a
-// persisted snapshot instead of re-running computeWeeklyStrongStocks live
-// on every request - see getOrComputeWeeklyStrongSnapshot.
+// The Weekly Strong breakout screen (see weekly-strong-evaluator.ts for
+// the actual qualification logic - not restated here), scoped to this
+// collection's active members. Reads a persisted snapshot instead of
+// re-running computeWeeklyStrongStocks live on every request - see
+// getOrComputeWeeklyStrongSnapshot.
 export async function getCollectionWeeklyStrongStocks(input: { code: string }) {
   const collection = await requireCollectionByCode(input.code);
   const cacheKey = `collectionWeeklyStrongStocks:${collection.code}`;
@@ -267,8 +268,8 @@ export async function getCollectionWeeklyStrongStocks(input: { code: string }) {
 
 // Note: the old getCollectionWeeklyStrongStocksBacktest (count-only, live-
 // computed on every request) has been removed - see
-// weekly-strong-backtest.service.ts for the persisted replacement
-// (Phase C2). getActiveMemberInstrumentRows below is still shared by the
+// weekly-strong-backtest.service.ts for the persisted replacement.
+// getActiveMemberInstrumentRows below is still shared by the
 // two functions above and that new module.
 export async function getActiveMemberInstrumentRows(collectionId: string) {
   return db
@@ -357,12 +358,12 @@ export async function previewCollectionImport(input: { id: string; csvContent: s
 
 // Confirming an import does several things atomically in ONE transaction:
 // (1) the pre-existing active-flag update below, which stays the source
-// of truth for current/live Dashboard reads (Phase D #16); (2) creates
-// one new IMMUTABLE market_collection_versions snapshot dated
-// `effectiveFrom` (Phase D #2, #4) - never during dry-run
-// (previewCollectionImport above never calls this function); (3) Phase
-// D.5 lifecycle correctness - see the two invalidation blocks inline
-// below. If a version already exists for that exact effectiveFrom, the
+// of truth for current/live Dashboard reads; (2) creates one new
+// IMMUTABLE market_collection_versions snapshot dated `effectiveFrom` -
+// never during dry-run (previewCollectionImport above never calls this
+// function); (3) current/historical-membership lifecycle correctness -
+// see the two invalidation blocks inline below. If a version already
+// exists for that exact effectiveFrom, the
 // whole import is rejected (nothing is written) rather than silently
 // overwritten - use replaceCollectionVersionMembers
 // (market-collection-versions.service.ts) for an explicit, safeguarded
@@ -432,7 +433,7 @@ export async function importCollectionCsv(input: {
         })
         .where(eq(marketCollections.id, collection.id));
 
-      // Phase D.5 #2 - current_membership lifecycle. current_membership
+      // current_membership lifecycle: current_membership
       // runs are documented as "whatever this collection's active set is
       // AT GENERATION TIME" - if this import actually changed the active
       // set, every already-persisted current_membership run now reflects
@@ -488,7 +489,7 @@ export async function importCollectionCsv(input: {
         );
       }
 
-      // Phase D.5 #1 - new-version invalidation. This new version is now
+      // New-version invalidation: this new version is now
       // authoritative for the window [effectiveFrom, next version's
       // effectiveFrom or unbounded). Any historical_membership run whose
       // weekEnding falls in that exact window was necessarily resolved
@@ -536,7 +537,7 @@ export async function importCollectionCsv(input: {
   invalidateCacheByPrefix(`collectionRelativeStrength:${collection.code}:`);
   invalidateCacheByPrefix(`collectionWeeklyStrongStocks:${collection.code}`);
   invalidateCacheByPrefix(`collectionWeeklyStrongBacktest:${collection.code}`);
-  // Phase D.10 #5 - the AUTHORITATIVE invalidation for the persisted
+  // The AUTHORITATIVE invalidation for the persisted
   // snapshot (the in-process caches above are now just a short safety-net
   // layer on top of it, see COLLECTION_CACHE_TTL_MS). Membership changing
   // is exactly the kind of "underlying data actually changed" event the

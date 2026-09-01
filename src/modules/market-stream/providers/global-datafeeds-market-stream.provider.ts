@@ -4,6 +4,7 @@ import { db } from "../../../db/client";
 import { instruments } from "../../../db/schema";
 import { DATA_PROVIDER_KEY } from "../../../shared/constants";
 import { env } from "../../../shared/env";
+import { getErrorMessage } from "../../../shared/errors";
 import { logger } from "../../../shared/logger";
 import {
   GLOBAL_DATAFEEDS_MESSAGE_TYPE,
@@ -163,7 +164,7 @@ export class GlobalDatafeedsMarketStreamProvider {
           provider: DATA_PROVIDER_KEY.globalDatafeeds,
           exchange: subscription.exchange,
           symbol: subscription.symbol,
-          message: error instanceof Error ? error.message : "Unknown stream error",
+          message: getErrorMessage(error, "Unknown stream error"),
         },
         "Global Datafeeds subscription failed"
       );

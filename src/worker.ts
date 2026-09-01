@@ -14,6 +14,7 @@ import {
   syncWeeklyStrongBacktestIncremental,
 } from "./modules/weekly-strong-backtest/weekly-strong-backtest.service";
 import { JOB_NAMES, JOB_STATUS, QUEUE_NAMES } from "./shared/constants";
+import { getErrorMessage } from "./shared/errors";
 import { logger } from "./shared/logger";
 
 const connection = getRedisConnectionOptions();
@@ -47,7 +48,7 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
         .update(syncJobs)
         .set({
           status: JOB_STATUS.failed,
-          errorMessage: error instanceof Error ? error.message : "Job failed",
+          errorMessage: getErrorMessage(error, "Job failed"),
           updatedAt: new Date(),
         })
         .where(eq(syncJobs.id, syncJobId));
@@ -74,7 +75,7 @@ const worker = new Worker(
         if (exchange) {
           await syncWeeklyStrongBacktestIncremental(exchange).catch((error) => {
             logger.error(
-              { exchange, message: error instanceof Error ? error.message : "Unknown error" },
+              { exchange, message: getErrorMessage(error, "Unknown error") },
               "Weekly Strong backtest incremental sync failed"
             );
           });

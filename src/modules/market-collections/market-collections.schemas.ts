@@ -7,9 +7,9 @@ import { z } from "zod";
 // absent key (confirmed empirically: `exchangeSchema.optional().parse({})`
 // still yields "US", not undefined - a real zod-composition gotcha, not a
 // misunderstanding). For THIS endpoint specifically, "no exchange" must
-// mean "don't filter by exchange" (Phase D's country-derivation flow on
-// the Dashboard calls it with no filters at all to see every collection
-// across every country) - a silent "US" filter here made every one of
+// mean "don't filter by exchange" (the Dashboard's own country-derivation
+// flow calls it with no filters at all to see every collection across
+// every country) - a silent "US" filter here made every one of
 // this app's real BSE-only collections invisible.
 export const listCollectionsQuerySchema = z
   .object({

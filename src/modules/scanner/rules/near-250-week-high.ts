@@ -1,76 +1,43 @@
 import {
-  NEAR_250_WEEK_HIGH_RULE,
-  getEffectiveScannerLookbackWeeks,
-} from "../scanner.constants";
-import type { Near250WeekHighScanMatch, ScannerCandle } from "../scanner.types";
+  deriveScannerLookbackBars,
+  evaluateWeeklyStrongSeries,
+  type WeeklyStrongCandle,
+} from "../../market-data/weekly-strong-evaluator";
+import { getEffectiveScannerLookbackWeeks } from "../scanner.constants";
+import type { Near250WeekHighScanMatch } from "../scanner.types";
 
+// The Scanner's live near-high scan. This is now the SAME two-condition
+// Weekly Strong evaluator computeSymbolBreakoutBacktest (market-data.service.ts)
+// uses for the backtest overlay on the same page - previously this function
+// ran its own weekly-only simplification (a single close-vs-rolling-high
+// check), which could disagree with the backtest's two-condition answer for
+// the same symbol at the same moment. See docs/KNOWN_ISSUES.md.
 export function calculateNear250WeekHighScan(
-  candles: ScannerCandle[],
+  dailyCandles: WeeklyStrongCandle[],
+  weeklyCandles: WeeklyStrongCandle[],
   requestedLookbackWeeks: number
 ): Near250WeekHighScanMatch | null {
-  const sortedCandles = [...candles].sort((a, b) => a.time.localeCompare(b.time));
   const lookbackWeeks = getEffectiveScannerLookbackWeeks(
     requestedLookbackWeeks,
-    sortedCandles.length
+    weeklyCandles.length
   );
   if (!lookbackWeeks) return null;
 
-  const latestWindow = sortedCandles.slice(-lookbackWeeks);
-  const latest = latestWindow[latestWindow.length - 1];
-  const highestClose250 = Math.max(...latestWindow.map((candle) => candle.close));
-  const threshold85 = highestClose250 * NEAR_250_WEEK_HIGH_RULE.thresholdMultiplier;
-  const currentClose = latest.close;
-  const matched = currentClose >= threshold85;
-  const currentVsHighestClosePct = (currentClose / highestClose250) * 100;
-  const distanceAboveThresholdPct = ((currentClose - threshold85) / threshold85) * 100;
-  const highlightTimes = getRollingHighlightTimes(sortedCandles, lookbackWeeks);
+  const { dailyLookbackBars, weeklyLookbackBars } = deriveScannerLookbackBars(lookbackWeeks);
+  const seriesPoints = evaluateWeeklyStrongSeries(dailyCandles, weeklyCandles, {
+    dailyLookbackBars,
+    weeklyLookbackBars,
+  });
+  if (seriesPoints.length === 0) return null;
 
-  if (!matched) {
-    return {
-      matched,
-      startTime: highlightTimes[0] ?? latest.time,
-      endTime: latest.time,
-      highlightTimes,
-      metrics: {
-        currentClose,
-        highestClose250,
-        threshold85,
-        currentVsHighestClosePct,
-        distanceAboveThresholdPct,
-        lookbackWeeks,
-      },
-    };
-  }
+  const highlightTimes = seriesPoints.filter((point) => point.passes).map((point) => point.time);
+  const latest = seriesPoints[seriesPoints.length - 1];
 
   return {
-    matched,
+    matched: latest.passes,
     startTime: highlightTimes[0] ?? latest.time,
     endTime: latest.time,
     highlightTimes,
-    metrics: {
-      currentClose,
-      highestClose250,
-      threshold85,
-      currentVsHighestClosePct,
-      distanceAboveThresholdPct,
-      lookbackWeeks,
-    },
+    metrics: { lookbackWeeks },
   };
-}
-
-function getRollingHighlightTimes(candles: ScannerCandle[], lookbackWeeks: number) {
-  const highlightTimes: string[] = [];
-
-  for (let index = lookbackWeeks - 1; index < candles.length; index++) {
-    const window = candles.slice(index - lookbackWeeks + 1, index + 1);
-    const highestClose = Math.max(...window.map((candle) => candle.close));
-    const threshold = highestClose * NEAR_250_WEEK_HIGH_RULE.thresholdMultiplier;
-    const candle = candles[index];
-
-    if (candle.close >= threshold) {
-      highlightTimes.push(candle.time);
-    }
-  }
-
-  return highlightTimes;
 }

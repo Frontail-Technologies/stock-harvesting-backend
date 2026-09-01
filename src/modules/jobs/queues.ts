@@ -6,6 +6,7 @@ import {
   SUPPORTED_EXCHANGE_CODES,
 } from "../../shared/constants";
 import { env } from "../../shared/env";
+import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 
 const REPEATABLE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
@@ -37,7 +38,7 @@ export function getMarketDataQueue() {
       logger.warn(
         {
           message:
-            error instanceof Error ? error.message : "Unknown queue error",
+            getErrorMessage(error, "Unknown queue error"),
         },
         "Market data queue Redis connection failed; job features degraded",
       );
@@ -64,7 +65,7 @@ export async function scheduleRepeatableMarketDataSync() {
       logger.warn(
         {
           exchange,
-          message: error instanceof Error ? error.message : "Unknown error",
+          message: getErrorMessage(error, "Unknown error"),
         },
         "Failed to schedule repeatable market data sync",
       );

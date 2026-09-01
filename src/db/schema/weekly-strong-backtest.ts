@@ -4,11 +4,11 @@ import { marketCollectionVersions } from "./market-collection-versions";
 import { marketCollections } from "./market-collections";
 import { instruments } from "./market-data";
 
-// "current_membership" (Phase C2): generated against whatever the
-// segment's CURRENT active membership is at generation time - recorded
-// explicitly rather than silently presented as historically accurate
-// point-in-time index membership. "historical_membership" (Phase D):
-// generated against the collection's point-in-time membership version
+// "current_membership": generated against whatever the segment's CURRENT
+// active membership is at generation time - recorded explicitly rather
+// than silently presented as historically accurate point-in-time index
+// membership. "historical_membership": generated against the
+// collection's point-in-time membership version
 // that was actually effective for that specific completed week (see
 // getCollectionMembershipAt) - membershipVersionId below is always
 // populated for these runs and NULL for current_membership runs. The two
@@ -42,7 +42,7 @@ export const weeklyStrongBacktestRuns = pgTable(
     // Populated only for membershipMode = "historical_membership" - the
     // exact point-in-time snapshot this run was evaluated against, so
     // every historically-correct run is traceable to the precise version
-    // used (Phase D requirement). NULL for current_membership runs, which
+    // used. NULL for current_membership runs, which
     // read whatever was active at generation time and don't reference a
     // version row. onDelete "restrict" (the FK default), not cascade: a
     // persisted run must never silently lose its provenance if a version

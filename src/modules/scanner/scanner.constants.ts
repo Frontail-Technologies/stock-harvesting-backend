@@ -25,7 +25,3 @@ export function getEffectiveScannerLookbackWeeks(
 
   return fallback ?? null;
 }
-
-export const NEAR_250_WEEK_HIGH_RULE = {
-  thresholdMultiplier: 0.85,
-} as const;

@@ -14,23 +14,22 @@ import {
   writeDashboardSnapshot,
 } from "./dashboard-snapshot-store";
 
-// Phase D.10 #1/#2 - THE fix for "the expensive base calculation should
-// happen once, not once per derived view". Returns the FULL base metrics
-// array for this collection's active-member pool - Sector/Industry cards
-// (and, before Phase D.10, an entirely unused third `rsQuery` call - see
-// the report) all used to independently re-run
-// computeAllRelativeStrengthMetrics from scratch. Callers now share this
-// one persisted snapshot and derive their own view from it in-memory
-// (pickTopRelativeStrengthRows / groupRelativeStrengthMetrics - pure, no
-// candle I/O) - see getCollectionRelativeStrength in
-// market-collections.service.ts.
+// THE fix for "the expensive base calculation should happen once, not
+// once per derived view". Returns the FULL base metrics array for this
+// collection's active-member pool - Sector/Industry cards (and, before
+// this fix, an entirely unused third `rsQuery` call) all used to
+// independently re-run computeAllRelativeStrengthMetrics from scratch.
+// Callers now share this one persisted snapshot and derive their own view
+// from it in-memory (pickTopRelativeStrengthRows /
+// groupRelativeStrengthMetrics - pure, no candle I/O) - see
+// getCollectionRelativeStrength in market-collections.service.ts.
 //
 // On a snapshot miss (never generated yet, or just invalidated - see
 // invalidateCollectionSnapshots below) this computes synchronously inline
-// and persists the result before returning - the exception/bootstrap path
-// documented in the Phase D.10 report (#8), not what a normal request
-// depends on: every request after this one, for this collection, hits the
-// stored row directly until something actually invalidates it again.
+// and persists the result before returning - an exception/bootstrap path,
+// not what a normal request depends on: every request after this one, for
+// this collection, hits the stored row directly until something actually
+// invalidates it again.
 export async function getOrComputeCollectionRelativeStrengthBase(
   collectionId: string,
   exchange: string,
@@ -59,8 +58,8 @@ export async function getOrComputeCollectionRelativeStrengthBase(
 
 // Same pattern for the Weekly Strong passing-stocks list (the table and
 // its matching Dashboard card) - computeWeeklyStrongStocks itself is
-// completely unchanged (Phase D.10 explicitly does not touch formulas),
-// only how often it actually runs.
+// completely unchanged - this only changes how often it actually runs,
+// never the formula itself.
 export async function getOrComputeWeeklyStrongSnapshot(
   collectionId: string,
   exchange: string,
@@ -81,7 +80,7 @@ export async function getOrComputeWeeklyStrongSnapshot(
   return computed;
 }
 
-// Invalidation (Phase D.10 #5) - called when this collection's underlying
+// Invalidation - called when this collection's underlying
 // data actually changes (a confirmed admin import - see
 // importCollectionCsv) rather than relied on as a fixed TTL. Deletes both
 // metric types for this collection; the next read of either recomputes

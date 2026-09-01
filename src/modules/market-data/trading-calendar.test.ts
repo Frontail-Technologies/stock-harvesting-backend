@@ -63,7 +63,7 @@ describe("isCompletedTradingWeek", () => {
   });
 
   it("is not complete over the trailing weekend of the same week", () => {
-    // Deliberate design choice (see the Phase C1.5 report): a week only
+    // Deliberate design choice: a week only
     // becomes "complete" once evaluation has moved into the FOLLOWING ISO
     // week, not merely once its last trading day's close has passed - a
     // delayed/corrective EOD sync over the weekend could still touch

@@ -20,7 +20,7 @@ import { watchlistsRouter } from "./modules/watchlists/watchlists.routes";
 import { weeklyStrongBacktestRouter } from "./modules/weekly-strong-backtest/weekly-strong-backtest.routes";
 import { API_ROUTES, HTTP_STATUS } from "./shared/constants";
 import { corsOrigins } from "./shared/env";
-import { errorHandler, notFound } from "./shared/errors";
+import { errorHandler, getErrorMessage, notFound } from "./shared/errors";
 import { sendData } from "./shared/http";
 import { logger } from "./shared/logger";
 
@@ -143,7 +143,7 @@ async function checkDatabaseHealth() {
     };
   } catch (error) {
     logger.error(
-      { message: error instanceof Error ? error.message : "Unknown error" },
+      { message: getErrorMessage(error, "Unknown error") },
       "Database health check failed"
     );
 

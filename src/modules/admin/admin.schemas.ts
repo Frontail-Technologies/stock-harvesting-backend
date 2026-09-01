@@ -129,8 +129,8 @@ export const updateCollectionBodySchema = z
   .strict();
 
 // Dry-run preview only diffs symbols against current membership - it never
-// creates a version, so effectiveFrom isn't needed here (Phase D #4: "Do
-// NOT create a version during dry-run").
+// creates a version, so effectiveFrom isn't needed here (a dry-run must
+// never create a version).
 export const importCollectionCsvBodySchema = z
   .object({
     csvContent: z.string().min(1).max(2_000_000),
@@ -140,8 +140,8 @@ export const importCollectionCsvBodySchema = z
   .strict();
 
 // Confirming an import additionally requires the date this constituent
-// snapshot becomes authoritative for historical membership resolution
-// (Phase D #4/#5) - required here, unlike the dry-run schema above.
+// snapshot becomes authoritative for historical membership resolution -
+// required here, unlike the dry-run schema above.
 export const confirmCollectionImportBodySchema = importCollectionCsvBodySchema.extend({
   effectiveFrom: z.string().date(),
 });

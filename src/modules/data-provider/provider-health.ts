@@ -1,4 +1,5 @@
 ﻿import { PROVIDER_STATUS } from "../../shared/constants";
+import { getErrorMessage } from "../../shared/errors";
 import type { ProviderHealthStatus } from "./data-provider.types";
 
 export function configuredProviderMissing(message = "Provider credentials are not configured"): ProviderHealthStatus {
@@ -44,7 +45,7 @@ export function getConfiguredExpiryHealth(
 }
 
 export function providerHealthFromError(error: unknown): ProviderHealthStatus {
-  const message = error instanceof Error ? error.message : "Provider health check failed";
+  const message = getErrorMessage(error, "Provider health check failed");
   const lowerMessage = message.toLowerCase();
   const expired = [
     "expired",

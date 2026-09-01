@@ -65,7 +65,7 @@ async function requestValue<T>(
     const bodyText = await response.text().catch(() => "");
     throw new AppError(
       HTTP_STATUS.badGateway,
-      ERROR_CODES.internalError,
+      ERROR_CODES.providerError,
       `Global Datafeeds Fundamentals request failed (${response.status}): ${bodyText.slice(0, 300)}`,
     );
   }

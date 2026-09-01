@@ -8,6 +8,7 @@ export const ERROR_MESSAGES = {
   invalidRequestData: "Invalid request data",
   notFound: "Resource not found",
   providerNotConfigured: "Data provider is not configured",
+  providerRequestFailed: "Data provider request failed",
   aiProviderNotConfigured: "AI provider is not configured",
   aiSettingsMigrationRequired: "AI settings database migration is required",
   aiRequestFailed: "AI request failed",

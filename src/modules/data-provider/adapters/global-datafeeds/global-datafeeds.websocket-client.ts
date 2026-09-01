@@ -154,7 +154,7 @@ export class GlobalDatafeedsWebSocketClient {
     if (this.socket?.readyState !== WebSocket.OPEN) {
       throw new AppError(
         HTTP_STATUS.badGateway,
-        ERROR_CODES.badRequest,
+        ERROR_CODES.providerError,
         "Global Datafeeds socket is not open"
       );
     }

@@ -7,8 +7,8 @@ import { users } from "./users";
 // An IMMUTABLE point-in-time snapshot of a collection's full constituent
 // list, created on every confirmed (non-dry-run) admin import - alongside,
 // not instead of, market_collection_members' existing active-boolean
-// model, which stays the source of truth for current/live Dashboard reads
-// (see the Phase D report). Never updated in place once created; a
+// model, which stays the source of truth for current/live Dashboard reads.
+// Never updated in place once created; a
 // correction creates a new snapshot for the SAME version id via an
 // explicit replace workflow (market-collection-versions.service.ts),
 // never a silent overwrite of member rows.

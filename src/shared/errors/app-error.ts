@@ -32,3 +32,15 @@ export function notFound(message: string = ERROR_MESSAGES.notFound) {
 export function conflict(message: string = ERROR_MESSAGES.conflict, details?: unknown) {
   return new AppError(HTTP_STATUS.conflict, ERROR_CODES.conflict, message, details);
 }
+
+// A data-provider/vendor call failed - status and code now agree (both mean
+// "upstream", not "the client's request was malformed"). `details` should
+// stay client-safe (see error-handler.ts, which serializes it directly to
+// the response) - callers needing to retain raw vendor error text for their
+// own logs should log it themselves before calling this, not pass it here.
+export function providerError(
+  message: string = ERROR_MESSAGES.providerRequestFailed,
+  details?: unknown
+) {
+  return new AppError(HTTP_STATUS.badGateway, ERROR_CODES.providerError, message, details);
+}

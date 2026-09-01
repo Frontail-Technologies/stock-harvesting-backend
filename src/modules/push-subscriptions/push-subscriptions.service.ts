@@ -4,6 +4,7 @@ import webPush from "web-push";
 import { db } from "../../db/client";
 import { pushSubscriptions } from "../../db/schema";
 import { env } from "../../shared/env";
+import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import type { PriceAlertCondition } from "../price-alerts/price-alerts.service";
 
@@ -128,7 +129,7 @@ export async function sendPriceAlertNotification(input: {
         continue;
       }
       logger.warn(
-        { subscriptionId: row.id, message: error instanceof Error ? error.message : "Unknown push error" },
+        { subscriptionId: row.id, message: getErrorMessage(error, "Unknown push error") },
         "Push notification send failed"
       );
     }

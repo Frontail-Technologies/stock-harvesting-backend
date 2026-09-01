@@ -15,7 +15,7 @@ import {
   type UserPlan,
   type UserRole,
 } from "../../shared/constants";
-import { badRequest, notFound } from "../../shared/errors";
+import { badRequest, getErrorMessage, notFound } from "../../shared/errors";
 import {
   backfillDailyCandles,
   backfillIndexCandles,
@@ -341,7 +341,7 @@ export async function updateAdminDataProviderSettings(input: {
       logger.warn(
         {
           provider: updated.key,
-          message: error instanceof Error ? error.message : "Unknown error",
+          message: getErrorMessage(error, "Unknown error"),
         },
         "Failed to close realtime connection after provider disable"
       );
@@ -404,7 +404,7 @@ export async function triggerInstrumentSync(input: {
           syncJobId: job.id,
           type: SYNC_JOB_TYPES.instrumentSync,
           exchange: input.exchange,
-          message: error instanceof Error ? error.message : "Sync failed",
+          message: getErrorMessage(error, "Sync failed"),
         },
         "Ingestion job failed"
       );
@@ -412,7 +412,7 @@ export async function triggerInstrumentSync(input: {
         .update(syncJobs)
         .set({
           status: JOB_STATUS.failed,
-          errorMessage: error instanceof Error ? error.message : "Sync failed",
+          errorMessage: getErrorMessage(error, "Sync failed"),
           updatedAt: new Date(),
         })
         .where(eq(syncJobs.id, job.id));
@@ -452,7 +452,7 @@ export async function triggerSectorClassificationSync(input: { actorUserId: stri
       {
         syncJobId: job.id,
         type: SYNC_JOB_TYPES.sectorClassificationSync,
-        message: error instanceof Error ? error.message : "Sync failed",
+        message: getErrorMessage(error, "Sync failed"),
       },
       "Ingestion job failed"
     );
@@ -460,7 +460,7 @@ export async function triggerSectorClassificationSync(input: { actorUserId: stri
       .update(syncJobs)
       .set({
         status: JOB_STATUS.failed,
-        errorMessage: error instanceof Error ? error.message : "Sync failed",
+        errorMessage: getErrorMessage(error, "Sync failed"),
         updatedAt: new Date(),
       })
       .where(eq(syncJobs.id, job.id));
@@ -504,7 +504,7 @@ export async function triggerIndexCandleBackfill(input: {
       {
         syncJobId: job.id,
         type: SYNC_JOB_TYPES.indexCandleBackfill,
-        message: error instanceof Error ? error.message : "Backfill failed",
+        message: getErrorMessage(error, "Backfill failed"),
       },
       "Ingestion job failed"
     );
@@ -512,7 +512,7 @@ export async function triggerIndexCandleBackfill(input: {
       .update(syncJobs)
       .set({
         status: JOB_STATUS.failed,
-        errorMessage: error instanceof Error ? error.message : "Backfill failed",
+        errorMessage: getErrorMessage(error, "Backfill failed"),
         updatedAt: new Date(),
       })
       .where(eq(syncJobs.id, job.id));
@@ -567,7 +567,7 @@ export async function triggerPriceRefresh(input: {
           syncJobId: job.id,
           type: SYNC_JOB_TYPES.priceRefresh,
           exchange: input.exchange,
-          message: error instanceof Error ? error.message : "Price refresh failed",
+          message: getErrorMessage(error, "Price refresh failed"),
         },
         "Ingestion job failed"
       );
@@ -575,7 +575,7 @@ export async function triggerPriceRefresh(input: {
         .update(syncJobs)
         .set({
           status: JOB_STATUS.failed,
-          errorMessage: error instanceof Error ? error.message : "Price refresh failed",
+          errorMessage: getErrorMessage(error, "Price refresh failed"),
           updatedAt: new Date(),
         })
         .where(eq(syncJobs.id, job.id));
@@ -705,7 +705,7 @@ export async function triggerWeeklyStrongBacktestBackfill(input: {
         .update(syncJobs)
         .set({
           status: JOB_STATUS.failed,
-          errorMessage: error instanceof Error ? error.message : "Backfill failed",
+          errorMessage: getErrorMessage(error, "Backfill failed"),
           updatedAt: new Date(),
         })
         .where(eq(syncJobs.id, job.id));
@@ -721,7 +721,7 @@ export async function triggerWeeklyStrongBacktestBackfill(input: {
 }
 
 // Same queued-if-Redis-else-inline pattern as triggerWeeklyStrongBacktestBackfill
-// above. Reuses runWeeklyStrongBacktestHistoricalRebuild (Phase D) - grouped
+// above. Reuses runWeeklyStrongBacktestHistoricalRebuild - grouped
 // per resolved membership version, never blindly recomputing every
 // collection.
 export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
@@ -755,7 +755,7 @@ export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
         .update(syncJobs)
         .set({
           status: JOB_STATUS.failed,
-          errorMessage: error instanceof Error ? error.message : "Historical rebuild failed",
+          errorMessage: getErrorMessage(error, "Historical rebuild failed"),
           updatedAt: new Date(),
         })
         .where(eq(syncJobs.id, job.id));

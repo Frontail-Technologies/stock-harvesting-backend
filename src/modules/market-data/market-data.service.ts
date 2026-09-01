@@ -4,7 +4,7 @@ import { db, type DbOrTx } from "../../db/client";
 import { candles, instruments, marketCollections } from "../../db/schema";
 import { getOrSetCache } from "../../shared/cache";
 import { logger } from "../../shared/logger";
-import { AppError } from "../../shared/errors";
+import { AppError, getErrorMessage } from "../../shared/errors";
 import {
   CANDLE_SOURCE,
   CANDLE_TIMEFRAME,
@@ -43,6 +43,7 @@ import {
 import { getLatestExpectedTradingDay } from "./trading-calendar";
 import type { MoveFilter } from "./market-data.schemas";
 import {
+  deriveScannerLookbackBars,
   evaluateWeeklyStrongLatest,
   evaluateWeeklyStrongSeries,
   excludeIncompleteTradingWeek,
@@ -112,7 +113,7 @@ export type RelativeStrengthMetricRow = {
   change55dPct: number;
 };
 
-type MetricCandle = {
+export type MetricCandle = {
   symbol: string;
   time: string;
   open: number;
@@ -304,7 +305,7 @@ export type RelativeStrengthInstrumentInput = {
 // dashboard-snapshots.service.ts can call it exactly once per invalidation
 // cycle and persist the result, instead of the Dashboard's read path
 // (getCollectionRelativeStrength/getIndexRelativeStrength) each running it
-// independently on every cache-cold request (Phase D.10).
+// independently on every cache-cold request.
 export async function computeAllRelativeStrengthMetrics(
   instrumentRows: RelativeStrengthInstrumentInput[],
   exchange: string
@@ -374,8 +375,8 @@ export type GroupRelativeStrengthRow = {
 // to carry real sector/industry classification (from the sector-classification
 // sync) - instruments with no classification yet are silently excluded
 // rather than lumped into a misleading "unclassified" group.
-// Pure/cheap (no candle I/O) - extracted (Phase D.10) so
-// dashboard-snapshots.service.ts can group a STORED base metrics array
+// Pure/cheap (no candle I/O) - extracted so dashboard-snapshots.service.ts
+// can group a STORED base metrics array
 // the same way this always grouped a freshly-computed one. Averages the
 // 55-day change % of every metric row sharing a sector/industry; a row
 // with no classification for the requested groupBy is silently excluded
@@ -418,12 +419,10 @@ export async function computeGroupRelativeStrength(
   return groupRelativeStrengthMetrics(allMetrics, groupBy, limit);
 }
 
-// ChartInk-style "near multi-year close" breakout screen: a stock passes only
-// if its latest weekly close is within 15% of its own 250-week closing high AND its
-// latest daily close is within 15% of its own 1252-day (~5yr) closing high. Unlike
-// the relative-strength metrics above (which rank everything), this filters
-// down to only the stocks that pass both conditions. See
-// weekly-strong-evaluator.ts for the shared decision logic and constants.
+// The Weekly Strong breakout screen. Unlike the relative-strength metrics
+// above (which rank everything), this filters down to only the stocks
+// that pass the qualification rule. See weekly-strong-evaluator.ts for the
+// actual decision logic and constants - not restated here.
 
 export type WeeklyStrongStockRow = {
   symbol: string;
@@ -510,15 +509,15 @@ export async function computeWeeklyStrongStocks(
 
 // Re-runs the same weekly-strong breakout check at every historical week
 // over the backtest window, instead of just today, and counts how many pool
-// members passed at each point - powers the persisted 250-week backtest
-// backfill (Phase C2). Superseded computeWeeklyStrongStocksBacktest
-// (count-only, live-computed on every Dashboard page load) - that
-// function has been removed now that the Dashboard reads persisted
-// weekly_strong_backtest_runs/_members instead of recomputing on read.
+// members passed at each point - powers the persisted backtest backfill.
+// Superseded computeWeeklyStrongStocksBacktest (count-only, live-computed
+// on every Dashboard page load) - that function has been removed now that
+// the Dashboard reads persisted weekly_strong_backtest_runs/_members
+// instead of recomputing on read.
 export const WEEKLY_STRONG_BACKTEST_DEFAULT_WEEKS = 250;
-// Fetch window needs to cover the oldest backtest week's own trailing
-// lookback (250 weeks / 1252 days) *plus* the backtest range itself
-// (another 250 weeks) - comfortably over both at 10 years.
+// Fetch window needs to cover both the oldest backtest week's own trailing
+// evaluator lookback (see weekly-strong-evaluator.ts's own constants) AND
+// the backtest range itself - comfortably over both at 10 years.
 const WEEKLY_STRONG_BACKTEST_FETCH_YEARS = 10;
 
 export type WeeklyStrongBacktestMemberRow = {
@@ -537,8 +536,8 @@ export type WeeklyStrongBacktestWeekMembers = {
 // Fetches each pool member's full historical daily+weekly series exactly
 // ONCE (not once per week evaluated), then runs the canonical evaluator's
 // full-series pass in one call per instrument - this is the "don't fetch
-// the same instrument history 250 separate times" requirement. The Phase
-// C2 backfill job calls this directly and persists its output; nothing
+// the same instrument history 250 separate times" requirement. The
+// backfill job calls this directly and persists its output; nothing
 // recomputes this on a Dashboard read.
 export async function computeWeeklyStrongBacktestMembers(
   instrumentRows: Array<{
@@ -622,6 +621,48 @@ export type SymbolBreakoutBacktestStats = {
 
 type BreakoutTrade = { entryIndex: number; exitIndex: number; returnPct: number };
 
+export type SymbolWeeklyStrongSeriesInput = {
+  dailyRows: MetricCandle[];
+  weeklyRows: MetricCandle[];
+};
+
+// Shared fetch+gate step for any per-symbol Weekly Strong evaluation - the
+// Scanner's live near-high scan (scanner/rules/near-250-week-high.ts, via
+// scanner.service.ts) and this file's own backtest below both need exactly
+// this: the same daily+weekly series, the same completed-week trim, the
+// same minimum-history gate. Factored out so the two call sites fetch and
+// gate identically and can't silently diverge on WHAT data they evaluate -
+// only computeSymbolBreakoutBacktest used to do this inline, and the live
+// scan used to run its own, different (weekly-only) query entirely. See
+// docs/KNOWN_ISSUES.md for the discrepancy this closes.
+export async function getSymbolWeeklyStrongSeriesInput(
+  symbol: string,
+  exchange: string
+): Promise<SymbolWeeklyStrongSeriesInput | null> {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const { dailyCandles, weeklyCandles } = await readDailyAndWeeklyMetricCandles({
+    exchange,
+    symbols: [normalizedSymbol],
+    dailyFrom: getDefaultChartHistoryFromDate(),
+    weeklyFrom: getDefaultChartHistoryFromDate(),
+  });
+
+  const dailyRows = groupMetricCandlesBySymbol(dailyCandles).get(normalizedSymbol) ?? [];
+  // Same completed-week trim used everywhere else in the Weekly Strong
+  // pipeline - the series must stop at the latest COMPLETED week, never
+  // include today's still-forming week, live or historical.
+  const weeklyRows = excludeIncompleteTradingWeek(
+    groupMetricCandlesBySymbol(weeklyCandles).get(normalizedSymbol) ?? [],
+    exchange
+  );
+
+  if (!hasSufficientWeeklyStrongHistory(dailyRows.length, weeklyRows.length)) {
+    return null;
+  }
+
+  return { dailyRows, weeklyRows };
+}
+
 // Trade-by-trade backtest of the SAME two-condition breakout rule as
 // computeWeeklyStrongStocks above, for one symbol over its full available
 // history - this is what the Scanner's backtest stats overlay should be
@@ -633,34 +674,16 @@ export async function computeSymbolBreakoutBacktest(
   exchange: string,
   lookbackWeeks = WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS
 ): Promise<SymbolBreakoutBacktestStats | null> {
-  const normalizedSymbol = normalizeSymbol(symbol);
-  const { dailyCandles, weeklyCandles } = await readDailyAndWeeklyMetricCandles({
-    exchange,
-    symbols: [normalizedSymbol],
-    dailyFrom: getDefaultChartHistoryFromDate(),
-    weeklyFrom: getDefaultChartHistoryFromDate(),
-  });
-
-  const dailyRows = groupMetricCandlesBySymbol(dailyCandles).get(normalizedSymbol) ?? [];
-  // Same completed-week trim as the Weekly Strong list/backtest above -
-  // this backtest's own historical series must stop at the same "latest
-  // completed week" boundary, not include today's still-forming week.
-  const weeklyRows = excludeIncompleteTradingWeek(
-    groupMetricCandlesBySymbol(weeklyCandles).get(normalizedSymbol) ?? [],
-    exchange
-  );
-
-  if (!hasSufficientWeeklyStrongHistory(dailyRows.length, weeklyRows.length)) {
-    return null;
-  }
+  const seriesInput = await getSymbolWeeklyStrongSeriesInput(symbol, exchange);
+  if (!seriesInput) return null;
+  const { dailyRows, weeklyRows } = seriesInput;
 
   // lookbackWeeks is caller-chosen (Scanner's own lookback multiplier) -
-  // genuinely different orchestration from the fixed 250/1252-bar Weekly
-  // Strong screen elsewhere, so this window-size formula (unchanged from
-  // before) is preserved exactly rather than folded into the fixed
-  // defaults. Only the shared per-bar decision logic is now common.
-  const weeklyLookbackBars = Math.max(1, Math.round(lookbackWeeks));
-  const dailyLookbackBars = Math.max(1, Math.round(lookbackWeeks * 5));
+  // genuinely different orchestration from the fixed-window Weekly Strong
+  // screen elsewhere, so this window-size formula (unchanged from before)
+  // is preserved exactly rather than folded into the fixed defaults. Only
+  // the shared per-bar decision logic is now common.
+  const { dailyLookbackBars, weeklyLookbackBars } = deriveScannerLookbackBars(lookbackWeeks);
   const seriesPoints = evaluateWeeklyStrongSeries(dailyRows, weeklyRows, {
     dailyLookbackBars,
     weeklyLookbackBars,
@@ -786,7 +809,7 @@ function buildStockFilters(input: {
 // All 4 dashboard cards rank by the same 55-day change % now (see
 // RelativeStrengthMetricRow.change55dPct), so this is a single top-N
 // selection rather than a union across 4 separately-ranked metrics.
-// Exported (Phase D.10) so dashboard-snapshots.service.ts can slice a
+// Exported so dashboard-snapshots.service.ts can slice a
 // STORED base metrics array the same way this always sliced a freshly-
 // computed one - pure/cheap (no candle I/O), safe to call on read.
 export function pickTopRelativeStrengthRows(
@@ -973,11 +996,9 @@ export async function getChartCandles(input: {
     exchange,
   });
 
-  if (
-    dailyRows.length === 0 ||
-    hasLikelySplitDiscontinuity(dailyRows) ||
-    shouldBackfillRequestedHistory(dailyRows, from, input.from)
-  ) {
+  const freshnessAction = decideChartCandleFreshnessAction(dailyRows, from, input.from, exchange);
+
+  if (freshnessAction === "backfill") {
     await safeProviderAction("market-data.chart-candle-backfill", () =>
       runChartBackfillOnce({
         symbol,
@@ -993,13 +1014,10 @@ export async function getChartCandles(input: {
       to: input.to,
       exchange,
     });
-  } else if (isLatestDailyCandleStale(dailyRows, exchange)) {
-    // The branch above only ever fires for empty/split/missing-history
-    // data - once a symbol has any daily history, this is the only check
-    // that keeps serving it forever from re-checking freshness. Only the
-    // latest row is out of date, so this does a targeted incremental fetch
-    // (syncLatestDailyCandlesForSymbols, a ~14-day window) instead of the
-    // full-range backfill above.
+  } else if (freshnessAction === "incremental-refresh") {
+    // Only the latest row is out of date, so this does a targeted
+    // incremental fetch (syncLatestDailyCandlesForSymbols, a ~14-day
+    // window) instead of the full-range backfill above.
     await safeProviderAction("market-data.chart-candle-freshness-refresh", () =>
       runLatestCandleRefreshOnce({ symbol, exchange })
     );
@@ -1201,6 +1219,34 @@ export function isLatestDailyCandleStale(
   const latest = rows[rows.length - 1]?.time;
   if (!latest) return false;
   return latest < getLatestExpectedTradingDay(exchange, at);
+}
+
+export type ChartCandleFreshnessAction = "backfill" | "incremental-refresh" | "none";
+
+// The exact freshness/completeness decision getChartCandles makes before
+// deciding whether (and how) to call the provider - extracted as its own
+// pure function so the decision itself is directly testable without a live
+// DB/provider (see market-data.freshness.test.ts). Order matters:
+// missing/discontinuous/incomplete-history conditions take priority over
+// mere staleness - a symbol with no usable history needs a full re-fetch,
+// not just the latest few days.
+export function decideChartCandleFreshnessAction(
+  dailyRows: Array<{ time: string; close: string | number }>,
+  from: string,
+  requestedFrom: string | undefined,
+  exchange: string
+): ChartCandleFreshnessAction {
+  if (
+    dailyRows.length === 0 ||
+    hasLikelySplitDiscontinuity(dailyRows) ||
+    shouldBackfillRequestedHistory(dailyRows, from, requestedFrom)
+  ) {
+    return "backfill";
+  }
+  if (isLatestDailyCandleStale(dailyRows, exchange)) {
+    return "incremental-refresh";
+  }
+  return "none";
 }
 
 // Concurrent chart requests for the same stale exchange+symbol collapse into
@@ -1441,7 +1487,7 @@ async function readDailyAndWeeklyMetricCandles(input: {
             {
               exchange: input.exchange,
               symbol,
-              message: error instanceof Error ? error.message : "Seed backfill failed",
+              message: getErrorMessage(error, "Seed backfill failed"),
             },
             "Relative strength seed backfill failed for symbol"
           );
@@ -1518,9 +1564,11 @@ function groupMetricCandlesBySymbol(rows: MetricCandle[]) {
 // latest close: the close 54 trading sessions before it, using actual
 // daily candle rows (not calendar days), so weekends/holidays never skew
 // the lookback.
-const CHANGE_55D_LOOKBACK_BARS = 54;
+// Exported for direct regression testing only (pure function, no other
+// caller needs it outside this file) - see market-data.55-day-change.test.ts.
+export const CHANGE_55D_LOOKBACK_BARS = 54;
 
-function calculate55DayChange(dailyRows: MetricCandle[]): number {
+export function calculate55DayChange(dailyRows: MetricCandle[]): number {
   const latest = dailyRows[dailyRows.length - 1];
   const base = dailyRows[dailyRows.length - 1 - CHANGE_55D_LOOKBACK_BARS];
 
@@ -1723,7 +1771,7 @@ export async function backfillIndexCandles(exchange: string = NSE_INDEX_EXCHANGE
         {
           exchange,
           symbol: row.symbol,
-          message: error instanceof Error ? error.message : "Backfill failed",
+          message: getErrorMessage(error, "Backfill failed"),
         },
         "Index candle backfill failed for symbol"
       );
@@ -1741,15 +1789,15 @@ export async function backfillIndexCandles(exchange: string = NSE_INDEX_EXCHANGE
 // computeGroupRelativeStrength). Defaults to NSE_IDX to preserve existing
 // callers; pass BSE_IDX for the BSE index box.
 //
-// Phase D.10 - this used to call computeRelativeStrengthMetrics (a live,
-// uncached, years-of-candles computation) on EVERY request, unlike the
+// This used to call computeRelativeStrengthMetrics (a live, uncached,
+// years-of-candles computation) on EVERY request, unlike the
 // collection-scoped RS surfaces which at least had a short in-process
 // cache. Now reads a persisted snapshot (scope "index_exchange", keyed by
 // the exchange code - indices aren't members of any market_collection, so
 // there's no collectionId to key this by) and derives the limited/sorted
 // view from it via pickTopRelativeStrengthRows - pure, no candle I/O. On a
 // miss it computes once and persists before returning (the same
-// exception/bootstrap path documented in the Phase D.10 report).
+// exception/bootstrap path as the collection-scoped version above).
 export async function getIndexRelativeStrength(
   limit: number,
   exchange: string = NSE_INDEX_EXCHANGE
@@ -1828,7 +1876,7 @@ export async function listSupportedExchanges(): Promise<ProviderExchange[]> {
         eodhdExchanges = (await eodhdAdapter.fetchExchanges?.()) ?? [];
       } catch (error) {
         logger.warn(
-          { message: error instanceof Error ? error.message : "Unknown provider error" },
+          { message: getErrorMessage(error, "Unknown provider error") },
           "Unable to fetch EODHD exchanges list"
         );
       }
@@ -2054,7 +2102,7 @@ async function fetchLatestDailyCandlesFromStoredInstruments(input: {
         {
           exchange: input.exchange,
           symbol,
-          message: error instanceof Error ? error.message : "Unknown provider error",
+          message: getErrorMessage(error, "Unknown provider error"),
         },
         "Latest candle sync skipped symbol"
       );
@@ -2096,7 +2144,7 @@ const INDEX_EXCHANGE_BY_EQUITY_EXCHANGE: Record<string, string> = {
   BSE: GLOBAL_DATAFEEDS_INDEX_EXCHANGE,
 };
 
-// Phase D.10 #5 - the authoritative invalidation trigger: clears every
+// The authoritative invalidation trigger: clears every
 // persisted Dashboard snapshot whose underlying candle pool could have
 // just changed for this equity exchange - every active collection on it,
 // plus its corresponding index-exchange snapshot. Deletes only; the next
@@ -2138,7 +2186,7 @@ export async function refreshAllLatestInstrumentPrices(exchange: string = DEFAUL
     refreshed += result?.insertedDaily ?? 0;
   }
 
-  // Phase D.10 - this is what actually changes the candle data the
+  // This is what actually changes the candle data the
   // Dashboard's persisted "current" snapshots (Relative Strength, Weekly
   // Strong - see dashboard-snapshot-store.ts) are derived from.
   // Invalidating them HERE, right after a real refresh, is the
@@ -2267,7 +2315,14 @@ async function hydrateDefaultMarketInstruments(exchange: string = DEFAULT_EXCHAN
   try {
     const result = await syncProviderInstruments(exchange);
     if (result.count > 0) return result;
-  } catch {
+  } catch (error) {
+    // Best-effort by design: falls back to the static default list rather
+    // than failing the request - this is still worth a low-noise trace so
+    // a persistently-failing provider sync isn't completely invisible.
+    logger.warn(
+      { exchange, message: getErrorMessage(error) },
+      "Provider instrument sync failed; falling back to default instrument list"
+    );
     return hydrateDefaultFallbackInstruments(exchange);
   }
 
@@ -2299,7 +2354,17 @@ async function safeProviderAction<T>(
       | { provider?: string; status?: number; message?: string }
       | undefined) : undefined;
     if (details?.provider && (details.status === 401 || details.status === 403)) {
-      void markProviderConnectionExpired(details.provider, details.message).catch(() => {});
+      // Best-effort by design (a failure here shouldn't fail the request
+      // that triggered it) - but silent before, so a broken expiry-marking
+      // path could hide indefinitely. Now at least logged.
+      void markProviderConnectionExpired(details.provider, details.message).catch(
+        (markError: unknown) => {
+          logger.warn(
+            { provider: details.provider, message: getErrorMessage(markError) },
+            "Failed to mark provider connection as expired"
+          );
+        }
+      );
     }
 
     return null;

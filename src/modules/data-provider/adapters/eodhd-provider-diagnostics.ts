@@ -1,6 +1,7 @@
 import { env } from "../../../shared/env";
+import { getErrorMessage } from "../../../shared/errors";
+import { EODHD_BASE_URL } from "./eodhd-data-provider.adapter";
 
-const EODHD_BASE_URL = "https://eodhd.com/api";
 const EXCHANGE_PROBES = [
   {
     exchangeCode: "US",
@@ -199,7 +200,7 @@ function getDiagnosticsFromDate() {
 
 if (require.main === module) {
   runEodhdProviderDiagnostics().catch((error) => {
-    console.error(error instanceof Error ? error.message : "Unknown EODHD error");
+    console.error(getErrorMessage(error, "Unknown EODHD error"));
     process.exitCode = 1;
   });
 }

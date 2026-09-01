@@ -1,15 +1,17 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "../../db/client";
-import { candles, scanResults } from "../../db/schema";
+import { scanResults } from "../../db/schema";
 import {
   CANDLE_TIMEFRAME,
   DEFAULT_EXCHANGE,
   type CandleTimeframe,
 } from "../../shared/constants";
 import { normalizeSymbol } from "../../shared/normalize";
-import { aggregateWeeklyCandles } from "../market-data/candle-aggregation";
-import { computeSymbolBreakoutBacktest } from "../market-data/market-data.service";
+import {
+  computeSymbolBreakoutBacktest,
+  getSymbolWeeklyStrongSeriesInput,
+} from "../market-data/market-data.service";
 import { calculateNear250WeekHighScan } from "./rules/near-250-week-high";
 import {
   DEFAULT_SCANNER_LOOKBACK,
@@ -89,60 +91,18 @@ async function calculateCurrentNear250WeekHighResult(input: {
   if (input.rule && input.rule !== SCANNER_RULE_KEY.near250WeekHigh) return null;
 
   const symbol = normalizeSymbol(input.symbol);
-  const dailyCandles = await db
-    .select({
-      time: candles.time,
-      open: candles.open,
-      high: candles.high,
-      low: candles.low,
-      close: candles.close,
-      volume: candles.volume,
-    })
-    .from(candles)
-    .where(
-      and(
-        eq(candles.exchange, input.exchange),
-        eq(candles.symbol, symbol),
-        eq(candles.timeframe, CANDLE_TIMEFRAME.day)
-      )
-    )
-    .orderBy(asc(candles.time));
-
-  const weeklyCandles = dailyCandles.length > 0
-    ? aggregateWeeklyCandles(
-        dailyCandles.map((candle) => ({
-          time: candle.time,
-          open: Number(candle.open),
-          high: Number(candle.high),
-          low: Number(candle.low),
-          close: Number(candle.close),
-          volume: Number(candle.volume),
-        }))
-      )
-    : await db
-        .select({
-          time: candles.time,
-          high: candles.high,
-          close: candles.close,
-        })
-        .from(candles)
-        .where(
-          and(
-            eq(candles.exchange, input.exchange),
-            eq(candles.symbol, symbol),
-            eq(candles.timeframe, CANDLE_TIMEFRAME.week)
-          )
-        )
-        .orderBy(asc(candles.time));
+  // Same fetch+gate (daily+weekly series, completed-week trim, minimum-
+  // history check) the backtest overlay uses for this same symbol - see
+  // getSymbolWeeklyStrongSeriesInput's own comment for why this must be
+  // shared rather than each path querying independently.
+  const seriesInput = await getSymbolWeeklyStrongSeriesInput(symbol, input.exchange);
+  if (!seriesInput) return null;
 
   const lookback = input.lookback ?? DEFAULT_SCANNER_LOOKBACK;
   const lookbackWeeks = SCANNER_LOOKBACK_WEEKS[lookback];
   const scan = calculateNear250WeekHighScan(
-    weeklyCandles.map((candle) => ({
-      time: candle.time,
-      high: Number(candle.high),
-      close: Number(candle.close),
-    })),
+    seriesInput.dailyRows,
+    seriesInput.weeklyRows,
     lookbackWeeks
   );
 
@@ -163,13 +123,11 @@ async function calculateCurrentNear250WeekHighResult(input: {
 
 // API response minimization (see docs/DOMAIN_BOUNDARIES.md) - the client
 // only ever renders `latestMatched` (see
-// src/features/scanner/lib/scanner-result-mappers.ts), never the raw
-// close/high/threshold/percentage values `calculateNear250WeekHighScan`
-// computes internally. Those intermediate values would make the rule's
-// own ratio trivially recoverable from a single API response
-// (threshold85 / highestClose250), so they're dropped here rather than
-// forwarded - this only trims what's sent to the client, not what
-// `calculateNear250WeekHighScan` computes/returns internally.
+// src/features/scanner/lib/scanner-result-mappers.ts), never any other
+// field of what the evaluator computes internally (lookback window size,
+// per-bar pass/fail breakdown, etc.) - those would make the rule's own
+// mechanics reverse-engineerable from API responses, so only the single
+// boolean the UI renders is forwarded.
 export function toClientScanMetrics(metrics: Record<string, unknown>): { latestMatched?: boolean } {
   return typeof metrics.latestMatched === "boolean"
     ? { latestMatched: metrics.latestMatched }

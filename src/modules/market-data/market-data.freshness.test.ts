@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isLatestDailyCandleStale } from "./market-data.service";
+import { decideChartCandleFreshnessAction, isLatestDailyCandleStale } from "./market-data.service";
 
 // getChartCandles itself talks directly to the module-level `db` import and
 // the live provider registry, so it can't be unit tested without a real
@@ -35,5 +35,68 @@ describe("isLatestDailyCandleStale", () => {
     const at = new Date("2026-01-06T12:00:00Z");
     expect(isLatestDailyCandleStale([{ time: "2026-01-05" }], "NSE", at)).toBe(true);
     expect(isLatestDailyCandleStale([{ time: "2026-01-05" }], "US", at)).toBe(false);
+  });
+});
+
+// The full backfill/incremental-refresh/no-op decision getChartCandles
+// makes - see that function's own comment for why missing/discontinuous/
+// incomplete history takes priority over mere staleness. This does not
+// change any of the three predicates it composes, only proves their
+// combination picks the right action.
+describe("decideChartCandleFreshnessAction", () => {
+  const freshRow = { time: "2026-01-06", close: 100 };
+
+  it("no stored candles at all -> full backfill", () => {
+    expect(decideChartCandleFreshnessAction([], "2025-01-01", undefined, "NSE")).toBe("backfill");
+  });
+
+  it("fresh stored candles -> no action (no provider call of any kind)", () => {
+    // isLatestDailyCandleStale defaults its `at` param to `new Date()`, so
+    // this composed decision can't inject a fixed clock the way the
+    // isLatestDailyCandleStale tests above do - use a row whose date is
+    // always <= "today" relative to the real clock, and instead assert the
+    // *shape* of the decision (never "backfill", which fresh data must
+    // never trigger).
+    const result = decideChartCandleFreshnessAction([freshRow], "2025-01-01", undefined, "NSE");
+    expect(result).not.toBe("backfill");
+  });
+
+  it("stale stored candles (latest row older than expected) -> incremental refresh, not a full backfill", () => {
+    // A row far enough in the past to be stale under any real-world clock.
+    const longStaleRow = { time: "2020-01-01", close: 100 };
+    const result = decideChartCandleFreshnessAction([longStaleRow], "2015-01-01", undefined, "NSE");
+    expect(result).toBe("incremental-refresh");
+  });
+
+  it("a likely split discontinuity forces a full backfill even though rows exist and the latest is fresh", () => {
+    const splitRows = [
+      { time: "2026-01-01", close: 1000 },
+      { time: "2026-01-02", close: 200 }, // 5x jump - matches the >=4x split heuristic
+    ];
+    expect(decideChartCandleFreshnessAction(splitRows, "2025-01-01", undefined, "NSE")).toBe(
+      "backfill"
+    );
+  });
+
+  it("existing rows don't cover the explicitly requested older `from` date -> full backfill", () => {
+    const rows = [{ time: "2024-06-01", close: 100 }];
+    // Requested history starts in 2020, but the oldest stored row is 2024 -
+    // the stored range doesn't cover what was explicitly asked for.
+    expect(decideChartCandleFreshnessAction(rows, "2020-01-01", "2020-01-01", "NSE")).toBe(
+      "backfill"
+    );
+  });
+
+  it("no explicit `from` was requested -> missing older history alone does not force a backfill", () => {
+    const rows = [{ time: "2024-06-01", close: 100 }];
+    // Same stored range as above, but requestedFrom (explicitFrom) is
+    // undefined - shouldBackfillRequestedHistory only fires for an
+    // explicitly-requested from date, matching its own documented
+    // contract, so only the freshness check (not staleness-irrelevant
+    // here since this row could be considered fresh or stale depending on
+    // the real clock) governs - the point is backfill is not forced purely
+    // by "there might be older history we don't have".
+    const result = decideChartCandleFreshnessAction(rows, "2020-01-01", undefined, "NSE");
+    expect(result).not.toBe("backfill");
   });
 });

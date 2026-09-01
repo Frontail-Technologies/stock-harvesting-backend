@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
-import { db } from "../../db/client";
+import { db, type DbOrTx } from "../../db/client";
 import {
   marketCollections,
   syncJobs,
@@ -120,7 +120,7 @@ export async function runWeeklyStrongBacktestBackfill(input: {
 }
 
 // ---------------------------------------------------------------------
-// Historical-membership rebuild (admin-triggered, Phase D). Reuses this
+// Historical-membership rebuild (admin-triggered). Reuses this
 // collection's own already-persisted current_membership week list as the
 // reference week set (never inventing a second date-derivation path) -
 // a current_membership backfill must have run at least once first. For
@@ -252,11 +252,11 @@ export async function runWeeklyStrongBacktestHistoricalRebuild(input: {
 // - see worker.ts. Only touches collections that already have at least
 // one persisted current_membership run; never recomputes the full range.
 // Always keeps producing current_membership runs (cheap, always
-// available, used as the audit/fallback series - Phase D #10). If the
-// collection ALSO has at least one membership version, additionally
-// resolves the version effective for that same newly-completed week and
-// persists a historical_membership run for it - never using today's
-// active membership blindly for that second run (Phase D #12).
+// available, used as the audit/fallback series). If the collection ALSO
+// has at least one membership version, additionally resolves the version
+// effective for that same newly-completed week and persists a
+// historical_membership run for it - never using today's active
+// membership blindly for that second run.
 // ---------------------------------------------------------------------
 
 export type WeeklyStrongBacktestIncrementalResult = {
@@ -385,7 +385,12 @@ export async function syncWeeklyStrongBacktestIncremental(
 // call this per week)
 // ---------------------------------------------------------------------
 
-async function persistWeeklyStrongBacktestWeek(
+// dbClient defaults to the real db - every real caller gets identical
+// behavior to before this parameter existed. It exists so this function's
+// idempotent-upsert transaction is directly testable with a fake client
+// (see weekly-strong-backtest.persistence.test.ts), the same tiny-seam
+// pattern replaceCandlesAtomically uses in market-data.service.ts.
+export async function persistWeeklyStrongBacktestWeek(
   collectionId: string,
   point: WeeklyStrongBacktestWeekMembers,
   instrumentIdBySymbol: Map<string, string>,
@@ -393,8 +398,9 @@ async function persistWeeklyStrongBacktestWeek(
     mode: WeeklyStrongBacktestMembershipMode;
     versionId: string | null;
   },
+  dbClient: DbOrTx = db,
 ) {
-  await db.transaction(async (tx) => {
+  await dbClient.transaction(async (tx) => {
     const [run] = await tx
       .insert(weeklyStrongBacktestRuns)
       .values({
@@ -464,8 +470,7 @@ export type WeeklyStrongBacktestStackedPoint = {
 
 // Shared by both Dashboard reads below: prefer historical_membership runs
 // when the collection has any, falling back to current_membership only
-// when it has none - the two modes are never mixed within one response
-// (Phase D #10).
+// when it has none - the two modes are never mixed within one response.
 async function selectPreferredRuns(collectionId: string) {
   const historicalRuns = await db
     .select({

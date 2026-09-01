@@ -10,7 +10,7 @@ import {
   type SupportedAiModelCode,
 } from "../../shared/constants";
 import { env } from "../../shared/env";
-import { AppError, ERROR_CODES, ERROR_MESSAGES } from "../../shared/errors";
+import { AppError, ERROR_CODES, ERROR_MESSAGES, getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import { getChartCandles, listStocks } from "../market-data/market-data.service";
 import { decryptField, encryptField } from "../security/encryption";
@@ -306,7 +306,7 @@ async function callGemini(input: {
   if (!response.ok) {
     throw new AppError(
       HTTP_STATUS.badGateway,
-      ERROR_CODES.badRequest,
+      ERROR_CODES.providerError,
       `${ERROR_MESSAGES.aiRequestFailed} for ${model} (${response.status})`
     );
   }
@@ -318,7 +318,7 @@ async function callGemini(input: {
     .trim();
 
   if (!answer) {
-    throw new AppError(HTTP_STATUS.badGateway, ERROR_CODES.badRequest, ERROR_MESSAGES.aiRequestFailed);
+    throw new AppError(HTTP_STATUS.badGateway, ERROR_CODES.providerError, ERROR_MESSAGES.aiRequestFailed);
   }
 
   return answer;
@@ -344,10 +344,10 @@ async function requestGeminiGenerateContent(input: {
     });
   } catch (error) {
     logger.warn(
-      { model: input.model, message: error instanceof Error ? error.message : "Unknown error" },
+      { model: input.model, message: getErrorMessage(error, "Unknown error") },
       "Gemini request failed"
     );
-    throw new AppError(HTTP_STATUS.badGateway, ERROR_CODES.badRequest, ERROR_MESSAGES.aiRequestFailed);
+    throw new AppError(HTTP_STATUS.badGateway, ERROR_CODES.providerError, ERROR_MESSAGES.aiRequestFailed);
   }
 }
 
@@ -382,7 +382,7 @@ async function findAvailableGeminiModel(apiKey: string, requestedModel: string) 
       );
     } catch (error) {
       logger.warn(
-        { version, message: error instanceof Error ? error.message : "Unknown error" },
+        { version, message: getErrorMessage(error, "Unknown error") },
         "Unable to list Gemini models"
       );
     }

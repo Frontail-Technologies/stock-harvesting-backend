@@ -1,4 +1,5 @@
 import { env } from "../../../../shared/env";
+import { getErrorMessage } from "../../../../shared/errors";
 import {
   GLOBAL_DATAFEEDS_MESSAGE_TYPE,
 } from "./global-datafeeds.constants";
@@ -75,7 +76,7 @@ async function main() {
     }, DIAGNOSTIC_REQUEST_TIMEOUT_MS);
     report.exchanges = exchangeResponse.Result ?? exchangeResponse;
   } catch (error) {
-    report.exchangesError = error instanceof Error ? error.message : "Unknown error";
+    report.exchangesError = getErrorMessage(error, "Unknown error");
   }
 
   const probes: unknown[] = [];
@@ -140,7 +141,7 @@ async function main() {
           count: variantRows.length,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown instrument error";
+        const message = getErrorMessage(error, "Unknown instrument error");
         instrumentVariants.push({
           variant: variant.name,
           error: message,
@@ -172,7 +173,7 @@ async function main() {
           first: searchRows[0] ?? null,
         });
       } catch (error) {
-        searchError = error instanceof Error ? error.message : "Search probe failed";
+        searchError = getErrorMessage(error, "Search probe failed");
       }
 
       const normalizedSymbol = symbol.toUpperCase();
@@ -281,7 +282,7 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error(error instanceof Error ? error.message : "Unknown Global Datafeeds error");
+    console.error(getErrorMessage(error, "Unknown Global Datafeeds error"));
     process.exitCode = 1;
   })
   .finally(() => {

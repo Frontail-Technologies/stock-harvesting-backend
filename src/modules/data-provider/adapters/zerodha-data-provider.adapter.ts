@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { DATA_PROVIDER_KEY, HTTP_STATUS } from "../../../shared/constants";
 import { env } from "../../../shared/env";
 import { AppError, ERROR_CODES, ERROR_MESSAGES } from "../../../shared/errors";
+import { logger } from "../../../shared/logger";
 import type {
   DataProviderAdapter,
   ProviderDailyCandle,
@@ -192,7 +193,7 @@ export class ZerodhaDataProviderAdapter implements DataProviderAdapter {
     if (!response.ok) {
       throw new AppError(
         HTTP_STATUS.badGateway,
-        ERROR_CODES.badRequest,
+        ERROR_CODES.providerError,
         "Data provider token exchange failed"
       );
     }
@@ -208,7 +209,7 @@ export class ZerodhaDataProviderAdapter implements DataProviderAdapter {
     if (!json.data?.access_token) {
       throw new AppError(
         HTTP_STATUS.badGateway,
-        ERROR_CODES.badRequest,
+        ERROR_CODES.providerError,
         "Data provider access token missing"
       );
     }
@@ -245,17 +246,19 @@ export class ZerodhaDataProviderAdapter implements DataProviderAdapter {
 
     if (!response.ok) {
       const error = await readKiteError(response);
+      // Raw Kite error text/type stays server-side only (this route is
+      // admin-only, but a raw vendor response body is still not something
+      // an API client - even an admin one - needs) - the client gets a
+      // generic, status-only message.
+      logger.warn(
+        { provider: DATA_PROVIDER_KEY.zerodha, status: response.status, kiteError: error },
+        "Zerodha instrument fetch failed"
+      );
       throw new AppError(
         HTTP_STATUS.badGateway,
-        ERROR_CODES.badRequest,
-        `Unable to fetch instruments (${response.status}${
-          error.errorType ? ` ${error.errorType}` : ""
-        })`,
-        {
-          provider: DATA_PROVIDER_KEY.zerodha,
-          status: response.status,
-          message: error.message,
-        }
+        ERROR_CODES.providerError,
+        `Unable to fetch instruments (provider returned ${response.status})`,
+        { provider: DATA_PROVIDER_KEY.zerodha, status: response.status }
       );
     }
 
@@ -396,12 +399,22 @@ export class ZerodhaDataProviderAdapter implements DataProviderAdapter {
 
     if (!response.ok) {
       const error = await readKiteError(response);
+      // Raw Kite error text/type stays server-side only - the client gets
+      // a generic, status-only message plus our own (non-vendor) request
+      // parameters, which are safe to echo back.
+      logger.warn(
+        {
+          provider: DATA_PROVIDER_KEY.zerodha,
+          symbol: input.symbol,
+          status: response.status,
+          kiteError: error,
+        },
+        "Zerodha daily candle fetch failed"
+      );
       throw new AppError(
         HTTP_STATUS.badGateway,
-        ERROR_CODES.badRequest,
-        `Unable to fetch daily candles (${response.status}${
-          error.errorType ? ` ${error.errorType}` : ""
-        })`,
+        ERROR_CODES.providerError,
+        `Unable to fetch daily candles (provider returned ${response.status})`,
         {
           provider: DATA_PROVIDER_KEY.zerodha,
           symbol: input.symbol,
@@ -409,7 +422,6 @@ export class ZerodhaDataProviderAdapter implements DataProviderAdapter {
           from: formatKiteDateTime(input.fromDate),
           to: formatKiteDateTime(input.toDate, true),
           status: response.status,
-          message: error.message,
         }
       );
     }

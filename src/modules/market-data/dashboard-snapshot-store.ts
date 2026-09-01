@@ -29,7 +29,7 @@ export const RELATIVE_STRENGTH_SNAPSHOT_VERSION = "relative-strength-v2";
 // need market-data.service.ts's compute functions) can depend on it
 // one-directionally without a cycle.
 
-export async function readDashboardSnapshot<T>(
+export async function readDashboardSnapshot<T extends unknown[]>(
   scopeType: DashboardSnapshotScopeType,
   scopeKey: string,
   metricType: DashboardSnapshotMetricType
@@ -63,7 +63,7 @@ export type DashboardSnapshotRecord<T> = {
 // return shape, so the existing weekly_strong callers (which don't need
 // either field and are explicitly out of scope for this change) keep
 // their exact current behavior untouched.
-export async function readDashboardSnapshotWithMeta<T>(
+export async function readDashboardSnapshotWithMeta<T extends unknown[]>(
   scopeType: DashboardSnapshotScopeType,
   scopeKey: string,
   metricType: DashboardSnapshotMetricType
@@ -95,7 +95,7 @@ export async function writeDashboardSnapshot(input: {
   metricType: DashboardSnapshotMetricType;
   exchange: string;
   evaluatorVersion: string;
-  payload: unknown;
+  payload: unknown[];
 }): Promise<{ asOfDate: string }> {
   const asOfDate = getLatestExpectedTradingDay(input.exchange);
 
@@ -131,7 +131,7 @@ export async function writeDashboardSnapshot(input: {
 // Deletes every metric snapshot for one scope (e.g. both
 // relative_strength and weekly_strong for one collection) - the
 // invalidation half of "recompute when underlying data actually changed,
-// not on a fixed TTL" (Phase D.10 #5). Deleting rather than marking stale
+// not on a fixed TTL". Deleting rather than marking stale
 // is deliberate: the next read simply finds nothing, computes fresh, and
 // re-persists - one code path handles both "never generated yet" and
 // "just invalidated", instead of two.

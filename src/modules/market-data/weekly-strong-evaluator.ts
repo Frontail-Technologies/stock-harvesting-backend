@@ -1,7 +1,6 @@
 // The canonical "Weekly Strong" / near-multi-year-high breakout evaluator.
 //
-// Phase C1 consolidation - see the Phase C1 audit report for the full
-// line-by-line comparison. Before this module existed, the same
+// Consolidated into one module after an audit found the same
 // two-condition decision (latest daily close within `ratio` of its
 // trailing `dailyLookbackBars`-bar high, AND latest weekly close within
 // `ratio` of its trailing `weeklyLookbackBars`-bar high - both windows
@@ -80,7 +79,7 @@ export function hasSufficientWeeklyStrongHistory(
 // computeAllRelativeStrengthMetrics's own weekly pre-filter (which powers
 // the separate, unchanged Relative Strength Index/Sector/Industry cards)
 // does not call this; that calculation path is explicitly out of scope
-// here (see the Phase C1.5 report).
+// here.
 export function excludeIncompleteTradingWeek<T extends { time: string }>(
   weeklyRows: T[],
   exchange: string,
@@ -168,6 +167,24 @@ export function evaluateWeeklyStrongLatest(
   const passesWeekly = passesNearHigh(weeklyCloses, weeklyCloses.length - 1, weeklyLookbackBars, ratio);
 
   return { passes: passesDaily && passesWeekly, passesDaily, passesWeekly };
+}
+
+// Window-size derivation for the Scanner's own caller-chosen lookback (its
+// lookback-multiplier UI control) - as opposed to the fixed 250/1252-bar
+// Weekly Strong screen elsewhere, which never calls this. Written once so
+// the Scanner's live near-high scan and its backtest overlay can't drift
+// apart on window SIZE the way they previously drifted on the pass/fail
+// RULE itself (see near-250-week-high.ts and computeSymbolBreakoutBacktest -
+// both call this now instead of each deriving the 1:5 daily/weekly bar
+// ratio independently).
+export function deriveScannerLookbackBars(lookbackWeeks: number): {
+  dailyLookbackBars: number;
+  weeklyLookbackBars: number;
+} {
+  return {
+    weeklyLookbackBars: Math.max(1, Math.round(lookbackWeeks)),
+    dailyLookbackBars: Math.max(1, Math.round(lookbackWeeks * 5)),
+  };
 }
 
 export type WeeklyStrongSeriesPoint = {
