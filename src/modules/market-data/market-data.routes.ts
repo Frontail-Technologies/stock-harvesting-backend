@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import type { CandleTimeframe } from "../../shared/constants";
+import { CANDLE_TIMEFRAME, type CandleTimeframe } from "../../shared/constants";
 import { sendData } from "../../shared/http";
 import { asyncHandler, requireAuth, validate } from "../../shared/middleware";
 import {
@@ -9,6 +9,7 @@ import {
   chartEligibleStockSearchQuerySchema,
   historyRangeQuerySchema,
   indexRelativeStrengthQuerySchema,
+  publicCandleQuerySchema,
   stockListQuerySchema,
   type MoveFilter,
 } from "./market-data.schemas";
@@ -61,6 +62,30 @@ marketDataRouter.get(
 marketDataRouter.get("/exchanges", asyncHandler(async (_req, res) => {
   sendData(res, { exchanges: await listSupportedExchanges() });
 }));
+
+// Public: the /stocks/[exchange]/[symbol] SEO/discovery page server-renders
+// a basic daily price chart for anonymous visitors - the same canonical
+// daily candle data any signed-in user already gets from
+// /charts/:symbol/candles, just without the login requirement. Deliberately
+// narrower than that route: daily timeframe only (no week/month, no
+// from/to override), full history every time - nothing for a caller to
+// tune. Reuses getChartCandles directly, so there is exactly one candle
+// implementation, not a parallel one.
+marketDataRouter.get(
+  "/public/candles/:symbol",
+  validate({ params: candleParamsSchema, query: publicCandleQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { symbol: string };
+    const query = req.query as unknown as { exchange: string };
+    const candleRows = await getChartCandles({
+      symbol: params.symbol,
+      timeframe: CANDLE_TIMEFRAME.day,
+      exchange: query.exchange,
+    });
+
+    sendData(res, { candles: candleRows });
+  })
+);
 
 marketDataRouter.use(requireAuth);
 

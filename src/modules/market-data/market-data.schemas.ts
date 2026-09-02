@@ -66,6 +66,15 @@ export const candleQuerySchema = z
   })
   .strict();
 
+// No timeframe/from/to here on purpose - the public candles route always
+// returns full daily history only (see market-data.routes.ts), so there is
+// nothing for an anonymous caller to override.
+export const publicCandleQuerySchema = z
+  .object({
+    exchange: exchangeSchema,
+  })
+  .strict();
+
 export const historyRangeQuerySchema = z
   .object({
     symbol: z.string().trim().min(1).max(64),
