@@ -23,12 +23,11 @@ type VerifyTurnstileOptions = {
   expectedAction?: string;
 };
 
-function isTurnstileConfigured() {
-  return Boolean(env.TURNSTILE_SECRET_KEY);
-}
-
-function shouldBypassTurnstileForLocalDev() {
-  return env.NODE_ENV !== "production" && !isTurnstileConfigured();
+// Bot verification only ever runs in production - a secret key left
+// configured in a dev/staging env (e.g. copied from .env.example) must
+// never force real Turnstile checks while developing locally.
+function shouldBypassTurnstileForDevelopment() {
+  return env.NODE_ENV !== "production";
 }
 
 function turnstileError(details?: unknown) {
@@ -62,8 +61,8 @@ export async function verifyTurnstileToken({
   remoteIp,
   expectedAction,
 }: VerifyTurnstileOptions) {
-  if (shouldBypassTurnstileForLocalDev()) {
-    logger.warn("Turnstile skipped because TURNSTILE_SECRET_KEY is not configured outside production");
+  if (shouldBypassTurnstileForDevelopment()) {
+    logger.warn("Turnstile skipped outside production");
     return;
   }
 
