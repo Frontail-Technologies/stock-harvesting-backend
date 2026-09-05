@@ -19,6 +19,7 @@ import {
   invalidateCollectionSnapshots,
 } from "../market-data/dashboard-snapshots.service";
 import {
+  deriveSectorIndustryTaxonomy,
   groupRelativeStrengthMetrics,
   NSE_NORMAL_EQUITY_SYMBOL_PATTERN,
   pickTopRelativeStrengthRows,
@@ -233,6 +234,34 @@ export async function getCollectionRelativeStrength(input: {
     return {
       collection: { code: collection.code, name: collection.name, exchange: collection.exchange },
       metrics,
+      asOfDate,
+    };
+  });
+}
+
+// Full sector -> industries taxonomy for the collection's active members -
+// no ranking, no top-N slicing, no scores. This is what the Dashboard's
+// cross-filter uses to resolve "which industries belong to this sector" and
+// "what sector does this industry belong to", so a ranked/limited sample
+// must never be its source (a stock outside the top-N would otherwise be
+// unresolvable). Shares the same cached base snapshot as
+// getCollectionRelativeStrength above - no extra computation, just a
+// different, complete derivation of it.
+export async function getCollectionSectorIndustryTaxonomy(input: { code: string }) {
+  const collection = await requireCollectionByCode(input.code);
+  const cacheKey = `collectionSectorIndustryTaxonomy:${collection.code}`;
+
+  return getOrSetCache(cacheKey, COLLECTION_CACHE_TTL_MS, async () => {
+    const memberRows = await getActiveMemberInstrumentRows(collection.id);
+    const { metrics: baseMetrics, asOfDate } = await getOrComputeCollectionRelativeStrengthBase(
+      collection.id,
+      collection.exchange,
+      memberRows
+    );
+
+    return {
+      collection: { code: collection.code, name: collection.name, exchange: collection.exchange },
+      sectors: deriveSectorIndustryTaxonomy(baseMetrics),
       asOfDate,
     };
   });

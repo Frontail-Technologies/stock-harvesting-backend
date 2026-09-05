@@ -43,9 +43,11 @@ import * as evaluatorModule from "./weekly-strong-evaluator";
 import {
   computeAllRelativeStrengthMetrics,
   computeWeeklyStrongStocks,
+  deriveSectorIndustryTaxonomy,
   getSymbolWeeklyStrongSeriesInput,
   readDailyAndWeeklyMetricCandles,
   type RelativeStrengthInstrumentInput,
+  type RelativeStrengthMetricRow,
 } from "./market-data.metrics";
 
 const readMetricCandles = vi.mocked(candlesModule.readMetricCandles);
@@ -240,6 +242,76 @@ describe("computeWeeklyStrongStocks orchestration", () => {
 
     expect(result).toEqual([]);
     expect(evaluateWeeklyStrongLatest).not.toHaveBeenCalled();
+  });
+});
+
+describe("deriveSectorIndustryTaxonomy", () => {
+  function buildMetricRow(
+    symbol: string,
+    sector: string,
+    industry: string
+  ): RelativeStrengthMetricRow {
+    return {
+      symbol,
+      name: symbol,
+      exchange: "NSE",
+      sector,
+      industry,
+      close: 100,
+      volume: 1000,
+      change55dPct: 0,
+    };
+  }
+
+  it("resolves a sector/industry pair that only appears after index 500 in a >500-row pool, without losing or duplicating any other entry", () => {
+    // 500 rows split across two sector/industry pairs (each repeated 250x,
+    // proving de-duplication), then one more row past index 500 introducing
+    // a brand-new pair that a ranked/limited top-N sample would have missed.
+    const rows: RelativeStrengthMetricRow[] = [];
+    for (let i = 0; i < 500; i++) {
+      const isA = i % 2 === 0;
+      rows.push(buildMetricRow(`SYM${i}`, isA ? "Sector A" : "Sector B", isA ? "Industry A1" : "Industry B1"));
+    }
+    rows.push(buildMetricRow("LATESYM", "Late Sector", "Late Industry"));
+
+    expect(rows.length).toBeGreaterThan(500);
+    expect(rows.findIndex((row) => row.sector === "Late Sector")).toBe(500);
+
+    const taxonomy = deriveSectorIndustryTaxonomy(rows);
+
+    // The late-appearing sector/industry pair is present and resolvable.
+    const lateEntry = taxonomy.find((row) => row.sector === "Late Sector");
+    expect(lateEntry).toBeDefined();
+    expect(lateEntry?.industries).toContain("Late Industry");
+
+    // Nothing lost: exactly the three distinct sectors survive, none merged
+    // or dropped because of array size.
+    expect(taxonomy.map((row) => row.sector).sort()).toEqual(["Late Sector", "Sector A", "Sector B"]);
+
+    // 250 duplicate rows per sector collapse to a single industry entry
+    // each - duplicates are deduplicated, not repeated per occurrence.
+    const sectorA = taxonomy.find((row) => row.sector === "Sector A");
+    const sectorB = taxonomy.find((row) => row.sector === "Sector B");
+    expect(sectorA?.industries).toEqual(["Industry A1"]);
+    expect(sectorB?.industries).toEqual(["Industry B1"]);
+
+    // No proprietary score/ranking field leaks into the taxonomy shape -
+    // every entry is exactly {sector, industries}.
+    for (const entry of taxonomy) {
+      expect(Object.keys(entry).sort()).toEqual(["industries", "sector"]);
+    }
+  });
+
+  it("excludes rows missing a sector or industry classification", () => {
+    const rows: RelativeStrengthMetricRow[] = [
+      buildMetricRow("CLASSIFIED", "Sector A", "Industry A1"),
+      { ...buildMetricRow("NOSECTOR", "Sector A", "Industry A1"), sector: null },
+      { ...buildMetricRow("NOINDUSTRY", "Sector A", "Industry A1"), industry: null },
+    ];
+
+    const taxonomy = deriveSectorIndustryTaxonomy(rows);
+
+    expect(taxonomy).toEqual([{ sector: "Sector A", industries: ["Industry A1"] }]);
   });
 });
 

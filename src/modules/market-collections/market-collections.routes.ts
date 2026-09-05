@@ -11,6 +11,7 @@ import {
 import {
   getCollectionMembers,
   getCollectionRelativeStrength,
+  getCollectionSectorIndustryTaxonomy,
   getCollectionWeeklyStrongStocks,
   listCollections,
 } from "./market-collections.service";
@@ -61,6 +62,15 @@ marketCollectionsRouter.get(
         groupBy: query.groupBy,
       })
     );
+  })
+);
+
+marketCollectionsRouter.get(
+  "/:code/sector-industry-taxonomy",
+  validate({ params: collectionCodeParamsSchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { code: string };
+    sendData(res, await getCollectionSectorIndustryTaxonomy({ code: params.code }));
   })
 );
 

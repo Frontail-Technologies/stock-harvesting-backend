@@ -265,6 +265,34 @@ export async function computeGroupRelativeStrength(
   return groupRelativeStrengthMetrics(allMetrics, groupBy, limit);
 }
 
+export type SectorIndustryTaxonomyRow = {
+  sector: string;
+  industries: string[];
+};
+
+// Full sector -> industries membership taxonomy, no ranking/scoring and no
+// top-N slicing - every classified stock in the pool contributes, so a
+// sector/industry with no strong movers still resolves correctly. Rows
+// missing either classification are excluded, same convention as
+// groupRelativeStrengthMetrics above. Pure/cheap (no candle I/O) - the
+// caller already has allMetrics from a cached base computation.
+export function deriveSectorIndustryTaxonomy(
+  allMetrics: RelativeStrengthMetricRow[]
+): SectorIndustryTaxonomyRow[] {
+  const sectorToIndustries = new Map<string, Set<string>>();
+
+  for (const metric of allMetrics) {
+    if (!metric.sector || !metric.industry) continue;
+    const industries = sectorToIndustries.get(metric.sector) ?? new Set<string>();
+    industries.add(metric.industry);
+    sectorToIndustries.set(metric.sector, industries);
+  }
+
+  return [...sectorToIndustries.entries()]
+    .map(([sector, industries]) => ({ sector, industries: [...industries].sort() }))
+    .sort((a, b) => a.sector.localeCompare(b.sector));
+}
+
 // The Weekly Strong breakout screen. Unlike the relative-strength metrics
 // above (which rank everything), this filters down to only the stocks
 // that pass the qualification rule. See weekly-strong-evaluator.ts for the
