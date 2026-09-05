@@ -1,9 +1,15 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
-import { watchlistItems, watchlists } from "../../db/schema";
+import { instruments, watchlistItems, watchlists } from "../../db/schema";
 import { conflict, forbidden, notFound } from "../../shared/errors";
 import { normalizeSymbol } from "../../shared/normalize";
+import {
+  computeAllRelativeStrengthMetrics,
+  pickTopRelativeStrengthRows,
+  type RelativeStrengthInstrumentInput,
+  type RelativeStrengthMetricRow,
+} from "../market-data/market-data.service";
 
 type WatchlistRow = typeof watchlists.$inferSelect;
 type WatchlistItemRow = typeof watchlistItems.$inferSelect;
@@ -38,6 +44,23 @@ export function findDuplicateWatchlistItem(
   );
 }
 
+// Pure/DB-independent, so it's unit tested directly (same split as
+// assertWatchlistOwnership/findDuplicateWatchlistItem above). A Watchlist
+// can mix exchanges in a way a market-collection never does, and the
+// shared relative-strength evaluator computes per single exchange, so the
+// items have to be bucketed before each bucket is evaluated separately.
+export function groupSymbolsByExchange(
+  items: Array<{ exchange: string; symbol: string }>
+): Map<string, string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const item of items) {
+    const bucket = grouped.get(item.exchange);
+    if (bucket) bucket.push(item.symbol);
+    else grouped.set(item.exchange, [item.symbol]);
+  }
+  return grouped;
+}
+
 export async function listWatchlists(input: { userId: string }) {
   const rows = await db
     .select({
@@ -45,9 +68,18 @@ export async function listWatchlists(input: { userId: string }) {
       name: watchlists.name,
       createdAt: watchlists.createdAt,
       updatedAt: watchlists.updatedAt,
+      // Table-qualified on both sides deliberately, not the bare-column
+      // interpolation this used to use: drizzle's `sql` tag renders a
+      // Column reference as just its column name, and watchlist_items has
+      // its own `id` primary key - inside this subquery's scope, an
+      // unqualified "id" resolves to THAT (its own PK) rather than the
+      // intended outer watchlists.id, silently turning the correlation
+      // into watchlist_id = id (always false) and making itemCount always
+      // 0. Same bug/fix already applied to market-collections.service.ts's
+      // listCollections memberCount subquery.
       itemCount: sql<number>`(
-        select count(*)::int from ${watchlistItems}
-        where ${watchlistItems.watchlistId} = ${watchlists.id}
+        select count(*)::int from "watchlist_items"
+        where "watchlist_items"."watchlist_id" = "watchlists"."id"
       )`,
     })
     .from(watchlists)
@@ -78,6 +110,60 @@ export async function getWatchlist(input: { userId: string; id: string }) {
     .orderBy(asc(watchlistItems.position), asc(watchlistItems.createdAt));
 
   return toWatchlistDetailResponse(watchlist, items);
+}
+
+// Ranks a Watchlist's current members through the exact same relative-
+// strength evaluator Dashboard's Stock Harvest widget uses for a market
+// collection (computeAllRelativeStrengthMetrics/pickTopRelativeStrengthRows,
+// re-exported from market-data.service.ts - not reimplemented here). The
+// only thing this adds is sourcing the instrument universe from a
+// Watchlist's live membership instead of a collection's, computed fresh on
+// every call (no persisted snapshot, unlike the collection path) since
+// Watchlist membership is small and can change at any moment - a stale
+// snapshot would silently show outdated rankings after an add/remove.
+export async function getWatchlistRelativeStrength(input: {
+  userId: string;
+  id: string;
+  limit: number;
+}) {
+  const watchlist = await getOwnedWatchlist(input.id, input.userId);
+  const items = await db
+    .select({ exchange: watchlistItems.exchange, symbol: watchlistItems.symbol })
+    .from(watchlistItems)
+    .where(eq(watchlistItems.watchlistId, watchlist.id));
+
+  if (items.length === 0) {
+    return {
+      watchlist: { id: watchlist.id, name: watchlist.name },
+      metrics: [] as RelativeStrengthMetricRow[],
+      asOfDate: null as string | null,
+    };
+  }
+
+  const bySymbolsPerExchange = groupSymbolsByExchange(items);
+  const allMetrics: RelativeStrengthMetricRow[] = [];
+
+  for (const [exchange, symbols] of bySymbolsPerExchange) {
+    const instrumentRows: RelativeStrengthInstrumentInput[] = await db
+      .select({
+        symbol: instruments.symbol,
+        name: instruments.name,
+        exchange: instruments.exchange,
+        sector: instruments.sector,
+        industry: instruments.industry,
+      })
+      .from(instruments)
+      .where(and(eq(instruments.exchange, exchange), inArray(instruments.symbol, symbols)));
+
+    const metrics = await computeAllRelativeStrengthMetrics(instrumentRows, exchange);
+    allMetrics.push(...metrics);
+  }
+
+  return {
+    watchlist: { id: watchlist.id, name: watchlist.name },
+    metrics: pickTopRelativeStrengthRows(allMetrics, input.limit),
+    asOfDate: new Date().toISOString().slice(0, 10),
+  };
 }
 
 export async function createWatchlist(input: { userId: string; name: string }) {

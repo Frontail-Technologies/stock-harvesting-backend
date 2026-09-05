@@ -33,3 +33,9 @@ export const addWatchlistItemBodySchema = z
     symbol: z.string().trim().min(1).max(64),
   })
   .strict();
+
+export const watchlistRelativeStrengthQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().positive().max(500).default(200),
+  })
+  .strict();

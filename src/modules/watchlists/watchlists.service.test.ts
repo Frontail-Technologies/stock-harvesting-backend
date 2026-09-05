@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { assertWatchlistOwnership, findDuplicateWatchlistItem } from "./watchlists.service";
+import {
+  assertWatchlistOwnership,
+  findDuplicateWatchlistItem,
+  groupSymbolsByExchange,
+} from "./watchlists.service";
 
 // These two functions are the only DB-independent decision points in the
 // watchlists service - the rest is plain Drizzle CRUD wired to them (same
@@ -53,5 +57,48 @@ describe("findDuplicateWatchlistItem", () => {
 
   it("returns null when no item matches", () => {
     expect(findDuplicateWatchlistItem(items, "NSE", "INFY")).toBeNull();
+  });
+});
+
+// Feeds getWatchlistRelativeStrength (a Watchlist's stocks ranked through
+// the same relative-strength evaluator Dashboard's Stock Harvest widget
+// uses) - the evaluator itself computes per single exchange, so a mixed-
+// exchange Watchlist has to be bucketed first. Pure/DB-independent, tested
+// directly for the same reason as the two describe blocks above.
+describe("groupSymbolsByExchange", () => {
+  it("groups symbols under their exchange", () => {
+    const grouped = groupSymbolsByExchange([
+      { exchange: "NSE", symbol: "RELIANCE" },
+      { exchange: "BSE", symbol: "TCS" },
+      { exchange: "NSE", symbol: "INFY" },
+    ]);
+
+    expect(grouped.get("NSE")).toEqual(["RELIANCE", "INFY"]);
+    expect(grouped.get("BSE")).toEqual(["TCS"]);
+    expect(grouped.size).toBe(2);
+  });
+
+  it("preserves per-exchange symbol order", () => {
+    const grouped = groupSymbolsByExchange([
+      { exchange: "BSE", symbol: "WIPRO" },
+      { exchange: "BSE", symbol: "TCS" },
+      { exchange: "BSE", symbol: "GROWW" },
+    ]);
+
+    expect(grouped.get("BSE")).toEqual(["WIPRO", "TCS", "GROWW"]);
+  });
+
+  it("returns an empty map for an empty watchlist", () => {
+    expect(groupSymbolsByExchange([]).size).toBe(0);
+  });
+
+  it("keeps a single-exchange watchlist to one bucket", () => {
+    const grouped = groupSymbolsByExchange([
+      { exchange: "NSE", symbol: "A" },
+      { exchange: "NSE", symbol: "B" },
+    ]);
+
+    expect(grouped.size).toBe(1);
+    expect(grouped.get("NSE")).toEqual(["A", "B"]);
   });
 });

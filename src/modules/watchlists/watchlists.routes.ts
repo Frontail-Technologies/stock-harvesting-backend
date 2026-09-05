@@ -8,12 +8,14 @@ import {
   updateWatchlistBodySchema,
   watchlistIdParamsSchema,
   watchlistItemParamsSchema,
+  watchlistRelativeStrengthQuerySchema,
 } from "./watchlists.schemas";
 import {
   addWatchlistItem,
   createWatchlist,
   deleteWatchlist,
   getWatchlist,
+  getWatchlistRelativeStrength,
   listWatchlists,
   removeWatchlistItem,
   renameWatchlist,
@@ -47,6 +49,23 @@ watchlistsRouter.get(
     const params = req.params as { id: string };
     const watchlist = await getWatchlist({ userId: getAuthUserId(req), id: params.id });
     sendData(res, { watchlist });
+  })
+);
+
+watchlistsRouter.get(
+  "/:id/relative-strength",
+  validate({ params: watchlistIdParamsSchema, query: watchlistRelativeStrengthQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { id: string };
+    const query = req.query as unknown as { limit: number };
+    sendData(
+      res,
+      await getWatchlistRelativeStrength({
+        userId: getAuthUserId(req),
+        id: params.id,
+        limit: query.limit,
+      })
+    );
   })
 );
 
