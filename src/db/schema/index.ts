@@ -10,6 +10,7 @@ export * from "./market-collections";
 export * from "./market-data";
 export * from "./monetization";
 export * from "./price-alerts";
+export * from "./registration-verifications";
 export * from "./scanner";
 export * from "./users";
 export * from "./watchlists";

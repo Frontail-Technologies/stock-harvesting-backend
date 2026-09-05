@@ -33,6 +33,10 @@ export function conflict(message: string = ERROR_MESSAGES.conflict, details?: un
   return new AppError(HTTP_STATUS.conflict, ERROR_CODES.conflict, message, details);
 }
 
+export function rateLimited(message: string = ERROR_MESSAGES.rateLimited, details?: unknown) {
+  return new AppError(HTTP_STATUS.tooManyRequests, ERROR_CODES.rateLimited, message, details);
+}
+
 // A data-provider/vendor call failed - status and code now agree (both mean
 // "upstream", not "the client's request was malformed"). `details` should
 // stay client-safe (see error-handler.ts, which serializes it directly to

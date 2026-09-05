@@ -4,7 +4,9 @@ export const ERROR_CODES = {
   forbidden: "FORBIDDEN",
   notFound: "NOT_FOUND",
   conflict: "CONFLICT",
+  rateLimited: "RATE_LIMITED",
   validationError: "VALIDATION_ERROR",
+  botVerificationFailed: "BOT_VERIFICATION_FAILED",
   internalError: "INTERNAL_ERROR",
   // A vendor/upstream data-provider call failed (non-2xx response, timeout,
   // or unusable payload) - distinct from badRequest, which means the

@@ -14,14 +14,14 @@ describe("resolveOauthDestination", () => {
     adminWebAppUrl: "https://admin.stockharvesting.com",
   };
 
-  it("main-site login (no portal hint) always lands on the main origin's /charts", () => {
+  it("main-site login (no portal hint) always lands on the main origin's /dashboard", () => {
     expect(resolveOauthDestination(undefined, config)).toEqual({
       origin: "https://stockharvesting.com",
-      successPath: "/charts",
+      successPath: "/dashboard",
     });
     expect(resolveOauthDestination(undefined, configWithAdmin)).toEqual({
       origin: "https://stockharvesting.com",
-      successPath: "/charts",
+      successPath: "/dashboard",
     });
   });
 
@@ -42,7 +42,7 @@ describe("resolveOauthDestination", () => {
   it("an unrecognized portal value is treated as the main site, not admin", () => {
     expect(resolveOauthDestination("something-else", configWithAdmin)).toEqual({
       origin: "https://stockharvesting.com",
-      successPath: "/charts",
+      successPath: "/dashboard",
     });
   });
 });

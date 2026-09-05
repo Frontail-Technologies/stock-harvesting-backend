@@ -10,6 +10,8 @@ export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   name: varchar("name", { length: 255 }).notNull(),
+  passwordHash: text("password_hash"),
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   avatarUrl: text("avatar_url"),
   role: userRoleEnum("role").default(DEFAULT_USER_ROLE).notNull(),
   plan: userPlanEnum("plan").default(DEFAULT_USER_PLAN).notNull(),

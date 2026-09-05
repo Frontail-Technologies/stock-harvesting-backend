@@ -3,9 +3,11 @@ import { Router } from "express";
 import { AUTH_ROUTES } from "../../shared/constants";
 import { unauthorized } from "../../shared/errors";
 import { sendData } from "../../shared/http";
-import { asyncHandler, getAuthUserId, requireAdmin, requireAdminAuth } from "../../shared/middleware";
+import { asyncHandler, getAuthUserId, rateLimit, requireAdmin, requireAdminAuth, validate } from "../../shared/middleware";
 import { clearRefreshCookie, getRefreshCookie, setRefreshCookie } from "../security/cookies";
-import { getCurrentUser, revokeRefreshToken, rotateRefreshToken } from "./auth.service";
+import { requireTurnstile } from "../security/turnstile";
+import { passwordLoginBodySchema } from "./auth.schemas";
+import { getCurrentUser, loginWithPassword, revokeRefreshToken, rotateRefreshToken } from "./auth.service";
 
 // The ADMIN portal's own auth router (mounted at /api/admin-auth) - the
 // mirror of auth.routes.ts's USER router, on entirely separate paths so
@@ -16,6 +18,26 @@ import { getCurrentUser, revokeRefreshToken, rotateRefreshToken } from "./auth.s
 // which independently re-validates the resolved account's role against
 // the portal that started the flow before creating anything.
 export const adminAuthRouter = Router();
+
+adminAuthRouter.post(
+  AUTH_ROUTES.login,
+  validate({ body: passwordLoginBodySchema }),
+  rateLimit({ keyPrefix: "auth:admin-login", windowMs: 15 * 60 * 1000, max: 10 }),
+  requireTurnstile("admin-password-login"),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { email: string; password: string };
+    const session = await loginWithPassword({
+      email: body.email,
+      password: body.password,
+      portal: "admin",
+    });
+    setRefreshCookie(res, "admin", session.refreshToken);
+    sendData(res, {
+      accessToken: session.accessToken,
+      user: session.user,
+    });
+  })
+);
 
 adminAuthRouter.post(AUTH_ROUTES.refresh, asyncHandler(async (req, res) => {
   const refreshToken = getRefreshCookie(req, "admin");

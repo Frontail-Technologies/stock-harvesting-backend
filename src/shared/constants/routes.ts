@@ -23,6 +23,10 @@ export const API_ROUTES = {
 export const AUTH_ROUTES = {
   googleUrl: "/google/url",
   googleCallback: "/google/callback",
+  login: "/login",
+  register: "/register",
+  registerResend: "/register/resend",
+  registerVerify: "/register/verify",
   refresh: "/refresh",
   me: "/me",
   logout: "/logout",
