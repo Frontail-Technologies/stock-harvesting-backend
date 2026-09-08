@@ -14,6 +14,7 @@ import {
   type UserPlan,
   type UserRole,
 } from "../../shared/constants";
+import { env } from "../../shared/env";
 import { badRequest, getErrorMessage, notFound } from "../../shared/errors";
 import { writeAuditLog } from "../../shared/audit/audit.service";
 import {
@@ -41,7 +42,7 @@ import {
 import { listProviderSettings, updateProviderSettings } from "../data-provider/data-provider-settings.service";
 import type { DataProviderSettingsRow } from "../data-provider/data-provider.types";
 import { closeMarketStreamProviderByKey } from "../market-stream/market-stream.service";
-import { getMarketDataQueue } from "../jobs/queues";
+import { addJobWithTimeout, getMarketDataQueue } from "../jobs/queues";
 import { logger } from "../../shared/logger";
 import type { adminUserSortFields } from "./admin.schemas";
 
@@ -665,7 +666,13 @@ export async function updateBrandingSettings(input: {
   return settings;
 }
 
-// Same queued-if-Redis-else-inline pattern as triggerInstrumentSync above - works without REDIS_URL configured too, since worker.ts refuses to start there.
+const BACKTEST_QUEUE_UNAVAILABLE_ERROR = "Backtest queue is currently unavailable. Retry once it recovers.";
+
+// No queue configured at all -> always runs inline, in every environment (pre-existing, approved
+// small-deployment behavior, unchanged here). A queue that IS configured but rejects the enqueue
+// (unreachable Redis) is different: in production that must persist a failed+error state instead
+// of ever running a potentially-heavy backfill inline inside the API request; only outside
+// production does it fall back inline, as a loudly-logged local convenience.
 export async function triggerWeeklyStrongBacktestBackfill(input: {
   actorUserId: string;
   collectionId: string;
@@ -681,13 +688,52 @@ export async function triggerWeeklyStrongBacktestBackfill(input: {
     })
     .returning();
 
+  let runInline = !queue;
+
   if (queue) {
-    await queue.add(JOB_NAMES.weeklyStrongBacktestBackfill, {
-      syncJobId: job.id,
-      collectionId: input.collectionId,
-      weeks: input.weeks,
-    });
-  } else {
+    try {
+      await addJobWithTimeout(
+        queue,
+        JOB_NAMES.weeklyStrongBacktestBackfill,
+        { syncJobId: job.id, collectionId: input.collectionId, weeks: input.weeks },
+        { jobId: `weekly-strong-backtest-backfill:${input.collectionId}` }
+      );
+    } catch (error) {
+      logger.warn(
+        { collectionId: input.collectionId, syncJobId: job.id, message: getErrorMessage(error, "Unknown error") },
+        "Weekly Strong backtest backfill: failed to enqueue job (Redis configured but unreachable?)"
+      );
+
+      if (env.NODE_ENV === "production") {
+        await db
+          .update(syncJobs)
+          .set({ status: JOB_STATUS.failed, errorMessage: BACKTEST_QUEUE_UNAVAILABLE_ERROR, updatedAt: new Date() })
+          .where(eq(syncJobs.id, job.id));
+
+        await writeAuditLog({
+          actorUserId: input.actorUserId,
+          action: "weekly_strong_backtest.backfill_triggered",
+          targetType: "market_collection",
+          targetId: input.collectionId,
+          metadata: { weeks: input.weeks, queueUnavailable: true },
+        });
+
+        return { syncJobId: job.id, status: JOB_STATUS.failed };
+      }
+
+      logger.warn(
+        { collectionId: input.collectionId, syncJobId: job.id },
+        "Weekly Strong backtest backfill: running inline (development-only fallback)"
+      );
+      await db
+        .update(syncJobs)
+        .set({ status: JOB_STATUS.running, updatedAt: new Date() })
+        .where(eq(syncJobs.id, job.id));
+      runInline = true;
+    }
+  }
+
+  if (runInline) {
     try {
       const result = await runWeeklyStrongBacktestBackfill({
         collectionId: input.collectionId,
@@ -721,7 +767,9 @@ export async function triggerWeeklyStrongBacktestBackfill(input: {
   return { syncJobId: job.id, status: job.status };
 }
 
-// Same queued-if-Redis-else-inline pattern as triggerWeeklyStrongBacktestBackfill above; reuses runWeeklyStrongBacktestHistoricalRebuild grouped per resolved membership version, not a blind recompute of every collection.
+// Same no-queue-always-inline / configured-but-unreachable-branches-by-environment pattern as
+// triggerWeeklyStrongBacktestBackfill above; reuses runWeeklyStrongBacktestHistoricalRebuild
+// grouped per resolved membership version, not a blind recompute of every collection.
 export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
   actorUserId: string;
   collectionId: string;
@@ -736,12 +784,52 @@ export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
     })
     .returning();
 
+  let runInline = !queue;
+
   if (queue) {
-    await queue.add(JOB_NAMES.weeklyStrongBacktestHistoricalRebuild, {
-      syncJobId: job.id,
-      collectionId: input.collectionId,
-    });
-  } else {
+    try {
+      await addJobWithTimeout(
+        queue,
+        JOB_NAMES.weeklyStrongBacktestHistoricalRebuild,
+        { syncJobId: job.id, collectionId: input.collectionId },
+        { jobId: `weekly-strong-backtest-historical-rebuild:${input.collectionId}` }
+      );
+    } catch (error) {
+      logger.warn(
+        { collectionId: input.collectionId, syncJobId: job.id, message: getErrorMessage(error, "Unknown error") },
+        "Weekly Strong backtest historical rebuild: failed to enqueue job (Redis configured but unreachable?)"
+      );
+
+      if (env.NODE_ENV === "production") {
+        await db
+          .update(syncJobs)
+          .set({ status: JOB_STATUS.failed, errorMessage: BACKTEST_QUEUE_UNAVAILABLE_ERROR, updatedAt: new Date() })
+          .where(eq(syncJobs.id, job.id));
+
+        await writeAuditLog({
+          actorUserId: input.actorUserId,
+          action: "weekly_strong_backtest.historical_rebuild_triggered",
+          targetType: "market_collection",
+          targetId: input.collectionId,
+          metadata: { queueUnavailable: true },
+        });
+
+        return { syncJobId: job.id, status: JOB_STATUS.failed };
+      }
+
+      logger.warn(
+        { collectionId: input.collectionId, syncJobId: job.id },
+        "Weekly Strong backtest historical rebuild: running inline (development-only fallback)"
+      );
+      await db
+        .update(syncJobs)
+        .set({ status: JOB_STATUS.running, updatedAt: new Date() })
+        .where(eq(syncJobs.id, job.id));
+      runInline = true;
+    }
+  }
+
+  if (runInline) {
     try {
       const result = await runWeeklyStrongBacktestHistoricalRebuild({ collectionId: input.collectionId });
       await db

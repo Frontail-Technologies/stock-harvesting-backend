@@ -39,8 +39,24 @@ export function getRedisConnectionOptions() {
   };
 }
 
+const PRODUCER_CONNECT_TIMEOUT_MS = 3_000;
+
+// Only the Worker's blocking commands (BRPOPLPUSH/BLMOVE) require maxRetriesPerRequest: null -
+// this API process only ever enqueues/reads, so its connection can (and must) fail a command
+// deterministically instead of retrying forever when Redis is configured but unreachable.
+export function getProducerRedisConnectionOptions() {
+  const base = getRedisConnectionOptions();
+  if (!base) return null;
+  return {
+    ...base,
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    connectTimeout: PRODUCER_CONNECT_TIMEOUT_MS,
+  };
+}
+
 export function getMarketDataQueue() {
-  const connection = getRedisConnectionOptions();
+  const connection = getProducerRedisConnectionOptions();
   if (!connection) return null;
   if (!marketDataQueue) {
     marketDataQueue = new Queue(QUEUE_NAMES.marketData, { connection });
@@ -58,6 +74,32 @@ export function getMarketDataQueue() {
     });
   }
   return marketDataQueue;
+}
+
+const ENQUEUE_TIMEOUT_MS = 5_000;
+
+// Defense-in-depth on top of the producer's own finite maxRetriesPerRequest/connectTimeout above:
+// this bounds the call so a down Redis fails fast and visibly instead of leaving a caller's
+// DB-persisted status (queued/pending) stuck forever, even if ioredis's own failure is slower
+// than expected. jobId makes the enqueue idempotent - a duplicate trigger for the same identity
+// collapses into the existing job instead of running the same heavy work twice; removeOnComplete/
+// removeOnFail ensure that identity is free again once the job is done, so a later legitimate
+// Retry isn't blocked by a finished job still occupying the same id.
+export async function addJobWithTimeout<T extends object>(
+  queue: Queue,
+  jobName: string,
+  data: T,
+  opts?: { jobId?: string },
+): Promise<void> {
+  await Promise.race([
+    queue.add(jobName, data, { removeOnComplete: true, removeOnFail: true, ...opts }).then(() => undefined),
+    new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error(`Timed out enqueueing "${jobName}" job after ${ENQUEUE_TIMEOUT_MS}ms - Redis may be unreachable`)),
+        ENQUEUE_TIMEOUT_MS,
+      );
+    }),
+  ]);
 }
 
 export async function scheduleRepeatableMarketDataSync() {

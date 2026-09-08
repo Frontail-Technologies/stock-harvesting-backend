@@ -26,7 +26,7 @@ vi.mock("../weekly-strong-backtest/weekly-strong-backtest.generation", () => ({
   runWeeklyStrongBacktestBackfill: vi.fn(),
   runWeeklyStrongBacktestHistoricalRebuild: vi.fn(),
 }));
-vi.mock("../jobs/queues", () => ({ getMarketDataQueue: vi.fn() }));
+vi.mock("../jobs/queues", () => ({ getMarketDataQueue: vi.fn(), addJobWithTimeout: vi.fn() }));
 vi.mock("../../shared/env", () => ({ env: { NODE_ENV: "test" } }));
 
 import * as dbClientModule from "../../db/client";
@@ -49,6 +49,7 @@ const hasSufficientWeeklyStrongHistory = vi.mocked(evaluatorModule.hasSufficient
 const runWeeklyStrongBacktestBackfill = vi.mocked(generationModule.runWeeklyStrongBacktestBackfill);
 const runWeeklyStrongBacktestHistoricalRebuild = vi.mocked(generationModule.runWeeklyStrongBacktestHistoricalRebuild);
 const getMarketDataQueue = vi.mocked(queuesModule.getMarketDataQueue);
+const addJobWithTimeout = vi.mocked(queuesModule.addJobWithTimeout);
 
 function selectResult(rows: unknown[]) {
   const chain = {
@@ -254,13 +255,20 @@ describe("triggerCollectionPreparation", () => {
     mockUpdateChain();
   });
 
-  it("enqueues via the market-data queue when one is available", async () => {
-    const add = vi.fn().mockResolvedValue(undefined);
-    getMarketDataQueue.mockReturnValue({ add } as never);
+  it("enqueues via the market-data queue when one is available, with a deterministic jobId", async () => {
+    const queue = {} as never;
+    getMarketDataQueue.mockReturnValue(queue);
+    addJobWithTimeout.mockResolvedValue(undefined);
 
     await triggerCollectionPreparation("col-1", "v1");
 
-    expect(add).toHaveBeenCalledWith("collection-prepare", { collectionId: "col-1", membershipVersionId: "v1" });
+    expect(addJobWithTimeout).toHaveBeenCalledWith(
+      queue,
+      "collection-prepare",
+      { collectionId: "col-1", membershipVersionId: "v1" },
+      { jobId: "collection-prepare:col-1:v1" }
+    );
+    expect(getActiveMemberInstrumentRows).not.toHaveBeenCalled();
   });
 
   it("F: with no queue and NODE_ENV=production, never runs preparation inline", async () => {
@@ -281,5 +289,34 @@ describe("triggerCollectionPreparation", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(getActiveMemberInstrumentRows).toHaveBeenCalledWith("col-1");
+  });
+
+  it("root cause regression: a queue that is configured but unreachable (enqueue fails) falls back to an in-process run outside production, instead of leaving the collection stuck pending forever", async () => {
+    getMarketDataQueue.mockReturnValue({} as never);
+    addJobWithTimeout.mockRejectedValue(new Error("Timed out enqueueing collection-prepare job"));
+
+    await triggerCollectionPreparation("col-1", "v1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(getActiveMemberInstrumentRows).toHaveBeenCalledWith("col-1");
+  });
+
+  it("follow-up correctness fix: a queue that is configured but unreachable in production is marked failed with a safe error, never run inline", async () => {
+    getMarketDataQueue.mockReturnValue({} as never);
+    addJobWithTimeout.mockRejectedValue(new Error("Timed out enqueueing collection-prepare job"));
+    const set = mockUpdateChain();
+    (env as { NODE_ENV: string }).NODE_ENV = "production";
+
+    await triggerCollectionPreparation("col-1", "v1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(getActiveMemberInstrumentRows).not.toHaveBeenCalled();
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparationStatus: "failed",
+        preparationError: expect.stringContaining("unavailable"),
+      })
+    );
+    (env as { NODE_ENV: string }).NODE_ENV = "test";
   });
 });

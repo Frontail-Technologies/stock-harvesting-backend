@@ -6,7 +6,7 @@ import { COLLECTION_PREPARATION_STATUS, JOB_NAMES } from "../../shared/constants
 import { env } from "../../shared/env";
 import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
-import { getMarketDataQueue } from "../jobs/queues";
+import { addJobWithTimeout, getMarketDataQueue } from "../jobs/queues";
 import { findSymbolsNeedingHistoryBackfill, groupMetricCandlesBySymbol } from "../market-data/market-data.candles";
 import { runChartBackfillOnce } from "../market-data/market-data.candle-sync";
 import { getDateYearsAgo, getTodayDate } from "../market-data/market-data.dates";
@@ -289,11 +289,68 @@ async function computeAvailabilityCounts(exchange: string, symbols: string[]) {
   return { membersWithRequiredHistory, membersUnavailable };
 }
 
+const COLLECTION_PREPARE_QUEUE_UNAVAILABLE_ERROR =
+  "Collection preparation queue is currently unavailable. Retry once it recovers.";
+
+function buildCollectionPrepareJobId(collectionId: string, membershipVersionId: string | null) {
+  return `collection-prepare:${collectionId}:${membershipVersionId ?? "none"}`;
+}
+
+function runCollectionPreparationInlineDevFallback(collectionId: string, membershipVersionId: string | null) {
+  void prepareCollectionData(collectionId, membershipVersionId).catch((error) => {
+    logger.error(
+      { collectionId, membershipVersionId, message: getErrorMessage(error, "Unknown error") },
+      "Collection preparation (dev fallback) failed"
+    );
+  });
+}
+
+async function markCollectionPreparationQueueUnavailable(collectionId: string) {
+  await db
+    .update(marketCollections)
+    .set({
+      preparationStatus: COLLECTION_PREPARATION_STATUS.failed,
+      preparationError: COLLECTION_PREPARE_QUEUE_UNAVAILABLE_ERROR,
+      updatedAt: new Date(),
+    })
+    .where(eq(marketCollections.id, collectionId));
+}
+
+// Never runs heavy preparation inline in production - a down/unreachable queue there must persist
+// a coherent failed+error state so the badge stops showing a false "Preparing" and Retry is
+// available, rather than silently degrading into a potentially-huge backfill inside the API
+// process. The dev-only inline fallback below exists purely for local convenience without a
+// worker running, and is always loudly logged so it's never mistaken for the real job path.
 export async function triggerCollectionPreparation(collectionId: string, membershipVersionId: string | null) {
   const queue = getMarketDataQueue();
+
   if (queue) {
-    await queue.add(JOB_NAMES.collectionPrepare, { collectionId, membershipVersionId });
-    return;
+    try {
+      await addJobWithTimeout(
+        queue,
+        JOB_NAMES.collectionPrepare,
+        { collectionId, membershipVersionId },
+        { jobId: buildCollectionPrepareJobId(collectionId, membershipVersionId) }
+      );
+      return;
+    } catch (error) {
+      logger.warn(
+        { collectionId, membershipVersionId, message: getErrorMessage(error, "Unknown error") },
+        "Collection preparation: failed to enqueue job (Redis configured but unreachable?)"
+      );
+
+      if (env.NODE_ENV === "production") {
+        await markCollectionPreparationQueueUnavailable(collectionId);
+        return;
+      }
+
+      logger.warn(
+        { collectionId, membershipVersionId },
+        "Collection preparation: running inline (development-only fallback - worker/Redis unreachable)"
+      );
+      runCollectionPreparationInlineDevFallback(collectionId, membershipVersionId);
+      return;
+    }
   }
 
   if (env.NODE_ENV === "production") {
@@ -304,10 +361,5 @@ export async function triggerCollectionPreparation(collectionId: string, members
     return;
   }
 
-  void prepareCollectionData(collectionId, membershipVersionId).catch((error) => {
-    logger.error(
-      { collectionId, membershipVersionId, message: getErrorMessage(error, "Unknown error") },
-      "Collection preparation (dev fallback) failed"
-    );
-  });
+  runCollectionPreparationInlineDevFallback(collectionId, membershipVersionId);
 }

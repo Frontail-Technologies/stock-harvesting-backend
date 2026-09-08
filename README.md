@@ -20,8 +20,17 @@ npm install
 copy .env.example .env
 npm run db:generate
 npm run db:migrate
-npm run dev
-npm run worker
+```
+
+Then run three processes concurrently (separate terminals) — a running
+Redis matching `REDIS_URL` is required, not just configured, or
+collection-preparation/backtest jobs never get consumed. See
+`docs/DEPLOYMENT.md` "Process topology" for the full explanation.
+
+```bash
+npm run dev          # API
+npm run dev:worker   # worker (consumes BullMQ jobs)
+redis-server         # or: docker run -p 6379:6379 redis
 ```
 
 The frontend should call `http://localhost:4000` through `NEXT_PUBLIC_API_BASE_URL`.
