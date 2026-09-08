@@ -2,6 +2,7 @@ import { pgEnum } from "drizzle-orm/pg-core";
 
 import {
   CANDLE_TIMEFRAMES,
+  COLLECTION_PREPARATION_STATUSES,
   JOB_STATUSES,
   MONETIZATION_MODES,
   PROVIDER_STATUSES,
@@ -17,3 +18,7 @@ export const providerStatusEnum = pgEnum("provider_status", PROVIDER_STATUSES);
 export const jobStatusEnum = pgEnum("job_status", JOB_STATUSES);
 export const scanRunStatusEnum = pgEnum("scan_run_status", SCAN_RUN_STATUSES);
 export const monetizationModeEnum = pgEnum("monetization_mode", MONETIZATION_MODES);
+export const collectionPreparationStatusEnum = pgEnum(
+  "collection_preparation_status",
+  COLLECTION_PREPARATION_STATUSES
+);

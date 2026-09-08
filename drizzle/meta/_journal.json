@@ -120,6 +120,20 @@
       "when": 1788592037527,
       "tag": "0016_old_night_thrasher",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788807145569,
+      "tag": "0017_lowly_luckman",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788807416957,
+      "tag": "0018_nostalgic_wither",
+      "breakpoints": true
     }
   ]
 }

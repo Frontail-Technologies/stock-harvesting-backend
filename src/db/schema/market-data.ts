@@ -4,6 +4,7 @@ import {
   index,
   numeric,
   pgTable,
+  primaryKey,
   timestamp,
   unique,
   uuid,
@@ -32,38 +33,39 @@ export const instruments = pgTable(
     sectorCode: varchar("sector_code", { length: 32 }),
     industry: varchar("industry", { length: 255 }),
     industryCode: varchar("industry_code", { length: 32 }),
-    classificationSyncedAt: timestamp("classification_synced_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    classificationSyncedAt: timestamp("classification_synced_at", {
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => ({
     exchangeActiveSymbolIdx: index("instruments_exchange_active_symbol_idx").on(
       table.exchange,
       table.active,
-      table.symbol
+      table.symbol,
     ),
     exchangeActiveNameIdx: index("instruments_exchange_active_name_idx").on(
       table.exchange,
       table.active,
-      table.name
+      table.name,
     ),
-    exchangeActiveChangePctIdx: index("instruments_exchange_active_change_pct_idx").on(
-      table.exchange,
-      table.active,
-      table.latestChangePct
-    ),
+    exchangeActiveChangePctIdx: index(
+      "instruments_exchange_active_change_pct_idx",
+    ).on(table.exchange, table.active, table.latestChangePct),
     exchangeSymbolUnique: unique().on(table.exchange, table.symbol),
     providerTokenUnique: unique().on(table.provider, table.instrumentToken),
-  })
+  }),
 );
 
 export const candles = pgTable(
   "candles",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
-    // NOT NULL since 2026-08-06 — verified live (0 of 1,357,264 rows were
-    // NULL) via backend/src/scripts/harden-candles-instrument-id.ts before
-    // applying; every write path already always supplies it.
+    id: uuid("id").defaultRandom().notNull(),
     instrumentId: uuid("instrument_id")
       .references(() => instruments.id, {
         onDelete: "cascade",
@@ -79,10 +81,20 @@ export const candles = pgTable(
     close: numeric("close", { precision: 18, scale: 4 }).notNull(),
     volume: numeric("volume", { precision: 20, scale: 0 }).notNull(),
     source: varchar("source", { length: 32 }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => ({
-    candleUnique: unique().on(table.exchange, table.symbol, table.timeframe, table.time),
-  })
+    pk: primaryKey({ columns: [table.id, table.time] }),
+    candleUnique: unique().on(
+      table.exchange,
+      table.symbol,
+      table.timeframe,
+      table.time,
+    ),
+  }),
 );
