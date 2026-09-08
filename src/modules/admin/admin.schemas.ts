@@ -143,7 +143,7 @@ export const confirmCollectionImportBodySchema = importCollectionCsvBodySchema.e
 // Deduplicated server-side by the service - a duplicate id in the array is never trusted as a distinct row.
 export const bulkDeleteCollectionsBodySchema = z
   .object({
-    collectionIds: z.array(z.string().uuid()).min(1).max(100),
+    collectionIds: z.array(z.string().uuid()).min(1).max(500),
   })
   .strict();
 

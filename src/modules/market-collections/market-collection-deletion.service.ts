@@ -8,7 +8,7 @@ import { notFound } from "../../shared/errors";
 import { removeQueuedCollectionPrepareJobs } from "../jobs/queues";
 import { invalidateCollectionSnapshots } from "../market-data/dashboard-snapshots.service";
 
-const BULK_DELETE_MAX_IDS = 100;
+const BULK_DELETE_MAX_IDS = 500;
 
 type DeletedCollectionRow = { id: string; code: string; name: string };
 
@@ -82,5 +82,6 @@ async function cleanupAfterCollectionDelete(deletedRows: DeletedCollectionRow[])
   }
 
   await Promise.all(deletedRows.map((row) => invalidateCollectionSnapshots(row.id)));
-  await removeQueuedCollectionPrepareJobs(deletedRows.map((row) => row.id));
+  // Never awaited - a slow/unreachable Redis must not hang the delete response; prepareCollectionData's own no-op check is the real safety net.
+  void removeQueuedCollectionPrepareJobs(deletedRows.map((row) => row.id));
 }
