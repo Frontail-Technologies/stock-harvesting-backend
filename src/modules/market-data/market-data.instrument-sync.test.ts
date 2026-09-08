@@ -79,8 +79,7 @@ describe("ensureInstrumentsForSymbols", () => {
       [{ symbol: "NEWSTOCK", name: "New Stock", instrumentToken: "tok-1" }],
       "eodhd"
     );
-    // Already resolved by the search - the post-search fallback pass must
-    // not additionally try to create a fallback row for the same symbol.
+    // Already resolved by the search - the post-search fallback pass must not additionally try to create a fallback row for the same symbol.
     expect(createFallbackInstrument).not.toHaveBeenCalled();
   });
 
@@ -122,6 +121,62 @@ describe("ensureInstrumentsForSymbols", () => {
     });
 
     await expect(ensureInstrumentsForSymbols(["ORPHAN"], "NSE")).resolves.not.toThrow();
+    expect(createFallbackInstrument).not.toHaveBeenCalled();
+  });
+
+  it("E. multiple missing symbols + provider without search capability -> full instrument sync runs exactly once, not once per missing symbol", async () => {
+    getInstrumentsBySymbol
+      .mockResolvedValueOnce(new Map()) // initial lookup: nothing exists
+      .mockResolvedValueOnce(
+        new Map([
+          ["ALPHA", { id: "i5", symbol: "ALPHA" } as never],
+          ["BETA", { id: "i6", symbol: "BETA" } as never],
+          ["GAMMA", { id: "i7", symbol: "GAMMA" } as never],
+        ])
+      );
+
+    const fetchInstruments = vi.fn().mockResolvedValue([
+      { symbol: "ALPHA", name: "Alpha", instrumentToken: "tok-a" },
+      { symbol: "BETA", name: "Beta", instrumentToken: "tok-b" },
+      { symbol: "GAMMA", name: "Gamma", instrumentToken: "tok-c" },
+    ]);
+
+    getEligibleProviderAdapter.mockImplementation(async (input: { capability: string }) => {
+      // No searchInstruments on this adapter - matches e.g. Zerodha for NSE.
+      if (input.capability === "instrument_search") {
+        return { providerKey: "zerodha" } as never;
+      }
+      if (input.capability === "instrument_sync") {
+        return { providerKey: "zerodha", fetchInstruments } as never;
+      }
+      return undefined as never;
+    });
+
+    await ensureInstrumentsForSymbols(["ALPHA", "BETA", "GAMMA"], "NSE");
+
+    expect(fetchInstruments).toHaveBeenCalledTimes(1);
+    expect(upsertInstruments).toHaveBeenCalledTimes(1);
+  });
+
+  it("F. mixed already-present and missing symbols only resolves the missing ones", async () => {
+    getInstrumentsBySymbol
+      .mockResolvedValueOnce(new Map([["TCS", { id: "i1", symbol: "TCS" } as never]])) // initial: TCS already exists
+      .mockResolvedValueOnce(new Map([["NEWCO", { id: "i8", symbol: "NEWCO" } as never]])); // re-check after search
+
+    const searchInstruments = vi
+      .fn()
+      .mockResolvedValue([{ symbol: "NEWCO", name: "New Co", instrumentToken: "tok-newco" }]);
+    getEligibleProviderAdapter.mockImplementation(async (input: { capability: string }) => {
+      if (input.capability === "instrument_search") {
+        return { providerKey: "eodhd", searchInstruments } as never;
+      }
+      return undefined as never;
+    });
+
+    await ensureInstrumentsForSymbols(["TCS", "NEWCO"], "NSE");
+
+    expect(searchInstruments).toHaveBeenCalledTimes(1);
+    expect(searchInstruments).toHaveBeenCalledWith("NEWCO", "NSE");
     expect(createFallbackInstrument).not.toHaveBeenCalled();
   });
 });

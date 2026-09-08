@@ -1,14 +1,11 @@
 import { z } from "zod";
 
-import { CANDLE_TIMEFRAME, CANDLE_TIMEFRAMES, DEFAULT_CANDLE_TIMEFRAME, DEFAULT_EXCHANGE } from "../../shared/constants";
+import { DEFAULT_CANDLE_TIMEFRAME, DEFAULT_EXCHANGE } from "../../shared/constants";
+import { candleTimeframeSchema } from "../../shared/validation/market.schemas";
 import { GLOBAL_DATAFEEDS_INDEX_EXCHANGE } from "../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
 import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 
-// Open rather than a closed enum - the exchange list is dynamic (see
-// listSupportedExchanges), sourced live from EODHD (~70 exchanges) plus
-// NSE. Bad codes fail gracefully downstream (the data-provider adapter
-// returns empty results for an unknown exchange code) rather than needing
-// this schema to know the full valid set up front.
+// Open rather than a closed enum - the exchange list is dynamic (see listSupportedExchanges, ~70 EODHD exchanges plus NSE); bad codes fail gracefully downstream instead of needing this schema to know the full valid set.
 export const exchangeSchema = z
   .string()
   .trim()
@@ -19,15 +16,6 @@ export const exchangeSchema = z
 
 export const MOVE_FILTERS = ["all", "gainers", "decliners", "unchanged"] as const;
 export type MoveFilter = (typeof MOVE_FILTERS)[number];
-
-const candleTimeframeSchema = z.preprocess((value) => {
-  if (typeof value !== "string") return value;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "1d") return CANDLE_TIMEFRAME.day;
-  if (normalized === "1w") return CANDLE_TIMEFRAME.week;
-  if (normalized === "1m" || normalized === "1mo") return CANDLE_TIMEFRAME.month;
-  return value;
-}, z.enum(CANDLE_TIMEFRAMES));
 
 export const stockListQuerySchema = z
   .object({
@@ -66,9 +54,7 @@ export const candleQuerySchema = z
   })
   .strict();
 
-// No timeframe/from/to here on purpose - the public candles route always
-// returns full daily history only (see market-data.routes.ts), so there is
-// nothing for an anonymous caller to override.
+// No timeframe/from/to here on purpose - the public candles route always returns full daily history only, so there is nothing for an anonymous caller to override.
 export const publicCandleQuerySchema = z
   .object({
     exchange: exchangeSchema,
@@ -83,10 +69,7 @@ export const historyRangeQuerySchema = z
   })
   .strict();
 
-// Closed whitelist, unlike the general exchangeSchema above - there are
-// only ever a handful of *index* exchanges, and an unrecognized one would
-// silently return an empty ranking rather than erroring, so it's worth
-// rejecting up front instead.
+// Closed whitelist, unlike the general exchangeSchema above - only a handful of *index* exchanges exist, and an unrecognized one would silently return an empty ranking, so it's worth rejecting up front.
 export const indexRelativeStrengthQuerySchema = z
   .object({
     limit: z.coerce.number().int().positive().max(500).default(150),

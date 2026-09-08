@@ -4,6 +4,7 @@ import {
   evaluateWeeklyStrongLatest,
   evaluateWeeklyStrongSeries,
   excludeIncompleteTradingWeek,
+  findCurrentStreakEntryIndex,
   hasSufficientWeeklyStrongHistory,
   MIN_WEEKLY_STRONG_DAILY_BARS,
   MIN_WEEKLY_STRONG_WEEKLY_BARS,
@@ -12,11 +13,14 @@ import {
   WEEKLY_STRONG_DAILY_LOOKBACK_BARS,
   WEEKLY_STRONG_NEAR_HIGH_RATIO,
   WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS,
+  type WeeklyStrongSeriesPoint,
 } from "./weekly-strong-evaluator";
 
-// Proprietary threshold regression guard - these values must never drift
-// silently during a refactor. If one of these ever needs to change, it
-// should be a deliberate, visible edit to this test, not a side effect.
+function point(time: string, passes: boolean): WeeklyStrongSeriesPoint {
+  return { time, passes, passesDaily: passes, passesWeekly: passes };
+}
+
+// Proprietary threshold regression guard - these values must never drift silently during a refactor; a needed change should be a deliberate, visible edit to this test, not a side effect.
 describe("Weekly Strong constants - unchanged by the consolidation refactor", () => {
   it("keeps the exact proprietary window sizes, ratio, and history floors", () => {
     expect(WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS).toBe(250);
@@ -27,13 +31,7 @@ describe("Weekly Strong constants - unchanged by the consolidation refactor", ()
   });
 });
 
-// Builds an ascending daily/weekly-time-shaped candle series: `count` bars,
-// all closing at `baseClose` except the last one (`latestClose`) and,
-// optionally, an earlier spike bar that sets the trailing high. Dates are
-// deliberately simple sequential day-strings ("day-000".."day-NNN") - the
-// evaluator only ever compares `time` strings for ordering/equality, never
-// parses them as real dates, so this is a faithful stand-in for real
-// daily/weekly candle `time` values without depending on a real calendar.
+// Builds an ascending daily/weekly-time-shaped candle series: `count` bars, all closing at `baseClose` except the last (`latestClose`) and, optionally, an earlier spike bar setting the trailing high. Dates are simple sequential day-strings since the evaluator only compares `time` strings for ordering/equality, never parses them as real dates.
 function buildSeries(
   count: number,
   baseClose: number,
@@ -77,12 +75,7 @@ describe("passesNearHigh (single-timeframe predicate)", () => {
   });
 
   it("is a strict inequality - exactly at the threshold does not pass", () => {
-    // Scanner's near-250-week-high.ts chart-highlight rule now delegates to
-    // this same evaluateWeeklyStrongSeries (see market-data.service.ts's
-    // getSymbolWeeklyStrongSeriesInput and docs/KNOWN_ISSUES.md) - it used
-    // to run its own independent weekly-only threshold check that could
-    // disagree with this one; that's fixed, so this strict inequality is
-    // now authoritative for both surfaces, not just this one.
+    // Scanner's near-250-week-high.ts chart-highlight rule now delegates to this same evaluateWeeklyStrongSeries (see docs/KNOWN_ISSUES.md) instead of its own independent check that could disagree, so this strict inequality is now authoritative for both surfaces.
     const closes = [1000, 850]; // 850 is exactly 85% of 1000
     expect(passesNearHigh(closes, 1, 2, WEEKLY_STRONG_NEAR_HIGH_RATIO)).toBe(false);
   });
@@ -93,8 +86,7 @@ describe("passesNearHigh (single-timeframe predicate)", () => {
   });
 
   it("only looks at the trailing lookback window, not the full series", () => {
-    // A much higher close far outside the lookback window must not affect
-    // the decision for the latest bar.
+    // A much higher close far outside the lookback window must not affect the decision for the latest bar.
     const closes = [5000, 700, 700, 700, 900];
     expect(passesNearHigh(closes, 4, 3, WEEKLY_STRONG_NEAR_HIGH_RATIO)).toBe(true);
   });
@@ -170,13 +162,7 @@ describe("evaluateWeeklyStrongLatest (the live Weekly Strong list's decision)", 
 
 describe("evaluateWeeklyStrongSeries (the backtest chart / Scanner overlay's decision)", () => {
   it("evaluates every weekly bar independently over its own trailing window", () => {
-    // windowSize=3, closes = [700, 700, 1000, 700, 900, 600]. Worked by hand:
-    //   i=0 window=[700]                 max=700  -> 700 > 595  -> pass (trivially its own high)
-    //   i=1 window=[700,700]             max=700  -> 700 > 595  -> pass
-    //   i=2 window=[700,700,1000]        max=1000 -> 1000 > 850 -> pass (sets the high)
-    //   i=3 window=[700,1000,700]        max=1000 -> 700 > 850  -> FAIL (still under the spike)
-    //   i=4 window=[1000,700,900]        max=1000 -> 900 > 850  -> pass
-    //   i=5 window=[700,900,600]         max=900  -> 600 > 765  -> FAIL (spike aged out, new high is 900)
+    // windowSize=3, closes = [700, 700, 1000, 700, 900, 600] - worked by hand to verify the rolling-window max correctly ages the spike at i=2 out of scope by i=5, flipping i=3 and i=5 to FAIL while i=4 still passes against the still-in-window spike.
     const dailyLookback = 10;
     const weeklyLookback = 3;
     const daily = buildSeries(60, 700, 700); // flat, plenty of daily bars across the same range
@@ -202,9 +188,7 @@ describe("evaluateWeeklyStrongSeries (the backtest chart / Scanner overlay's dec
       { time: "day-0005", close: 900 },
       { time: "day-0010", close: 900 },
     ];
-    // No daily candle exists before day-0008 - the first weekly bar (day-0005)
-    // has nothing to align to and must be skipped entirely, not counted as
-    // a fail.
+    // No daily candle exists before day-0008 - the first weekly bar (day-0005) has nothing to align to and must be skipped entirely, not counted as a fail.
     const daily = [
       { time: "day-0008", close: 900 },
       { time: "day-0010", close: 900 },
@@ -220,12 +204,7 @@ describe("evaluateWeeklyStrongSeries (the backtest chart / Scanner overlay's dec
   });
 
   it("its last point agrees exactly with evaluateWeeklyStrongLatest for the same data", () => {
-    // Daily and weekly share the same time axis here so the alignment walk
-    // lands on the true last daily bar for the last weekly bar - exactly
-    // what readDailyAndWeeklyMetricCandles' real output guarantees (both
-    // derived from the same underlying daily feed, so the latest weekly
-    // bar always covers up through the latest daily bar). Different
-    // lookback bar COUNTS per leg still apply independently.
+    // Daily and weekly share the same time axis here so the alignment walk lands on the true last daily bar for the last weekly bar, exactly what readDailyAndWeeklyMetricCandles' real output guarantees; different lookback bar COUNTS per leg still apply independently.
     const daily = buildSeries(120, 700, 950, { spikeIndex: 40, spikeClose: 1000 });
     const weekly = daily;
     const options = { dailyLookbackBars: 60, weeklyLookbackBars: 30 };
@@ -244,13 +223,37 @@ describe("evaluateWeeklyStrongSeries (the backtest chart / Scanner overlay's dec
   });
 });
 
-// These two functions power two different UI surfaces (the live
-// WeeklyStrongStockTable and the WeeklyStrongBacktestChart/Scanner overlay)
-// that must agree on "does this symbol pass, right now".
+// Dashboard's Harvest Results "Return" column reference point - the same entry concept computeSymbolBreakoutBacktest uses for a closed trade, here for a still-open qualifying streak.
+describe("findCurrentStreakEntryIndex (Return's reference point)", () => {
+  it("returns null for an empty series", () => {
+    expect(findCurrentStreakEntryIndex([])).toBeNull();
+  });
+
+  it("returns null when the series does not currently end in a passing state", () => {
+    const series = [point("w1", true), point("w2", false)];
+    expect(findCurrentStreakEntryIndex(series)).toBeNull();
+  });
+
+  it("walks back to the first bar of the unbroken trailing streak", () => {
+    const series = [point("w1", true), point("w2", false), point("w3", true), point("w4", true), point("w5", true)];
+    expect(findCurrentStreakEntryIndex(series)).toBe(2);
+  });
+
+  it("returns index 0 when the whole series is one unbroken streak", () => {
+    const series = [point("w1", true), point("w2", true), point("w3", true)];
+    expect(findCurrentStreakEntryIndex(series)).toBe(0);
+  });
+
+  it("returns the last index when only the final bar passes", () => {
+    const series = [point("w1", false), point("w2", false), point("w3", true)];
+    expect(findCurrentStreakEntryIndex(series)).toBe(2);
+  });
+});
+
+// These two functions power two different UI surfaces (the live WeeklyStrongStockTable and the WeeklyStrongBacktestChart/Scanner overlay) that must agree on "does this symbol pass, right now".
 describe("cross-consumer consistency: live list vs backtest, same underlying data", () => {
   it("produce identical pass/fail for several symbol-shaped series, including boundary cases", () => {
-    // daily/weekly share the same 80-bar time axis in every case (see the
-    // "same time axis" note above) - only the close values differ per case.
+    // daily/weekly share the same 80-bar time axis in every case (see the "same time axis" note above) - only the close values differ per case.
     const cases = [
       { daily: buildSeries(80, 700, 900), weekly: buildSeries(80, 700, 900) }, // both pass
       { daily: buildSeries(80, 700, 500), weekly: buildSeries(80, 700, 900) }, // daily fails
@@ -276,8 +279,7 @@ describe("cross-consumer consistency: live list vs backtest, same underlying dat
   });
 });
 
-// Week of Mon 2026-01-05 .. Sun 2026-01-11 - see trading-calendar.test.ts
-// for the underlying isCompletedTradingWeek behavior this builds on.
+// Week of Mon 2026-01-05 .. Sun 2026-01-11 - see trading-calendar.test.ts for the underlying isCompletedTradingWeek behavior this builds on.
 describe("excludeIncompleteTradingWeek", () => {
   const weeklyRows = [
     { time: "2025-12-22", close: 100 },
@@ -300,8 +302,7 @@ describe("excludeIncompleteTradingWeek", () => {
   });
 
   it("only ever drops the LAST entry, never an already-complete earlier week", () => {
-    // Even mid-week, the two prior (definitely complete) weeks must survive
-    // untouched - only the trailing in-progress one is trimmed.
+    // Even mid-week, the two prior (definitely complete) weeks must survive untouched - only the trailing in-progress one is trimmed.
     const at = new Date("2026-01-06T10:05:00Z");
     const result = excludeIncompleteTradingWeek(weeklyRows, "NSE", at);
     expect(result[0]).toEqual(weeklyRows[0]);
@@ -315,12 +316,7 @@ describe("excludeIncompleteTradingWeek", () => {
 
 describe("live list vs backtest: neither can surface an incomplete current week", () => {
   it("computeWeeklyStrongStocks-shaped evaluation only ever sees completed weeks", () => {
-    // A trailing in-progress week (today's daily candle already synced,
-    // but the week it belongs to hasn't ended) must never reach
-    // evaluateWeeklyStrongLatest - excludeIncompleteTradingWeek is what
-    // every real call site (computeWeeklyStrongStocks,
-    // computeWeeklyStrongStocksBacktest, computeSymbolBreakoutBacktest)
-    // applies before evaluating, exactly like this.
+    // A trailing in-progress week must never reach evaluateWeeklyStrongLatest - excludeIncompleteTradingWeek is what every real call site (computeWeeklyStrongStocks, computeWeeklyStrongStocksBacktest, computeSymbolBreakoutBacktest) applies before evaluating, exactly like this.
     const weeklyRowsWithPartialWeek = [
       ...buildSeries(30, 700, 700),
       { time: "2026-01-05", close: 5000 }, // huge spike, but an in-progress week

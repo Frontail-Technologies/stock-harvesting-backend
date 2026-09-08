@@ -1,7 +1,3 @@
-import { and, eq } from "drizzle-orm";
-
-import { db } from "../../../db/client";
-import { instruments } from "../../../db/schema";
 import { DATA_PROVIDER_KEY } from "../../../shared/constants";
 import { env } from "../../../shared/env";
 import { getErrorMessage } from "../../../shared/errors";
@@ -11,6 +7,7 @@ import {
 } from "../../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
 import type { GlobalDatafeedsQuoteRow } from "../../data-provider/adapters/global-datafeeds/global-datafeeds.types";
 import { globalDatafeedsClient } from "../../data-provider/adapters/global-datafeeds/global-datafeeds.websocket-client";
+import { resolveInstrumentsForSymbols } from "../../market-data/market-data.instruments";
 import { publishMarketStreamEvent } from "../market-stream.hub";
 import { streamSymbolKey } from "../market-stream.utils";
 import type { MarketStreamSymbol } from "../market-stream.types";
@@ -265,22 +262,10 @@ export class GlobalDatafeedsMarketStreamProvider {
 
   private async resolveSubscriptions(symbols: MarketStreamSymbol[]) {
     const resolved: GlobalDatafeedsSubscription[] = [];
+    const instrumentsByKey = await resolveInstrumentsForSymbols(symbols);
 
     for (const symbol of symbols) {
-      const [instrument] = await db
-        .select({
-          instrumentToken: instruments.instrumentToken,
-          provider: instruments.provider,
-        })
-        .from(instruments)
-        .where(
-          and(
-            eq(instruments.exchange, symbol.exchange),
-            eq(instruments.symbol, symbol.symbol)
-          )
-        )
-        .limit(1);
-
+      const instrument = instrumentsByKey.get(streamSymbolKey(symbol));
       const instrumentIdentifier = instrument?.instrumentToken || symbol.symbol;
       if (!instrumentIdentifier) {
         const warningKey = streamSymbolKey(symbol);

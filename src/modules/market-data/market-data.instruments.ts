@@ -10,13 +10,10 @@ import {
   getEligibleProviderAdapter,
 } from "../data-provider/data-provider.service";
 
-// Instrument-table DB operations that don't need provider-search/backfill
-// orchestration. getOrCreateInstrument lives in market-data.instrument-sync.ts
-// instead, since it falls back to provider-orchestration on a miss.
+// Instrument-table DB operations that don't need provider-search/backfill orchestration; getOrCreateInstrument lives in market-data.instrument-sync.ts instead, since it falls back to provider-orchestration on a miss.
 
 const INSTRUMENT_UPSERT_CHUNK_SIZE = 500;
-// 6 params/row x 500 = 3,000 params/statement - comfortably under
-// Postgres's 65,535-parameter protocol limit.
+// 6 params/row x 500 = 3,000 params/statement - comfortably under Postgres's 65,535-parameter protocol limit.
 const INSTRUMENT_STATS_UPDATE_CHUNK_SIZE = 500;
 
 export async function getInstrumentsBySymbol(symbols: string[], exchange: string = DEFAULT_EXCHANGE) {
@@ -31,11 +28,42 @@ export async function getInstrumentsBySymbol(symbols: string[], exchange: string
   return new Map(rows.map((row) => [row.symbol, row]));
 }
 
+export type InstrumentIdentity = { exchange: string; symbol: string };
+
+export async function resolveInstrumentsForSymbols(identities: InstrumentIdentity[]) {
+  const symbolsByExchange = new Map<string, Set<string>>();
+
+  for (const identity of identities) {
+    const exchange = identity.exchange?.trim();
+    const symbol = normalizeSymbol(identity.symbol ?? "");
+    if (!exchange || !symbol) continue;
+    const set = symbolsByExchange.get(exchange) ?? new Set<string>();
+    set.add(symbol);
+    symbolsByExchange.set(exchange, set);
+  }
+
+  const resolved = new Map<string, typeof instruments.$inferSelect>();
+  if (symbolsByExchange.size === 0) return resolved;
+
+  const rowsByExchange = await Promise.all(
+    [...symbolsByExchange.entries()].map(async ([exchange, symbolSet]) => ({
+      exchange,
+      rows: await getInstrumentsBySymbol([...symbolSet], exchange),
+    }))
+  );
+
+  for (const { exchange, rows } of rowsByExchange) {
+    for (const [symbol, row] of rows) {
+      resolved.set(`${exchange}:${symbol}`, row);
+    }
+  }
+
+  return resolved;
+}
+
 export async function createFallbackInstrument(symbol: string, exchange: string = DEFAULT_EXCHANGE) {
   const normalizedSymbol = normalizeSymbol(symbol);
-  // The provider tag (token format) can use the static registry even when
-  // that provider is disabled; the token itself always comes from an
-  // eligible adapter.
+  // The provider tag (token format) can use the static registry even when that provider is disabled; the token itself always comes from an eligible adapter.
   const staticAdapter = getDataProviderAdapterForExchange(exchange);
   const eligibleAdapter = await getEligibleProviderAdapter({
     exchange,
@@ -86,12 +114,7 @@ export type InstrumentUpsertInput = {
   segment?: string;
 };
 
-// `instruments` enforces two unique constraints (exchange+symbol and
-// provider+instrument_token), but onConflictDoUpdate can only target one -
-// a batch with two rows colliding on *either* key fails the whole INSERT.
-// Both dedup passes run before the insert; last-write-wins, symbol-level
-// first then token-level, so a vendor anomaly (two symbols claiming the
-// same token) only drops a row from this sync, not the whole batch.
+// `instruments` enforces two unique constraints (exchange+symbol, provider+instrument_token), but onConflictDoUpdate can only target one, so a batch colliding on *either* key fails the whole INSERT. Both dedup passes run first, last-write-wins, symbol-level then token-level, so a vendor anomaly only drops a row, not the whole batch.
 export function dedupeInstrumentUpsertInputs(inputs: InstrumentUpsertInput[]) {
   const bySymbolKey = new Map<string, InstrumentUpsertInput>();
   for (const row of inputs) {
@@ -115,12 +138,7 @@ export function dedupeInstrumentUpsertInputs(inputs: InstrumentUpsertInput[]) {
   return deduped;
 }
 
-// dedupeInstrumentUpsertInputs only catches collisions within this batch.
-// A row can still collide with a different (exchange, symbol) already in
-// the DB from an earlier sync (e.g. a provider reusing a token across
-// segments), which the (exchange, symbol) ON CONFLICT target doesn't
-// cover. Drop those here rather than letting vendor anomalies abort the
-// whole sync.
+// dedupeInstrumentUpsertInputs only catches collisions within this batch. A row can still collide with a different (exchange, symbol) already in the DB (e.g. a provider reusing a token across segments), uncovered by the ON CONFLICT target - drop those here rather than aborting the whole sync.
 async function dropCrossBatchTokenCollisions(
   inputs: InstrumentUpsertInput[],
   provider: string,
@@ -209,10 +227,7 @@ type LatestStockStatsRow = {
   time: string;
 };
 
-// Uses a row_number() window function (filtered in an outer query, since
-// row_number() can't be filtered directly in WHERE) to fetch exactly the
-// latest 2 rows per symbol, instead of ORDER BY with no LIMIT - which would
-// return each symbol's entire stored history just to read its last 2 rows.
+// Uses a row_number() window function (filtered in an outer query since row_number() can't be filtered directly in WHERE) to fetch exactly the latest 2 rows per symbol, instead of an unbounded ORDER BY returning each symbol's entire history.
 async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT_EXCHANGE, dbClient: DbOrTx = db) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   const stats = new Map<
@@ -274,11 +289,7 @@ async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT
   return stats;
 }
 
-// Persists the computed stats onto `instruments` so the stocks list can
-// read/sort/filter prices directly off that table instead of recomputing a
-// candles lookback per symbol on every read. Batched as
-// UPDATE ... FROM (VALUES ...) (at most ceil(symbolCount / 500) statements)
-// rather than one UPDATE per symbol.
+// Persists computed stats onto `instruments` so the stocks list can read/sort/filter prices directly instead of recomputing a candles lookback per symbol; batched as UPDATE ... FROM (VALUES ...) rather than one UPDATE per symbol.
 export async function refreshLatestInstrumentStats(exchange: string, symbols: string[], dbClient: DbOrTx = db) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   if (uniqueSymbols.length === 0) return;
@@ -295,10 +306,7 @@ export type LatestInstrumentStat = {
   time: string;
 };
 
-// Split out from refreshLatestInstrumentStats so the bulk write is
-// directly testable against a fake dbClient (see
-// market-data.instrument-stats-bulk-update.test.ts) independent of
-// getLatestStockStats's own query.
+// Split out from refreshLatestInstrumentStats so the bulk write is directly testable against a fake dbClient (see market-data.instrument-stats-bulk-update.test.ts) independent of getLatestStockStats's own query.
 export async function applyLatestInstrumentStats(
   exchange: string,
   stats: Map<string, LatestInstrumentStat>,
@@ -310,8 +318,7 @@ export async function applyLatestInstrumentStats(
   for (let index = 0; index < statRows.length; index += INSTRUMENT_STATS_UPDATE_CHUNK_SIZE) {
     const chunk = statRows.slice(index, index + INSTRUMENT_STATS_UPDATE_CHUNK_SIZE);
 
-    // Explicit ::numeric casts so Postgres can't fail to infer changePct's
-    // type on a chunk where it happens to be NULL for every row.
+    // Explicit ::numeric casts so Postgres can't fail to infer changePct's type on a chunk where it happens to be NULL for every row.
     const values = sql.join(
       chunk.map(
         ([symbol, stat]) =>

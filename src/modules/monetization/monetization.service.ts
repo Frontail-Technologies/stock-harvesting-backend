@@ -1,7 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
 
 import { db } from "../../db/client";
-import { adPlacements, auditLogs, monetizationSettings } from "../../db/schema";
+import { adPlacements, monetizationSettings } from "../../db/schema";
+import { writeAuditLog } from "../../shared/audit/audit.service";
 import { getOrSetCache, invalidateCacheByPrefix } from "../../shared/cache";
 import {
   AD_PLACEMENTS,
@@ -26,12 +27,7 @@ export function isValidSlotId(value: string) {
   return SLOT_ID_PATTERN.test(value);
 }
 
-// Mirrors the frontend's canRenderAd (src/features/adsense/lib/can-render-ad.ts)
-// exactly - kept as two small independent implementations since this is a
-// backend/frontend boundary, not duplicated logic within one runtime. Used
-// here only to decide what to report back in a placement's "ready" status,
-// not to gate the public config response itself (that stays raw truth; the
-// frontend is the one thing that must fail closed on render).
+// Mirrors the frontend's canRenderAd exactly - kept as two small independent implementations since this is a backend/frontend boundary. Used only to decide what to report in a placement's "ready" status, not to gate the public config response (that stays raw truth; the frontend must fail closed on render).
 export function isPlacementRenderable(
   mode: MonetizationMode,
   publisherId: string | null,
@@ -73,8 +69,7 @@ export async function listAdPlacements() {
     .where(inArray(adPlacements.key, AD_PLACEMENT_KEYS));
 
   const rowsByKey = new Map(rows.map((row) => [row.key, row]));
-  // Always return in AD_PLACEMENTS' declared order, with display metadata
-  // attached - the DB row only knows key/enabled/slotId/updatedAt.
+  // Always return in AD_PLACEMENTS' declared order, with display metadata attached - the DB row only knows key/enabled/slotId/updatedAt.
   return AD_PLACEMENTS.map((placement) => {
     const row = rowsByKey.get(placement.key);
     return {
@@ -127,9 +122,12 @@ export async function updateMonetizationSettings(input: {
     })
     .returning();
 
-  await audit(input.actorUserId, "monetization.settings.updated", "monetization", "settings", {
-    mode: input.mode,
-    hasPublisherId: Boolean(input.publisherId),
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "monetization.settings.updated",
+    targetType: "monetization",
+    targetId: "settings",
+    metadata: { mode: input.mode, hasPublisherId: Boolean(input.publisherId) },
   });
   invalidateCacheByPrefix("monetizationConfig");
 
@@ -154,9 +152,12 @@ export async function updateAdPlacement(input: {
     .where(eq(adPlacements.key, input.key))
     .returning();
 
-  await audit(input.actorUserId, "monetization.placement.updated", "ad_placement", input.key, {
-    enabled: input.enabled,
-    hasSlotId: Boolean(input.slotId),
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "monetization.placement.updated",
+    targetType: "ad_placement",
+    targetId: input.key,
+    metadata: { enabled: input.enabled, hasSlotId: Boolean(input.slotId) },
   });
   invalidateCacheByPrefix("monetizationConfig");
 
@@ -169,9 +170,7 @@ export type PublicMonetizationConfig = {
   placements: Record<AdPlacementKey, { enabled: boolean; slotId: string | null }>;
 };
 
-// Pure, DB-independent - the actual serialization shape that goes over the
-// wire to the public endpoint. Split out from getPublicMonetizationConfig so
-// it's directly unit-testable without a database connection.
+// Pure, DB-independent - the actual serialization shape that goes over the wire to the public endpoint; split out from getPublicMonetizationConfig so it's directly unit-testable without a database connection.
 export function buildPublicMonetizationConfig(
   settings: { mode: MonetizationMode; publisherId: string | null },
   placements: Array<{ key: AdPlacementKey; enabled: boolean; slotId: string | null }>
@@ -199,21 +198,5 @@ export async function getPublicMonetizationConfig(): Promise<PublicMonetizationC
     ]);
 
     return buildPublicMonetizationConfig(settings, placements);
-  });
-}
-
-async function audit(
-  actorUserId: string | null,
-  action: string,
-  targetType?: string,
-  targetId?: string,
-  metadata: Record<string, unknown> = {}
-) {
-  await db.insert(auditLogs).values({
-    actorUserId,
-    action,
-    targetType,
-    targetId,
-    metadata,
   });
 }

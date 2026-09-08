@@ -8,13 +8,8 @@ import {
   priceAlertIdParamsSchema,
   updatePriceAlertBodySchema,
 } from "./price-alerts.schemas";
-import {
-  createPriceAlert,
-  deletePriceAlert,
-  listPriceAlerts,
-  updatePriceAlert,
-  type PriceAlertStatus,
-} from "./price-alerts.service";
+import { createPriceAlert, deletePriceAlert, listPriceAlerts, updatePriceAlert } from "./price-alerts.service";
+import type { PriceAlertStatus } from "./price-alerts.types";
 
 export const priceAlertsRouter = Router();
 

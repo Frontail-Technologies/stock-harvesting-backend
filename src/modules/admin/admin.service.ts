@@ -2,7 +2,6 @@ import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import {
-  auditLogs,
   brandingSettings,
   syncJobs,
   users,
@@ -16,6 +15,7 @@ import {
   type UserRole,
 } from "../../shared/constants";
 import { badRequest, getErrorMessage, notFound } from "../../shared/errors";
+import { writeAuditLog } from "../../shared/audit/audit.service";
 import {
   backfillDailyCandles,
   backfillIndexCandles,
@@ -26,7 +26,7 @@ import { syncSectorClassifications } from "../market-data/sector-classification.
 import {
   runWeeklyStrongBacktestBackfill,
   runWeeklyStrongBacktestHistoricalRebuild,
-} from "../weekly-strong-backtest/weekly-strong-backtest.service";
+} from "../weekly-strong-backtest/weekly-strong-backtest.generation";
 import {
   getAllProviderStatuses,
   getProviderConnectUrl,
@@ -38,16 +38,14 @@ import {
   getProviderCapabilities,
   listDataProviderAdapters,
 } from "../data-provider/data-provider.registry";
-import {
-  listProviderSettings,
-  updateProviderSettings,
-  type DataProviderSettingsRow,
-} from "../data-provider/data-provider-settings.service";
+import { listProviderSettings, updateProviderSettings } from "../data-provider/data-provider-settings.service";
+import type { DataProviderSettingsRow } from "../data-provider/data-provider.types";
 import { closeMarketStreamProviderByKey } from "../market-stream/market-stream.service";
 import { getMarketDataQueue } from "../jobs/queues";
 import { logger } from "../../shared/logger";
+import type { adminUserSortFields } from "./admin.schemas";
 
-export type AdminUserSortField = "name" | "email" | "role" | "plan" | "createdAt";
+export type AdminUserSortField = (typeof adminUserSortFields)[number];
 
 export async function listAdminUsers(input: {
   q?: string;
@@ -200,8 +198,12 @@ export async function updateUserRole(input: {
     .returning();
   if (!updated) throw notFound("User not found");
 
-  await audit(input.actorUserId, "user.role_updated", "user", input.userId, {
-    role: input.role,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "user.role_updated",
+    targetType: "user",
+    targetId: input.userId,
+    metadata: { role: input.role },
   });
   return updated;
 }
@@ -218,8 +220,12 @@ export async function updateUserPlan(input: {
     .returning();
   if (!updated) throw notFound("User not found");
 
-  await audit(input.actorUserId, "user.plan_updated", "user", input.userId, {
-    plan: input.plan,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "user.plan_updated",
+    targetType: "user",
+    targetId: input.userId,
+    metadata: { plan: input.plan },
   });
   return updated;
 }
@@ -235,8 +241,12 @@ export async function deleteUser(input: { actorUserId: string; userId: string })
     .returning();
   if (!deleted) throw notFound("User not found");
 
-  await audit(input.actorUserId, "user.deleted", "user", input.userId, {
-    email: deleted.email,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "user.deleted",
+    targetType: "user",
+    targetId: input.userId,
+    metadata: { email: deleted.email },
   });
   return { id: deleted.id };
 }
@@ -266,11 +276,7 @@ export function deriveDataProviderHealth(input: {
   return mostRecentIsFailure ? "error" : "healthy";
 }
 
-// Operational admin view: enabled (admin decision), configuration (env/OAuth
-// presence, from the existing getProviderStatus), and health (derived from
-// tracked success/failure timestamps) are kept as three explicit, separate
-// fields - never conflated - per the "enabled=ON, health=Error is a valid,
-// meaningful state" requirement.
+// Operational admin view: enabled, configuration, and health are kept as three separate fields - never conflated - so "enabled=ON, health=Error" stays a valid, meaningful state.
 export async function getAdminDataProviderSettings() {
   const [settingsRows, statuses] = await Promise.all([
     listProviderSettings(),
@@ -328,12 +334,7 @@ export async function updateAdminDataProviderSettings(input: {
 
   const updated = await updateProviderSettings(input);
 
-  // A true -> false transition also force-closes any open realtime
-  // connection for this provider immediately, rather than waiting for its
-  // own close/reconnect cycle to notice - see market-stream.service.ts.
-  // Re-enabling doesn't need a matching force-reconnect: subscribe requests
-  // already lazily (re)connect on demand, so the next relevant subscription
-  // naturally picks the provider back up.
+  // A true -> false transition force-closes any open realtime connection immediately rather than waiting for its own cycle (see market-stream.service.ts); re-enabling needs no matching force-reconnect since subscribe requests lazily reconnect on demand.
   if (before?.enabled && !updated.enabled) {
     try {
       closeMarketStreamProviderByKey(updated.key);
@@ -353,7 +354,11 @@ export async function updateAdminDataProviderSettings(input: {
 
 export async function createProviderConnectUrl(actorUserId: string) {
   const url = getProviderConnectUrl();
-  await audit(actorUserId, "data_provider.connect_url_created", "data_provider");
+  await writeAuditLog({
+    actorUserId,
+    action: "data_provider.connect_url_created",
+    targetType: "data_provider",
+  });
   return { url };
 }
 
@@ -362,12 +367,12 @@ export async function completeProviderConnection(input: {
   requestToken: string;
 }) {
   const connection = await saveProviderToken({ requestToken: input.requestToken });
-  await audit(
-    input.actorUserId ?? null,
-    "data_provider.connected",
-    "data_provider",
-    connection.id
-  );
+  await writeAuditLog({
+    actorUserId: input.actorUserId ?? null,
+    action: "data_provider.connected",
+    targetType: "data_provider",
+    targetId: connection.id,
+  });
   return { connected: true };
 }
 
@@ -420,17 +425,17 @@ export async function triggerInstrumentSync(input: {
     }
   }
 
-  await audit(input.actorUserId, "data_provider.instrument_sync_triggered", "sync_job", job.id, {
-    exchange: input.exchange,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "data_provider.instrument_sync_triggered",
+    targetType: "sync_job",
+    targetId: job.id,
+    metadata: { exchange: input.exchange },
   });
   return job;
 }
 
-// Always runs inline rather than via the queue-branch pattern above — the
-// whole sync is ~22 sequential HTTP requests (one per sector) plus a handful
-// of bulk UPDATE statements, finishing in seconds, and there's no registered
-// queue worker for this job type since it's never actually been worth
-// offloading.
+// Runs inline (not via the queue-branch pattern above) — ~22 sequential HTTP requests plus a few bulk UPDATEs finish in seconds, so there's no queue worker registered for this job type.
 export async function triggerSectorClassificationSync(input: { actorUserId: string }) {
   const [job] = await db
     .insert(syncJobs)
@@ -467,19 +472,16 @@ export async function triggerSectorClassificationSync(input: { actorUserId: stri
     throw error;
   }
 
-  await audit(
-    input.actorUserId,
-    "data_provider.sector_classification_sync_triggered",
-    "sync_job",
-    job.id,
-    {}
-  );
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "data_provider.sector_classification_sync_triggered",
+    targetType: "sync_job",
+    targetId: job.id,
+  });
   return job;
 }
 
-// Same inline pattern as triggerSectorClassificationSync above — run "Sync
-// Indices" (triggerInstrumentSync with exchange: "NSE_IDX", no new code
-// needed there) first so there's something to backfill history for.
+// Same inline pattern as triggerSectorClassificationSync above — run "Sync Indices" first so there's something to backfill history for.
 export async function triggerIndexCandleBackfill(input: {
   actorUserId: string;
   exchange?: string;
@@ -519,22 +521,16 @@ export async function triggerIndexCandleBackfill(input: {
     throw error;
   }
 
-  await audit(
-    input.actorUserId,
-    "data_provider.index_candle_backfill_triggered",
-    "sync_job",
-    job.id,
-    {}
-  );
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "data_provider.index_candle_backfill_triggered",
+    targetType: "sync_job",
+    targetId: job.id,
+  });
   return job;
 }
 
-// Refreshes latestClose/latestChangePct/latestVolume for every already-known
-// instrument, without re-syncing instrument metadata (the heavier, slower
-// step "Sync NSE" also does). Gainers/decliners/unchanged filtering depends
-// on these columns being populated across the whole market, not just
-// whichever symbols a page happened to touch — this is the standalone way
-// to (re)run that catch-up without waiting on a full instrument resync.
+// Refreshes latestClose/latestChangePct/latestVolume for every known instrument without the heavier "Sync NSE" metadata resync — a standalone catch-up since gainers/decliners filtering needs these columns populated market-wide.
 export async function triggerPriceRefresh(input: {
   actorUserId: string;
   exchange: string;
@@ -583,8 +579,12 @@ export async function triggerPriceRefresh(input: {
     }
   }
 
-  await audit(input.actorUserId, "data_provider.price_refresh_triggered", "sync_job", job.id, {
-    exchange: input.exchange,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "data_provider.price_refresh_triggered",
+    targetType: "sync_job",
+    targetId: job.id,
+    metadata: { exchange: input.exchange },
   });
   return job;
 }
@@ -596,10 +596,12 @@ export async function triggerCandleBackfill(input: {
   to: string;
 }) {
   const result = await backfillDailyCandles(input);
-  await audit(input.actorUserId, "market_data.candles_backfilled", "instrument", input.symbol, {
-    from: input.from,
-    to: input.to,
-    result,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "market_data.candles_backfilled",
+    targetType: "instrument",
+    targetId: input.symbol,
+    metadata: { from: input.from, to: input.to, result },
   });
   return result;
 }
@@ -653,22 +655,17 @@ export async function updateBrandingSettings(input: {
     })
     .returning();
 
-  await audit(
-    input.actorUserId,
-    "branding.updated",
-    "branding",
-    String(BRANDING_DEFAULTS.id),
-    {
-      enabled: input.enabled,
-    }
-  );
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "branding.updated",
+    targetType: "branding",
+    targetId: String(BRANDING_DEFAULTS.id),
+    metadata: { enabled: input.enabled },
+  });
   return settings;
 }
 
-// Same queued-if-Redis-else-inline pattern as triggerInstrumentSync above -
-// works identically in an environment without REDIS_URL configured
-// (worker.ts refuses to start there, so runTrackedJob's queue path would
-// never actually execute).
+// Same queued-if-Redis-else-inline pattern as triggerInstrumentSync above - works without REDIS_URL configured too, since worker.ts refuses to start there.
 export async function triggerWeeklyStrongBacktestBackfill(input: {
   actorUserId: string;
   collectionId: string;
@@ -713,17 +710,18 @@ export async function triggerWeeklyStrongBacktestBackfill(input: {
     }
   }
 
-  await audit(input.actorUserId, "weekly_strong_backtest.backfill_triggered", "market_collection", input.collectionId, {
-    weeks: input.weeks,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "weekly_strong_backtest.backfill_triggered",
+    targetType: "market_collection",
+    targetId: input.collectionId,
+    metadata: { weeks: input.weeks },
   });
 
   return { syncJobId: job.id, status: job.status };
 }
 
-// Same queued-if-Redis-else-inline pattern as triggerWeeklyStrongBacktestBackfill
-// above. Reuses runWeeklyStrongBacktestHistoricalRebuild - grouped
-// per resolved membership version, never blindly recomputing every
-// collection.
+// Same queued-if-Redis-else-inline pattern as triggerWeeklyStrongBacktestBackfill above; reuses runWeeklyStrongBacktestHistoricalRebuild grouped per resolved membership version, not a blind recompute of every collection.
 export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
   actorUserId: string;
   collectionId: string;
@@ -763,13 +761,12 @@ export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
     }
   }
 
-  await audit(
-    input.actorUserId,
-    "weekly_strong_backtest.historical_rebuild_triggered",
-    "market_collection",
-    input.collectionId,
-    {}
-  );
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "weekly_strong_backtest.historical_rebuild_triggered",
+    targetType: "market_collection",
+    targetId: input.collectionId,
+  });
 
   return { syncJobId: job.id, status: job.status };
 }
@@ -777,20 +774,4 @@ export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
 export {
   getWeeklyStrongBacktestHistoricalStatus,
   getWeeklyStrongBacktestStatus,
-} from "../weekly-strong-backtest/weekly-strong-backtest.service";
-
-async function audit(
-  actorUserId: string | null,
-  action: string,
-  targetType?: string,
-  targetId?: string,
-  metadata: Record<string, unknown> = {}
-) {
-  await db.insert(auditLogs).values({
-    actorUserId,
-    action,
-    targetType,
-    targetId,
-    metadata,
-  });
-}
+} from "../weekly-strong-backtest/weekly-strong-backtest.status";

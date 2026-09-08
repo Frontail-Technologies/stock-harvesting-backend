@@ -2,6 +2,11 @@ import { and, asc, count, desc, eq, gt, gte, ilike, inArray, lt, lte, not, or, s
 
 import { db } from "../../db/client";
 import { candles, instruments } from "../../db/schema";
+import {
+  HISTORY_GAP_BACKFILL_RETRY_COOLDOWN_MS,
+  MAX_EXPECTED_TRADING_GAP_DAYS,
+  SUPPORTED_EXCHANGES_CACHE_TTL_MS,
+} from "./market-data.constants";
 import { getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
 import { getOrSetCache } from "../../shared/cache";
 import { logger } from "../../shared/logger";
@@ -87,28 +92,18 @@ import {
 import { getLatestExpectedTradingDay } from "./trading-calendar";
 import type { MoveFilter } from "./market-data.schemas";
 
-// Implementations now live in market-data.stocks.ts; re-exported here so
-// existing imports (e.g. market-collections.service.ts, ai.service.ts,
-// market-data.routes.ts) keep working.
+// Implementations now live in market-data.stocks.ts; re-exported here so existing imports (e.g. market-collections.service.ts, ai.service.ts, market-data.routes.ts) keep working.
 export { NSE_NORMAL_EQUITY_SYMBOL_PATTERN };
 
 export type { MetricCandle };
 
-// Implementation lives in market-data.stocks.ts; re-exported here so
-// existing imports (ai.service.ts, market-data.routes.ts) keep working.
+// Implementation lives in market-data.stocks.ts; re-exported here so existing imports (ai.service.ts, market-data.routes.ts) keep working.
 export { listStocks };
 
-// Watchlist/Charts stock-selection picker (BSE-only, candle-eligible
-// only). Implementation lives in market-data.stocks.ts; re-exported here
-// so existing imports (e.g. market-data.routes.ts) keep working.
+// Watchlist/Charts stock-selection picker (BSE-only, candle-eligible only); implementation lives in market-data.stocks.ts, re-exported here so existing imports keep working.
 export { searchChartEligibleBseStocks };
 
-// Relative Strength / Weekly Strong analytical data preparation and
-// orchestration - implementations live in market-data.metrics.ts;
-// re-exported here so existing imports (dashboard-snapshots.service.ts,
-// market-collections.service.ts, scanner.service.ts,
-// weekly-strong-backtest.service.ts, market-data.55-day-change.test.ts)
-// keep working.
+// Relative Strength / Weekly Strong analytical data preparation and orchestration - implementations live in market-data.metrics.ts, re-exported here so existing imports keep working.
 export {
   calculate55DayChange,
   CHANGE_55D_LOOKBACK_BARS,
@@ -178,7 +173,18 @@ export async function getChartCandles(input: {
 
   const freshnessAction = decideChartCandleFreshnessAction(dailyRows, from, input.from, exchange);
 
-  if (freshnessAction === "backfill") {
+  // A gap can be the *only* reason a backfill was triggered - that's specifically the case a provider may be structurally unable to fill, so it's the one case gated by the retry cooldown below; empty history and a split-ratio jump are both expected to resolve in a single backfill, so they keep retrying unconditionally.
+  const isGapOnlyBackfillTrigger =
+    freshnessAction === "backfill" &&
+    dailyRows.length > 0 &&
+    !hasLikelySplitDiscontinuity(dailyRows) &&
+    !shouldBackfillRequestedHistory(dailyRows, from, input.from) &&
+    hasSuspiciousHistoryGap(dailyRows);
+
+  if (
+    freshnessAction === "backfill" &&
+    (!isGapOnlyBackfillTrigger || shouldRetryHistoryGapBackfill(exchange, symbol))
+  ) {
     await safeProviderAction("market-data.chart-candle-backfill", () =>
       runChartBackfillOnce({
         symbol,
@@ -194,10 +200,12 @@ export async function getChartCandles(input: {
       to: input.to,
       exchange,
     });
+    // Recorded regardless of whether the gap actually closed - if it did, hasSuspiciousHistoryGap won't fire again and this mark is irrelevant; if it didn't, this is what stops every subsequent chart open from paying for another full-history fetch.
+    if (isGapOnlyBackfillTrigger) {
+      markHistoryGapBackfillAttempted(exchange, symbol);
+    }
   } else if (freshnessAction === "incremental-refresh") {
-    // Only the latest row is out of date, so this does a targeted
-    // incremental fetch (syncLatestDailyCandlesForSymbols, a ~14-day
-    // window) instead of the full-range backfill above.
+    // Only the latest row is out of date, so this does a targeted incremental fetch (syncLatestDailyCandlesForSymbols, a ~14-day window) instead of the full-range backfill above.
     await safeProviderAction("market-data.chart-candle-freshness-refresh", () =>
       runLatestCandleRefreshOnce({ symbol, exchange })
     );
@@ -361,11 +369,45 @@ function hasLikelySplitDiscontinuity(
   return false;
 }
 
-// Only meaningful when the caller explicitly requested more history than
-// is currently stored (explicitFrom set) - a normal, unbounded default
-// request has no "did we backfill far enough back" question to ask, and
-// must fall through to the cheap isLatestDailyCandleStale check instead of
-// triggering a full multi-year backfill on every open.
+function daysBetween(earlier: string, later: string): number {
+  const msPerDay = 86_400_000;
+  return Math.round(
+    (new Date(`${later}T00:00:00Z`).getTime() - new Date(`${earlier}T00:00:00Z`).getTime()) /
+      msPerDay
+  );
+}
+
+function hasSuspiciousHistoryGap(rows: Array<{ time: string }>): boolean {
+  for (let index = 1; index < rows.length; index++) {
+    const previous = rows[index - 1]?.time;
+    const current = rows[index]?.time;
+    if (!previous || !current) continue;
+    if (daysBetween(previous, current) > MAX_EXPECTED_TRADING_GAP_DAYS) return true;
+  }
+
+  return false;
+}
+
+const historyGapBackfillAttemptedAtByKey = new Map<string, number>();
+
+export function shouldRetryHistoryGapBackfill(
+  exchange: string,
+  symbol: string,
+  at: number = Date.now()
+): boolean {
+  const attemptedAt = historyGapBackfillAttemptedAtByKey.get(`${exchange}:${symbol}`);
+  return attemptedAt === undefined || at - attemptedAt >= HISTORY_GAP_BACKFILL_RETRY_COOLDOWN_MS;
+}
+
+export function markHistoryGapBackfillAttempted(
+  exchange: string,
+  symbol: string,
+  at: number = Date.now()
+): void {
+  historyGapBackfillAttemptedAtByKey.set(`${exchange}:${symbol}`, at);
+}
+
+// Only meaningful when the caller explicitly requested more history than is currently stored (explicitFrom set) - a normal, unbounded default request has no such question to ask and must fall through to the cheap isLatestDailyCandleStale check instead of triggering a full multi-year backfill on every open.
 function shouldBackfillRequestedHistory(
   rows: Array<{ time: string }>,
   requestedFrom: string,
@@ -391,11 +433,7 @@ export function isLatestDailyCandleStale(
 
 export type ChartCandleFreshnessAction = "backfill" | "incremental-refresh" | "none";
 
-// getChartCandles' freshness decision, pure and directly testable (see
-// market-data.freshness.test.ts). Order matters: missing/discontinuous/
-// incomplete-history conditions take priority over mere staleness, since a
-// symbol with no usable history needs a full re-fetch, not just the latest
-// few days.
+// getChartCandles' freshness decision, pure and directly testable (see market-data.freshness.test.ts). Order matters: missing/discontinuous/incomplete-history conditions take priority over mere staleness, since a symbol with no usable history needs a full re-fetch, not just the latest few days.
 export function decideChartCandleFreshnessAction(
   dailyRows: Array<{ time: string; close: string | number }>,
   from: string,
@@ -405,6 +443,7 @@ export function decideChartCandleFreshnessAction(
   if (
     dailyRows.length === 0 ||
     hasLikelySplitDiscontinuity(dailyRows) ||
+    hasSuspiciousHistoryGap(dailyRows) ||
     shouldBackfillRequestedHistory(dailyRows, from, requestedFrom)
   ) {
     return "backfill";
@@ -463,35 +502,16 @@ async function deriveStoredCandlesForTimeframe(input: {
   return { inserted: aggregateRows.length };
 }
 
-// Implementation lives in market-data.instrument-sync.ts; re-exported here
-// so existing imports (admin.service.ts, worker.ts) keep working.
+// Implementation lives in market-data.instrument-sync.ts; re-exported here so existing imports (admin.service.ts, worker.ts) keep working.
 export { syncProviderInstruments };
 
-// The atomic core of a candle-range replacement: delete the existing
-// exchange/symbol/date-range across all 3 timeframes, then upsert the fresh
-// daily/weekly/monthly rows - all inside one transaction, so a failure at
-// any step (including a duplicate-key error surfaced from upsertCandles)
-// rolls back the delete too, instead of leaving the range empty. Exported
-// so it can be exercised directly against a fake DbOrTx in tests, without
-// needing to also fake the provider-fetch layer that backfillDailyCandles
-// wraps around it. Implementation lives in market-data.candles.ts;
-// re-exported here so existing imports from this file keep working.
+// The atomic core of a candle-range replacement: delete the existing range across all 3 timeframes then upsert fresh rows in one transaction, so any failure rolls back the delete too. Exported so it can be tested against a fake DbOrTx without faking the provider-fetch layer. Implementation lives in market-data.candles.ts; re-exported here so existing imports from this file keep working.
 export { replaceCandlesAtomically };
 
-// backfillDailyCandles/backfillIndexCandles implementations live in
-// market-data.candle-sync.ts; re-exported here so existing imports
-// (admin.service.ts) keep working.
+// backfillDailyCandles/backfillIndexCandles implementations live in market-data.candle-sync.ts; re-exported here so existing imports (admin.service.ts) keep working.
 export { backfillDailyCandles, backfillIndexCandles };
 
-// Global (not collection-scoped) ranking of one index exchange's indices
-// against each other - reuses computeAllRelativeStrengthMetrics, each
-// index as its own row (no grouping/averaging needed). Defaults to
-// NSE_IDX; pass BSE_IDX for the BSE index box.
-//
-// Reads a persisted snapshot (scope "index_exchange", keyed by exchange
-// code since indices aren't members of any market_collection) and derives
-// the limited/sorted view from it - pure, no candle I/O. On a miss it
-// computes once and persists before returning.
+// Global (not collection-scoped) ranking of one index exchange's indices against each other - reuses computeAllRelativeStrengthMetrics, each index as its own row. Defaults to NSE_IDX; pass BSE_IDX for the BSE index box. Reads a persisted snapshot (scope "index_exchange", keyed by exchange code since indices aren't members of any market_collection) and derives the limited/sorted view from it; on a miss it computes once and persists.
 export async function getIndexRelativeStrength(
   limit: number,
   exchange: string = NSE_INDEX_EXCHANGE
@@ -526,7 +546,6 @@ export async function getIndexRelativeStrength(
   return { metrics: pickTopRelativeStrengthRows(allMetrics, limit), asOfDate };
 }
 
-const SUPPORTED_EXCHANGES_CACHE_TTL_MS = 24 * 60 * 60_000;
 const NSE_PROVIDER_EXCHANGE: ProviderExchange = {
   code: "NSE",
   name: "India (NSE)",
@@ -548,10 +567,7 @@ const GLOBAL_DATAFEEDS_PROVIDER_EXCHANGES: ProviderExchange[] = [
   },
 ];
 
-// EODHD's exchange list is the source of truth for everything except NSE
-// (Zerodha-only). Cached 24h since exchange metadata rarely changes;
-// data-provider-settings.service.ts invalidates this cache prefix on every
-// admin toggle, so disable/enable still takes effect immediately.
+// EODHD's exchange list is the source of truth for everything except NSE (Zerodha-only). Cached 24h since exchange metadata rarely changes; data-provider-settings.service.ts invalidates this cache prefix on every admin toggle, so disable/enable still takes effect immediately.
 export async function listSupportedExchanges(): Promise<ProviderExchange[]> {
   return getOrSetCache("supportedExchanges", SUPPORTED_EXCHANGES_CACHE_TTL_MS, async () => {
     const eodhdAdapter = getEodhdDataProviderAdapter();
@@ -587,12 +603,10 @@ export async function listSupportedExchanges(): Promise<ProviderExchange[]> {
 }
 
 
-// Implementations live in market-data.candle-sync.ts; re-exported here so
-// existing imports (admin.service.ts, worker.ts) keep working.
+// Implementations live in market-data.candle-sync.ts; re-exported here so existing imports (admin.service.ts, worker.ts) keep working.
 export { refreshAllLatestInstrumentPrices };
 
-// Implementations live in market-data.instruments.ts; re-exported here so
-// existing imports from this file (including test files) keep working.
+// Implementations live in market-data.instruments.ts; re-exported here so existing imports from this file (including test files) keep working.
 export {
   applyLatestInstrumentStats,
   dedupeInstrumentUpsertInputs,

@@ -47,12 +47,7 @@ export const SUPPORTED_EXCHANGE_CODES = SUPPORTED_EXCHANGES.map(
   (exchange) => exchange.code
 ) as SupportedExchangeCode[];
 
-// Closed, deliberately small allow-list - every market collection in this
-// codebase is India/BSE today; do not invent unsupported countries. Add a
-// new entry here only when there is real backend support (instruments,
-// exchanges, and a collection) for that country - the Dashboard's country
-// selector reads this transitively via /api/market-collections, not a
-// hardcoded frontend list.
+// Closed, deliberately small allow-list - every market collection in this codebase is India/BSE today; add a new entry only when there is real backend support for that country, since the Dashboard's country selector reads this transitively via /api/market-collections.
 export const SUPPORTED_COUNTRIES = [{ code: "IN", label: "India" }] as const;
 export type SupportedCountryCode = (typeof SUPPORTED_COUNTRIES)[number]["code"];
 export const SUPPORTED_COUNTRY_CODES = SUPPORTED_COUNTRIES.map(
@@ -96,6 +91,25 @@ export const JOB_STATUS = {
 
 export const SCAN_RUN_STATUSES = JOB_STATUSES;
 
+export const COLLECTION_PREPARATION_STATUSES = [
+  "pending",
+  "syncing_candles",
+  "building_backtest",
+  "ready",
+  "partial",
+  "failed",
+] as const;
+export type CollectionPreparationStatus = (typeof COLLECTION_PREPARATION_STATUSES)[number];
+
+export const COLLECTION_PREPARATION_STATUS = {
+  pending: "pending",
+  syncingCandles: "syncing_candles",
+  buildingBacktest: "building_backtest",
+  ready: "ready",
+  partial: "partial",
+  failed: "failed",
+} as const satisfies Record<string, CollectionPreparationStatus>;
+
 export const CANDLE_SOURCE = {
   provider: "provider",
   derived: "derived",
@@ -111,12 +125,7 @@ export const DATA_PROVIDER_KEY = {
   globalDatafeeds: "global-datafeeds",
 } as const;
 
-// Capabilities actually implemented today (see DataProviderAdapter in
-// data-provider.types.ts) - historical/latest candles are on every adapter,
-// search/token/exchange-list are optional per-adapter methods, and
-// realtime_ws corresponds to a market-stream/providers/* class existing for
-// that provider key (a separate mechanism from the DataProviderAdapter
-// interface, not a method on it).
+// Capabilities actually implemented today (see DataProviderAdapter in data-provider.types.ts) - historical/latest candles are on every adapter, search/token/exchange-list are optional per-adapter methods, and realtime_ws corresponds to a separate market-stream/providers/* class, not a method on the adapter interface.
 export const PROVIDER_CAPABILITIES = [
   "instrument_sync",
   "historical_daily_candles",
@@ -128,10 +137,7 @@ export const PROVIDER_CAPABILITIES = [
 ] as const;
 export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];
 
-// Seed data only (display name + starting priority) - enabled always starts
-// true for every provider on first seed, since before this feature existed
-// every implemented provider was effectively always "on"; seeding anything
-// else would silently break production traffic on migration.
+// Seed data only (display name + starting priority) - enabled always starts true for every provider on first seed, since every implemented provider was effectively always "on" before this feature existed; seeding anything else would silently break production traffic on migration.
 export const DATA_PROVIDER_SETTINGS_SEEDS: ReadonlyArray<{
   key: string;
   displayName: string;
@@ -183,10 +189,7 @@ export const MONETIZATION_SETTINGS_DEFAULTS = {
   mode: MONETIZATION_MODE.off as MonetizationMode,
 } as const;
 
-// Stable internal identifiers, never display labels - these are the only
-// placements the product actually renders today. "insights_article" has no
-// real ad location yet; it's seeded disabled so admin can pre-configure it
-// ahead of that page existing.
+// Stable internal identifiers, never display labels - these are the only placements the product actually renders today; "insights_article" has no real ad location yet, seeded disabled so admin can pre-configure it ahead of that page existing.
 export const AD_PLACEMENTS = [
   {
     key: "landing_primary",

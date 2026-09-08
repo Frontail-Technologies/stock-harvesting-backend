@@ -6,7 +6,7 @@ import { pushSubscriptions } from "../../db/schema";
 import { env } from "../../shared/env";
 import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
-import type { PriceAlertCondition } from "../price-alerts/price-alerts.service";
+import type { PriceAlertCondition } from "../price-alerts/price-alerts.types";
 
 type PushSubscriptionInput = {
   endpoint: string;
@@ -108,13 +108,7 @@ export async function sendPriceAlertNotification(input: {
     tag: `price-alert:${input.exchange}:${input.symbol}`,
   });
 
-  // Fanned out with allSettled, not a sequential loop: this is bounded by
-  // one user's own device count (typically a handful of subscriptions),
-  // each send is fully independent (a different endpoint/keys pair), and
-  // per-row error handling (stale-subscription cleanup vs. a logged
-  // warning) already tolerates any one send failing without affecting the
-  // others - there was never an ordering or shared-state reason for these
-  // to run one at a time.
+  // Fanned out with allSettled, not a sequential loop: bounded by one user's device count, each send is fully independent, and per-row error handling already tolerates any one send failing - no ordering or shared-state reason to run one at a time.
   await Promise.allSettled(
     rows.map(async (row) => {
       try {

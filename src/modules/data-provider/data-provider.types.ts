@@ -1,4 +1,7 @@
+import type { dataProviderSettings } from "../../db/schema";
 import type { ProviderStatus } from "../../shared/constants";
+
+export type DataProviderSettingsRow = typeof dataProviderSettings.$inferSelect;
 
 export type ProviderConnectionStatus = {
   providerConfigured: boolean;

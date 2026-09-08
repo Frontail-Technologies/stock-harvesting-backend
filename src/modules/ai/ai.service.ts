@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { db } from "../../db/client";
-import { aiSettings, auditLogs } from "../../db/schema";
+import { aiSettings } from "../../db/schema";
 import {
   AI_SETTINGS_DEFAULTS,
   HTTP_STATUS,
@@ -11,6 +11,7 @@ import {
 } from "../../shared/constants";
 import { env } from "../../shared/env";
 import { AppError, ERROR_CODES, ERROR_MESSAGES, getErrorMessage } from "../../shared/errors";
+import { writeAuditLog } from "../../shared/audit/audit.service";
 import { logger } from "../../shared/logger";
 import { getChartCandles, listStocks } from "../market-data/market-data.service";
 import { decryptField, encryptField } from "../security/encryption";
@@ -77,8 +78,12 @@ export async function updateAiSettings(input: {
     })
     .returning();
 
-  await audit(input.actorUserId, "ai_settings.updated", "ai_settings", String(AI_SETTINGS_DEFAULTS.id), {
-    model: input.model,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "ai_settings.updated",
+    targetType: "ai_settings",
+    targetId: String(AI_SETTINGS_DEFAULTS.id),
+    metadata: { model: input.model },
   });
 
   return settings;
@@ -115,7 +120,12 @@ export async function updateAiApiKey(input: {
       .returning()
   );
 
-  await audit(input.actorUserId, "ai_api_key.updated", "ai_settings", String(AI_SETTINGS_DEFAULTS.id));
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "ai_api_key.updated",
+    targetType: "ai_settings",
+    targetId: String(AI_SETTINGS_DEFAULTS.id),
+  });
 
   return {
     hasKey: Boolean(settings.encryptedApiKey),
@@ -138,7 +148,12 @@ export async function deleteAiApiKey(input: { actorUserId: string }) {
       .where(eq(aiSettings.id, AI_SETTINGS_DEFAULTS.id))
   );
 
-  await audit(input.actorUserId, "ai_api_key.deleted", "ai_settings", String(AI_SETTINGS_DEFAULTS.id));
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "ai_api_key.deleted",
+    targetType: "ai_settings",
+    targetId: String(AI_SETTINGS_DEFAULTS.id),
+  });
   return getAiKeyStatus();
 }
 
@@ -430,20 +445,4 @@ async function tryGeminiFallbackModels(input: {
 function formatGeminiModelName(model: string) {
   const modelId = model.replace(/^models\//, "");
   return `models/${encodeURIComponent(modelId)}`;
-}
-
-async function audit(
-  actorUserId: string | null,
-  action: string,
-  targetType?: string,
-  targetId?: string,
-  metadata: Record<string, unknown> = {}
-) {
-  await db.insert(auditLogs).values({
-    actorUserId,
-    action,
-    targetType,
-    targetId,
-    metadata,
-  });
 }

@@ -7,9 +7,7 @@ import { badRequest, forbidden, getErrorMessage, notFound } from "../../shared/e
 import { logger } from "../../shared/logger";
 import { normalizeSymbol } from "../../shared/normalize";
 import { sendPriceAlertNotification } from "../push-subscriptions/push-subscriptions.service";
-
-export type PriceAlertCondition = "ABOVE" | "BELOW";
-export type PriceAlertStatus = "ACTIVE" | "TRIGGERED" | "DISABLED";
+import type { PriceAlertCondition, PriceAlertStatus } from "./price-alerts.types";
 
 export function isPriceAlertTriggered(input: {
   status: PriceAlertStatus;
@@ -59,13 +57,7 @@ export async function listPriceAlerts(input: {
   return rows.map(toPriceAlertResponse);
 }
 
-// The client-reported currentPrice is only a UX nicety (it's whatever the
-// user's screen happened to show) - it must never be the sole source of
-// truth for a semantic validation rule, since a stale tab or a modified
-// request could bypass it entirely. instruments.latestClose is this
-// backend's own record of the price, so it's authoritative whenever
-// present; the client value is only a fallback for the rare case a symbol
-// has no stored price yet.
+// The client-reported currentPrice is only a UX nicety - it must never be the sole source of truth for a semantic validation rule, since a stale tab or modified request could bypass it; instruments.latestClose is authoritative whenever present, the client value is only a fallback.
 async function getKnownCurrentPrice(exchange: string, symbol: string): Promise<number | null> {
   const [row] = await db
     .select({ latestClose: instruments.latestClose })

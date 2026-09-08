@@ -1,15 +1,14 @@
-import { and, eq } from "drizzle-orm";
 import WebSocket from "ws";
 
-import { db } from "../../../db/client";
-import { instruments } from "../../../db/schema";
 import { DATA_PROVIDER_KEY } from "../../../shared/constants";
 import { env } from "../../../shared/env";
 import { getErrorMessage } from "../../../shared/errors";
 import { logger } from "../../../shared/logger";
 import { getActiveProviderAccessToken } from "../../data-provider/data-provider.service";
+import { resolveInstrumentsForSymbols } from "../../market-data/market-data.instruments";
 import { applyTickToCandles } from "../market-stream-candles";
 import { publishMarketStreamEvent } from "../market-stream.hub";
+import { streamSymbolKey } from "../market-stream.utils";
 import type { MarketStreamSymbol } from "../market-stream.types";
 
 const KITE_WS_URL = "wss://ws.kite.trade";
@@ -192,25 +191,13 @@ export class KiteMarketStreamProvider {
 
   private async resolveSubscriptions(symbols: MarketStreamSymbol[]) {
     const resolved: KiteSubscription[] = [];
+    const instrumentsByKey = await resolveInstrumentsForSymbols(symbols);
 
     for (const symbol of symbols) {
-      const [instrument] = await db
-        .select({
-          instrumentToken: instruments.instrumentToken,
-          provider: instruments.provider,
-        })
-        .from(instruments)
-        .where(
-          and(
-            eq(instruments.exchange, symbol.exchange),
-            eq(instruments.symbol, symbol.symbol)
-          )
-        )
-        .limit(1);
-
+      const instrument = instrumentsByKey.get(streamSymbolKey(symbol));
       const instrumentToken = Number(instrument?.instrumentToken);
       if (!Number.isFinite(instrumentToken)) {
-        const warningKey = `${symbol.exchange}:${symbol.symbol}`;
+        const warningKey = streamSymbolKey(symbol);
         if (!this.missingTokenWarnings.has(warningKey)) {
           this.missingTokenWarnings.add(warningKey);
           logger.warn(

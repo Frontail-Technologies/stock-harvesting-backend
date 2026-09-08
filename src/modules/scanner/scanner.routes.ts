@@ -15,19 +15,6 @@ export const scannerRouter = Router();
 
 scannerRouter.use(requireAuth);
 
-scannerRouter.get("/results", validate({ query: scannerResultsQuerySchema }), asyncHandler(async (req, res) => {
-  const query = req.query as unknown as {
-    symbol?: string;
-    timeframe: CandleTimeframe;
-    rule?: string;
-    limit: number;
-    exchange: string;
-    lookback: ScannerLookbackMultiplier;
-  };
-  const results = await listScannerResults(query);
-  sendData(res, { results });
-}));
-
 scannerRouter.get(
   "/results/:symbol",
   validate({
