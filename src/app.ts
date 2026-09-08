@@ -2,30 +2,37 @@ import cors from "cors";
 import express, { type Request, type Response } from "express";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
-
 import { pool } from "./db/client";
 import { adminRouter } from "./modules/admin/admin.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
 import { adminAuthRouter } from "./modules/auth/admin-auth.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { drawingsRouter } from "./modules/drawings/drawings.routes";
+import { registerMarketCollectionsMetricsCollectors } from "./modules/market-collections/market-collections.metrics";
 import { marketCollectionsRouter } from "./modules/market-collections/market-collections.routes";
 import { marketDataRouter } from "./modules/market-data/market-data.routes";
 import { monetizationRouter } from "./modules/monetization/monetization.routes";
 import { priceAlertsRouter } from "./modules/price-alerts/price-alerts.routes";
 import { pushSubscriptionsRouter } from "./modules/push-subscriptions/push-subscriptions.routes";
 import { scannerRouter } from "./modules/scanner/scanner.routes";
-import { usersRouter } from "./modules/users/users.routes";
 import { watchlistsRouter } from "./modules/watchlists/watchlists.routes";
 import { weeklyStrongBacktestRouter } from "./modules/weekly-strong-backtest/weekly-strong-backtest.routes";
 import { API_ROUTES, HTTP_STATUS } from "./shared/constants";
-import { corsOrigins } from "./shared/env";
+import { corsOrigins, env } from "./shared/env";
 import { errorHandler, getErrorMessage, notFound } from "./shared/errors";
 import { sendData } from "./shared/http";
 import { logger } from "./shared/logger";
+import { httpMetricsMiddleware } from "./shared/metrics/http-metrics.middleware";
+import { metricsRouter } from "./shared/metrics/metrics.routes";
 
 export function createApp() {
   const app = express();
+
+  if (env.METRICS_ENABLED) {
+    registerMarketCollectionsMetricsCollectors();
+    app.use(metricsRouter);
+    app.use(httpMetricsMiddleware);
+  }
 
   app.use(helmet());
   app.use(
@@ -38,7 +45,7 @@ export function createApp() {
         callback(new Error("Origin is not allowed"));
       },
       credentials: true,
-    })
+    }),
   );
   app.use(express.json({ limit: "1mb" }));
   app.use(
@@ -70,7 +77,7 @@ export function createApp() {
           message: error.message,
         },
       }),
-    })
+    }),
   );
 
   app.get(API_ROUTES.health, async (_req, res) => {
@@ -84,13 +91,12 @@ export function createApp() {
         timestamp: new Date().toISOString(),
         database,
       },
-      database.ok ? HTTP_STATUS.ok : HTTP_STATUS.serviceUnavailable
+      database.ok ? HTTP_STATUS.ok : HTTP_STATUS.serviceUnavailable,
     );
   });
 
   app.use(API_ROUTES.auth, authRouter);
   app.use(API_ROUTES.adminAuth, adminAuthRouter);
-  app.use(API_ROUTES.users, usersRouter);
   app.use(API_ROUTES.marketData, marketDataRouter);
   app.use(API_ROUTES.marketCollections, marketCollectionsRouter);
   app.use(API_ROUTES.scanner, scannerRouter);
@@ -113,11 +119,6 @@ export function createApp() {
 
 const DATABASE_HEALTH_CHECK_TIMEOUT_MS = 2_000;
 
-// A lightweight liveness probe for the database connection itself, not just
-// "the Node process is running" — the health route previously always
-// returned ok:true even if Postgres was completely unreachable. Times out
-// independently of DB_CONNECTION_TIMEOUT_MS so a slow-but-not-dead database
-// still reports unhealthy quickly rather than hanging the health check too.
 async function checkDatabaseHealth() {
   const startedAt = Date.now();
 
@@ -127,8 +128,8 @@ async function checkDatabaseHealth() {
       new Promise((_resolve, reject) =>
         setTimeout(
           () => reject(new Error("Database health check timed out")),
-          DATABASE_HEALTH_CHECK_TIMEOUT_MS
-        )
+          DATABASE_HEALTH_CHECK_TIMEOUT_MS,
+        ),
       ),
     ]);
 
@@ -144,7 +145,7 @@ async function checkDatabaseHealth() {
   } catch (error) {
     logger.error(
       { message: getErrorMessage(error, "Unknown error") },
-      "Database health check failed"
+      "Database health check failed",
     );
 
     return {
