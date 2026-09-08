@@ -21,27 +21,16 @@ function toDateOnlyFromEpochSeconds(value: unknown) {
   return new Date(seconds * 1000).toISOString().slice(0, 10);
 }
 
-function isUsableBseEquity(row: GlobalDatafeedsInstrumentRow) {
-  const series = row.Series?.trim().toUpperCase();
-  const high52Week = toFiniteNumber(row.High52Week);
-  const low52Week = toFiniteNumber(row.Low52Week);
-  const lot = toFiniteNumber(row.QuotationLot);
-
-  if (!row.IsCommonExchange) return false;
-  if (!row.ISIN?.startsWith("INE")) return false;
-  if (lot !== null && lot > 1) return false;
-  if (high52Week !== null && high52Week <= 0) return false;
-  if (low52Week !== null && low52Week <= 0) return false;
-  if (series && ["F", "M", "MT", "NS", "P"].includes(series)) return false;
-
-  return true;
+// `instruments` is the reference universe, not a chart-readiness filter, so this must keep SME-board/recently-listed rows the old isUsableBseEquity/IsCommonExchange gates used to silently drop; the ISIN "INE" prefix alone is enough to exclude non-equity classes without re-excluding legitimate equities, and candle/quote readiness is handled separately downstream (market-data.metrics.ts, getChartCandles) - see docs/PROVIDERS.md.
+function isBseEquityIdentity(row: GlobalDatafeedsInstrumentRow) {
+  return Boolean(row.ISIN?.startsWith("INE"));
 }
 
 export function toGlobalDatafeedsInstrument(
   row: GlobalDatafeedsInstrumentRow,
   exchange: string
 ): ProviderInstrument | null {
-  if (exchange === "BSE" && !isUsableBseEquity(row)) return null;
+  if (exchange === "BSE" && !isBseEquityIdentity(row)) return null;
 
   const identifier = row.Identifier?.trim();
   if (!identifier) return null;
