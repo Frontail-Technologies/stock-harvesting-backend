@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DbOrTx } from "../../db/client";
 import { weeklyStrongBacktestMembers, weeklyStrongBacktestRuns } from "../../db/schema";
 import type { WeeklyStrongBacktestWeekMembers } from "../market-data/market-data.service";
-import { persistWeeklyStrongBacktestWeek } from "./weekly-strong-backtest.service";
+import { persistWeeklyStrongBacktestWeek } from "./weekly-strong-backtest.persistence";
 
 /**
  * No Postgres instance is reachable in this environment (same constraint as
@@ -90,8 +90,7 @@ function createFakeDb() {
         if (table === weeklyStrongBacktestMembers) {
           return {
             async where(_condition: unknown) {
-              // Real code always deletes by eq(runId, <the just-upserted run's id>)
-              // - lastRunId tracks exactly that within this fake transaction.
+              // Real code always deletes by eq(runId, <the just-upserted run's id>) - lastRunId tracks exactly that within this fake transaction.
               for (let i = members.length - 1; i >= 0; i--) {
                 if (members[i].runId === lastRunId) members.splice(i, 1);
               }

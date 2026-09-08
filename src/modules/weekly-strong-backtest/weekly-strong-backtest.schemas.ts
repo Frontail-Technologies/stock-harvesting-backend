@@ -16,6 +16,15 @@ export const collectionCodeWeekParamsSchema = z
   })
   .strict();
 
+export const membershipChangesQuerySchema = z
+  .object({
+    weekEnding: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "weekEnding must be YYYY-MM-DD"),
+  })
+  .strict();
+
 export const collectionIdParamsSchema = z
   .object({
     id: z.string().trim().uuid(),
