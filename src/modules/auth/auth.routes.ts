@@ -38,16 +38,16 @@ import {
 import {
   completeGoogleLogin,
   createGoogleAuthUrl,
-  getCurrentUser,
-  loginWithPassword,
   resolveAuthPortal,
   resolveOauthDestination,
-  revokeRefreshToken,
-  rotateRefreshToken,
+} from "./google-auth.service";
+import { loginWithPassword } from "./password-auth.service";
+import {
   requestUserRegistration,
   resendUserRegistrationOtp,
   verifyUserRegistrationOtp,
-} from "./auth.service";
+} from "./registration.service";
+import { getCurrentUser, revokeRefreshToken, rotateRefreshToken } from "./session.service";
 
 export const authRouter = Router();
 

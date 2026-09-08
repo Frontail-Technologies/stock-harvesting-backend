@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { evaluatePortalAccess, resolveAuthPortal, resolveOauthDestination } from "./auth.service";
+import { resolveAuthPortal, resolveOauthDestination } from "./google-auth.service";
+import { evaluatePortalAccess } from "./session.service";
 
-// Covers the one place that decides which frontend origin a Google login
-// bounces back to (auth.routes.ts's callback handler) - a regression here
-// would either strand admin logins on the main site (defeating portal
-// separation) or, worse, require every deployment to configure
-// ADMIN_WEB_APP_URL just to keep the existing main-site login working.
+// Covers the one place deciding which frontend origin a Google login bounces back to - a regression here could strand admin logins on the main site or force every deployment to configure ADMIN_WEB_APP_URL.
 describe("resolveOauthDestination", () => {
   const config = { webAppUrl: "https://stockharvesting.com" };
   const configWithAdmin = {
@@ -47,11 +44,7 @@ describe("resolveOauthDestination", () => {
   });
 });
 
-// Strict portal separation - resolveAuthPortal maps the short-lived OAuth
-// portal cookie to the AuthPortal type completeGoogleLogin/createSession/
-// rotateRefreshToken all key on. Only ever "admin" for an exact "admin"
-// value; everything else (missing, tampered, unrecognized) resolves to the
-// least-privileged "user" portal.
+// Strict portal separation - resolveAuthPortal maps the OAuth portal cookie to the AuthPortal type; only an exact "admin" value resolves to admin, everything else falls back to the least-privileged "user" portal.
 describe("resolveAuthPortal", () => {
   it("maps the exact 'admin' cookie value to the admin portal", () => {
     expect(resolveAuthPortal("admin")).toBe("admin");
@@ -66,11 +59,7 @@ describe("resolveAuthPortal", () => {
   });
 });
 
-// Strict portal separation - the actual login-time enforcement (items 2-5,
-// test matrix B/D): an admin-role account must never be granted a USER
-// portal session, and a non-admin account must never be granted an ADMIN
-// portal session. evaluatePortalAccess is the pure decision at the heart
-// of completeGoogleLogin, tested here without any real OAuth/DB round-trip.
+// Strict portal separation - login-time enforcement (items 2-5, matrix B/D): an admin account must never get a USER session, a non-admin must never get an ADMIN session; evaluatePortalAccess is the pure decision tested here without a real OAuth/DB round-trip.
 describe("evaluatePortalAccess", () => {
   it("A: a normal user logging into the USER portal is allowed", () => {
     expect(evaluatePortalAccess("user", "user")).toEqual({ allowed: true });
