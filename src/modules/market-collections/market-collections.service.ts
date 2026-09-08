@@ -2,7 +2,6 @@ import { and, asc, count, desc, eq, gt, gte, ilike, inArray, lt, or, sql } from 
 
 import { db, type DbOrTx } from "../../db/client";
 import {
-  auditLogs,
   instruments,
   marketCollectionMembers,
   marketCollections,
@@ -10,9 +9,11 @@ import {
   marketCollectionVersions,
   weeklyStrongBacktestRuns,
 } from "../../db/schema";
+import { writeAuditLog } from "../../shared/audit/audit.service";
 import { getOrSetCache, invalidateCacheByPrefix } from "../../shared/cache";
 import { conflict, notFound } from "../../shared/errors";
 import { normalizeSymbol } from "../../shared/normalize";
+import { normalizeBseCollectionFilename } from "./market-collections.filename";
 import {
   getOrComputeCollectionRelativeStrengthBase,
   getOrComputeWeeklyStrongSnapshot,
@@ -25,17 +26,10 @@ import {
   pickTopRelativeStrengthRows,
 } from "../market-data/market-data.service";
 
-// The expensive live computation (years of candle history per member) now
-// lives behind a persisted snapshot (dashboard-snapshots.service.ts),
-// invalidated when the underlying data actually changes, not on a fixed
-// TTL. This in-process cache just sits in front of that fast DB read - a
-// short safety-net to collapse concurrent requests, not the source of
-// freshness truth.
+// The expensive live computation now lives behind a persisted, change-invalidated snapshot (dashboard-snapshots.service.ts); this in-process cache just collapses concurrent requests in front of that fast DB read, it's not the source of freshness truth.
 const COLLECTION_CACHE_TTL_MS = 60_000;
 
-// 500-row chunks (1,500 params for the 3-param matched-member upsert, 501
-// for the deactivation batch) - comfortably under Postgres's 65,535-param
-// protocol limit, matching the convention used elsewhere in this codebase.
+// 500-row chunks (1,500/501 params per batch) - comfortably under Postgres's 65,535-param protocol limit, matching the convention used elsewhere in this codebase.
 const COLLECTION_MEMBER_WRITE_CHUNK_SIZE = 500;
 
 type MemberStatus = "new" | "already-active" | "reactivate";
@@ -71,16 +65,12 @@ export async function listCollections(input: { exchange?: string; countryCode?: 
       name: marketCollections.name,
       exchange: marketCollections.exchange,
       countryCode: marketCollections.countryCode,
-      // Table-qualified on both sides deliberately, not the bare-column
-      // interpolation this used to use: drizzle's `sql` tag renders a
-      // Column reference as just its column name, and
-      // market_collection_members has its own `id` primary key - inside
-      // this subquery's scope, an unqualified `"id"` resolves to THAT
-      // (its own PK) rather than the intended outer marketCollections.id,
-      // silently turning the correlation into collection_id = id (always
-      // false) and making memberCount always 0. Confirmed via a live
-      // diagnostic: the query builder's own .toSQL() showed
-      // `where "collection_id" = "id"` with no table prefix.
+      preparationStatus: marketCollections.preparationStatus,
+      preparedAt: marketCollections.preparedAt,
+      preparationError: marketCollections.preparationError,
+      membersWithRequiredHistory: marketCollections.membersWithRequiredHistory,
+      membersUnavailable: marketCollections.membersUnavailable,
+      // Table-qualified on both sides deliberately: an unqualified "id" here resolves to market_collection_members' own PK, not marketCollections.id, silently making the correlation always-false and memberCount always 0 (confirmed via .toSQL()).
       memberCount: sql<number>`(
         select count(*)::int from "market_collection_members"
         where "market_collection_members"."collection_id" = "market_collections"."id"
@@ -114,10 +104,7 @@ export async function getCollectionMembers(input: {
   return getCollectionMembersForCollection(collection, input);
 }
 
-// Admin variant — resolves by id and doesn't require the collection itself
-// to be active, so a deactivated collection's constituent list is still
-// viewable from its admin detail page (the public code-based lookup above
-// intentionally 404s on inactive collections).
+// Admin variant — resolves by id and doesn't require the collection to be active, so a deactivated collection's list is still viewable in admin (the public code-based lookup above 404s on inactive collections).
 export async function getCollectionMembersById(input: {
   id: string;
   page: number;
@@ -200,11 +187,7 @@ async function getCollectionMembersForCollection(
   });
 }
 
-// getOrComputeCollectionRelativeStrengthBase runs the expensive base
-// computation once per invalidation cycle (persisted); deriving the
-// requested view (top-N list or sector/industry grouping) from that stored
-// base is pure/cheap, so every {limit, groupBy} combination for a
-// collection shares one snapshot instead of recomputing.
+// getOrComputeCollectionRelativeStrengthBase runs the expensive base computation once per invalidation cycle; deriving the requested view (top-N or grouping) from that stored base is cheap, so every {limit, groupBy} combination shares one snapshot.
 export async function getCollectionRelativeStrength(input: {
   code: string;
   limit: number;
@@ -239,14 +222,7 @@ export async function getCollectionRelativeStrength(input: {
   });
 }
 
-// Full sector -> industries taxonomy for the collection's active members -
-// no ranking, no top-N slicing, no scores. This is what the Dashboard's
-// cross-filter uses to resolve "which industries belong to this sector" and
-// "what sector does this industry belong to", so a ranked/limited sample
-// must never be its source (a stock outside the top-N would otherwise be
-// unresolvable). Shares the same cached base snapshot as
-// getCollectionRelativeStrength above - no extra computation, just a
-// different, complete derivation of it.
+// Full sector -> industries taxonomy for active members, no ranking/top-N/scores: the Dashboard's cross-filter needs the complete mapping (a ranked/limited sample would leave stocks outside the top-N unresolvable). Shares the same cached base snapshot as getCollectionRelativeStrength above - just a different, complete derivation of it.
 export async function getCollectionSectorIndustryTaxonomy(input: { code: string }) {
   const collection = await requireCollectionByCode(input.code);
   const cacheKey = `collectionSectorIndustryTaxonomy:${collection.code}`;
@@ -267,26 +243,27 @@ export async function getCollectionSectorIndustryTaxonomy(input: { code: string 
   });
 }
 
-// The Weekly Strong breakout screen (see weekly-strong-evaluator.ts for
-// the actual qualification logic - not restated here), scoped to this
-// collection's active members. Reads a persisted snapshot instead of
-// re-running computeWeeklyStrongStocks live on every request - see
-// getOrComputeWeeklyStrongSnapshot.
+// The Weekly Strong breakout screen (see weekly-strong-evaluator.ts for qualification logic), scoped to this collection's active members; reads a persisted snapshot instead of re-running computeWeeklyStrongStocks live - see getOrComputeWeeklyStrongSnapshot.
 export async function getCollectionWeeklyStrongStocks(input: { code: string }) {
   const collection = await requireCollectionByCode(input.code);
   const cacheKey = `collectionWeeklyStrongStocks:${collection.code}`;
 
   return getOrSetCache(cacheKey, COLLECTION_CACHE_TTL_MS, async () => {
     const memberRows = await getActiveMemberInstrumentRows(collection.id);
-    const items = await getOrComputeWeeklyStrongSnapshot(collection.id, collection.exchange, memberRows);
+    const { items, weekEnding } = await getOrComputeWeeklyStrongSnapshot(
+      collection.id,
+      collection.exchange,
+      memberRows
+    );
     return {
       collection: { code: collection.code, name: collection.name },
       items,
+      weekEnding,
     };
   });
 }
 
-// Shared by the two functions above and weekly-strong-backtest.service.ts.
+// Shared by the two functions above and weekly-strong-backtest.generation.ts.
 export async function getActiveMemberInstrumentRows(collectionId: string) {
   return db
     .select({
@@ -304,40 +281,54 @@ export async function getActiveMemberInstrumentRows(collectionId: string) {
     );
 }
 
-export async function createCollection(input: {
+type NewCollectionInput = {
   code: string;
   name: string;
   exchange: string;
   countryCode?: string;
   description?: string;
-  actorUserId: string;
-}) {
-  const code = input.code.trim().toUpperCase();
+};
+
+function normalizeNewCollectionInput(input: NewCollectionInput) {
+  return {
+    code: input.code.trim().toUpperCase(),
+    name: input.name,
+    exchange: input.exchange,
+    countryCode: input.countryCode ?? "IN",
+    description: input.description ?? null,
+  };
+}
+
+export async function createCollection(input: NewCollectionInput & { actorUserId: string }) {
+  const values = normalizeNewCollectionInput(input);
   const [existing] = await db
     .select({ id: marketCollections.id })
     .from(marketCollections)
-    .where(and(eq(marketCollections.exchange, input.exchange), eq(marketCollections.code, code)));
+    .where(and(eq(marketCollections.exchange, values.exchange), eq(marketCollections.code, values.code)));
   if (existing) {
-    throw conflict(`A collection with code "${code}" already exists for ${input.exchange}`);
+    throw conflict(`A collection with code "${values.code}" already exists for ${values.exchange}`);
   }
 
-  const [created] = await db
-    .insert(marketCollections)
-    .values({
-      code,
-      name: input.name,
-      exchange: input.exchange,
-      countryCode: input.countryCode ?? "IN",
-      description: input.description ?? null,
-    })
-    .returning();
+  const [created] = await db.insert(marketCollections).values(values).returning();
 
   invalidateCacheByPrefix("collections:list");
-  await audit(input.actorUserId, "market_collection.created", "market_collection", created.id, {
-    code,
-    exchange: input.exchange,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "market_collection.created",
+    targetType: "market_collection",
+    targetId: created.id,
+    metadata: { code: values.code, exchange: values.exchange },
   });
   return created;
+}
+
+export async function findCollectionByCode(exchange: string, code: string) {
+  const normalizedCode = code.trim().toUpperCase();
+  const [collection] = await db
+    .select()
+    .from(marketCollections)
+    .where(and(eq(marketCollections.exchange, exchange), eq(marketCollections.code, normalizedCode)));
+  return collection ?? null;
 }
 
 export async function updateCollection(input: {
@@ -360,9 +351,12 @@ export async function updateCollection(input: {
     .returning();
 
   invalidateCacheByPrefix("collections:list");
-  await audit(input.actorUserId, "market_collection.updated", "market_collection", input.id, {
-    name: input.name,
-    active: input.active,
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "market_collection.updated",
+    targetType: "market_collection",
+    targetId: input.id,
+    metadata: { name: input.name, active: input.active },
   });
   return updated;
 }
@@ -372,35 +366,62 @@ export async function previewCollectionImport(input: { id: string; csvContent: s
   return classifyCollectionImport(collection, input.csvContent);
 }
 
-// Confirming an import does 3 things atomically in one transaction: (1)
-// updates the active-flag, the source of truth for live Dashboard reads;
-// (2) creates one new immutable market_collection_versions snapshot dated
-// `effectiveFrom`; (3) invalidates current/historical-membership backtest
-// runs (see the two invalidation blocks below). A version already existing
-// for that exact effectiveFrom rejects the whole import rather than
-// silently overwriting it - use replaceCollectionVersionMembers for an
-// explicit correction instead.
+// Confirming an import atomically: (1) updates the active-flag, (2) creates one new immutable market_collection_versions snapshot dated effectiveFrom, (3) invalidates backtest runs; an existing version for that exact effectiveFrom rejects the import instead of silently overwriting (use replaceCollectionVersionMembers for a correction). `id` can also be a NewCollectionInput (bulk-import create path), inserted in the SAME transaction so creation and first import commit/roll back together.
 export async function importCollectionCsv(input: {
-  id: string;
+  id: string | NewCollectionInput;
   csvContent: string;
   sourceName?: string;
   sourceDate?: string;
   effectiveFrom: string;
   actorUserId: string;
 }) {
-  const collection = await requireCollectionById(input.id);
-  const report = await classifyCollectionImport(collection, input.csvContent);
+  const isNewCollection = typeof input.id !== "string";
+  const existingCollection = isNewCollection ? null : await requireCollectionById(input.id as string);
+  const exchange = isNewCollection ? (input.id as NewCollectionInput).exchange : existingCollection!.exchange;
+
+  const report = await classifyCollectionImport(
+    { id: isNewCollection ? null : (input.id as string), exchange },
+    input.csvContent
+  );
   const activeMembershipChanged =
     report.summary.toAddCount + report.summary.toReactivateCount + report.summary.toDeactivateCount > 0;
 
-  const { versionId, invalidatedCurrentMembershipRuns, invalidatedHistoricalWeeks } = await db.transaction(
-    async (tx) => {
+  const { collectionId, code, versionId, invalidatedCurrentMembershipRuns, invalidatedHistoricalWeeks, created } =
+    await db.transaction(async (tx) => {
+      let collectionId: string;
+      let code: string;
+      let sourceNameFallback: string | null;
+      let sourceDateFallback: string | null;
+      let created = false;
+
+      if (isNewCollection) {
+        const values = normalizeNewCollectionInput(input.id as NewCollectionInput);
+        const [existing] = await tx
+          .select({ id: marketCollections.id })
+          .from(marketCollections)
+          .where(and(eq(marketCollections.exchange, values.exchange), eq(marketCollections.code, values.code)));
+        if (existing) {
+          throw conflict(`A collection with code "${values.code}" already exists for ${values.exchange}`);
+        }
+        const [createdRow] = await tx.insert(marketCollections).values(values).returning();
+        collectionId = createdRow.id;
+        code = createdRow.code;
+        sourceNameFallback = null;
+        sourceDateFallback = null;
+        created = true;
+      } else {
+        collectionId = existingCollection!.id;
+        code = existingCollection!.code;
+        sourceNameFallback = existingCollection!.sourceName;
+        sourceDateFallback = existingCollection!.sourceDate;
+      }
+
       const [existingVersion] = await tx
         .select({ id: marketCollectionVersions.id })
         .from(marketCollectionVersions)
         .where(
           and(
-            eq(marketCollectionVersions.collectionId, collection.id),
+            eq(marketCollectionVersions.collectionId, collectionId),
             eq(marketCollectionVersions.effectiveFrom, input.effectiveFrom)
           )
         );
@@ -411,40 +432,27 @@ export async function importCollectionCsv(input: {
         );
       }
 
-      await upsertMatchedCollectionMembers(tx, collection.id, report.matched);
-      await deactivateCollectionMembers(tx, collection.id, report.toDeactivate.map((row) => row.instrumentId));
+      await upsertMatchedCollectionMembers(tx, collectionId, report.matched);
+      await deactivateCollectionMembers(tx, collectionId, report.toDeactivate.map((row) => row.instrumentId));
 
       await tx
         .update(marketCollections)
         .set({
-          sourceName: input.sourceName ?? collection.sourceName,
-          sourceDate: input.sourceDate ?? collection.sourceDate,
+          sourceName: input.sourceName ?? sourceNameFallback,
+          sourceDate: input.sourceDate ?? sourceDateFallback,
           lastImportedAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(eq(marketCollections.id, collection.id));
+        .where(eq(marketCollections.id, collectionId));
 
-      // current_membership lifecycle: current_membership
-      // runs are documented as "whatever this collection's active set is
-      // AT GENERATION TIME" - if this import actually changed the active
-      // set, every already-persisted current_membership run now reflects
-      // a DIFFERENT "current" than the collection has going forward.
-      // Rather than let old and new weeks silently represent two
-      // different universes under one series, invalidate the whole
-      // current_membership series here so it can only ever be regenerated
-      // as one coherent pass (the existing admin "Generate Backtest"
-      // action - this does not auto-trigger a rebuild, matching how a
-      // historical-membership rebuild is also always an explicit admin
-      // action, and avoiding a slow synchronous rebuild inside this
-      // request). historical_membership runs are untouched here - they
-      // are keyed to point-in-time versions, not "now".
+      // current_membership runs mean "active set AT GENERATION TIME" - if this import changed the active set, invalidate the whole current_membership series so old/new weeks never silently mix universes; regeneration stays an explicit admin action (no auto-rebuild). historical_membership runs are untouched, being keyed to point-in-time versions, not "now".
       let invalidatedCurrentMembershipRuns = 0;
       if (activeMembershipChanged) {
         const deletedCurrentRuns = await tx
           .delete(weeklyStrongBacktestRuns)
           .where(
             and(
-              eq(weeklyStrongBacktestRuns.collectionId, collection.id),
+              eq(weeklyStrongBacktestRuns.collectionId, collectionId),
               eq(weeklyStrongBacktestRuns.membershipMode, "current_membership")
             )
           )
@@ -452,15 +460,11 @@ export async function importCollectionCsv(input: {
         invalidatedCurrentMembershipRuns = deletedCurrentRuns.length;
       }
 
-      // The version's member snapshot is exactly the uploaded file's full
-      // matched symbol list (report.matched), regardless of each row's
-      // new/reactivate/already-active status against the PREVIOUS active
-      // set - that whole list is, by construction, the complete desired
-      // membership as of effectiveFrom.
+      // The version's member snapshot is the uploaded file's full matched symbol list, regardless of each row's status against the PREVIOUS active set - it's the complete desired membership as of effectiveFrom.
       const [version] = await tx
         .insert(marketCollectionVersions)
         .values({
-          collectionId: collection.id,
+          collectionId,
           effectiveFrom: input.effectiveFrom,
           sourceName: input.sourceName ?? null,
           sourceDate: input.sourceDate ?? null,
@@ -475,29 +479,31 @@ export async function importCollectionCsv(input: {
             versionId: version.id,
             instrumentId: row.instrumentId,
             symbol: row.symbol,
-            exchange: collection.exchange,
+            exchange,
           }))
         );
       }
 
-      // New-version invalidation: this new version is now
-      // authoritative for the window [effectiveFrom, next version's
-      // effectiveFrom or unbounded). Any historical_membership run whose
-      // weekEnding falls in that exact window was necessarily resolved
-      // against a DIFFERENT (now-superseded) version for that week - it
-      // predates this insert, so it cannot already be stamped with this
-      // brand-new version's id. Delete it so the series is honest rather
-      // than silently wrong; a "Rebuild Historical Backtest" regenerates
-      // it. Scoped precisely to this window - weeks before effectiveFrom
-      // and weeks at/after the next version's effectiveFrom (i.e. already
-      // that later version's own territory) are untouched, and so are
-      // other collections/versions.
+      // Every confirmed import resets candle/backtest readiness - a previously READY collection must never keep showing READY once membership changed; latestMembershipVersionId is captured here and re-checked by prepareCollectionData so a superseded preparation job can never win.
+      await tx
+        .update(marketCollections)
+        .set({
+          preparationStatus: "pending",
+          preparedAt: null,
+          preparationError: null,
+          membersWithRequiredHistory: null,
+          membersUnavailable: null,
+          latestMembershipVersionId: version.id,
+        })
+        .where(eq(marketCollections.id, collectionId));
+
+      // New-version invalidation: this version is authoritative for [effectiveFrom, next version's effectiveFrom or unbounded); any historical_membership run in that window was resolved against a now-superseded version, so delete it rather than leave the series silently wrong - "Rebuild Historical Backtest" regenerates it. Scoped precisely to this window; other weeks/collections/versions are untouched.
       const [nextVersion] = await tx
         .select({ effectiveFrom: marketCollectionVersions.effectiveFrom })
         .from(marketCollectionVersions)
         .where(
           and(
-            eq(marketCollectionVersions.collectionId, collection.id),
+            eq(marketCollectionVersions.collectionId, collectionId),
             gt(marketCollectionVersions.effectiveFrom, input.effectiveFrom)
           )
         )
@@ -505,7 +511,7 @@ export async function importCollectionCsv(input: {
         .limit(1);
 
       const historicalWindowFilters = [
-        eq(weeklyStrongBacktestRuns.collectionId, collection.id),
+        eq(weeklyStrongBacktestRuns.collectionId, collectionId),
         eq(weeklyStrongBacktestRuns.membershipMode, "historical_membership"),
         gte(weeklyStrongBacktestRuns.weekEnding, input.effectiveFrom),
         ...(nextVersion ? [lt(weeklyStrongBacktestRuns.weekEnding, nextVersion.effectiveFrom)] : []),
@@ -519,40 +525,95 @@ export async function importCollectionCsv(input: {
         .map((row) => row.weekEnding)
         .sort();
 
-      return { versionId: version.id, invalidatedCurrentMembershipRuns, invalidatedHistoricalWeeks };
-    }
-  );
+      return {
+        collectionId,
+        code,
+        versionId: version.id,
+        invalidatedCurrentMembershipRuns,
+        invalidatedHistoricalWeeks,
+        created,
+      };
+    });
 
   invalidateCacheByPrefix("collections:list");
-  invalidateCacheByPrefix(`collectionMembers:${collection.code}:`);
-  invalidateCacheByPrefix(`collectionRelativeStrength:${collection.code}:`);
-  invalidateCacheByPrefix(`collectionWeeklyStrongStocks:${collection.code}`);
-  invalidateCacheByPrefix(`collectionWeeklyStrongBacktest:${collection.code}`);
-  // The authoritative invalidation for the persisted snapshot (the
-  // in-process caches above are just a short safety-net layer on top).
-  // The next read of either metric type recomputes once and re-persists.
-  await invalidateCollectionSnapshots(collection.id);
+  invalidateCacheByPrefix(`collectionMembers:${code}:`);
+  invalidateCacheByPrefix(`collectionRelativeStrength:${code}:`);
+  invalidateCacheByPrefix(`collectionWeeklyStrongStocks:${code}`);
+  invalidateCacheByPrefix(`collectionWeeklyStrongBacktest:${code}`);
+  // The authoritative invalidation for the persisted snapshot (the in-process caches above are just a safety-net layer); the next read of either metric type recomputes once and re-persists.
+  await invalidateCollectionSnapshots(collectionId);
 
-  await audit(input.actorUserId, "market_collection.imported", "market_collection", collection.id, {
-    summary: report.summary,
-    effectiveFrom: input.effectiveFrom,
-    versionId,
-    invalidatedCurrentMembershipRuns,
-    invalidatedHistoricalWeeks,
+  if (created) {
+    await writeAuditLog({
+      actorUserId: input.actorUserId,
+      action: "market_collection.created",
+      targetType: "market_collection",
+      targetId: collectionId,
+      metadata: { code, exchange },
+    });
+  }
+
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "market_collection.imported",
+    targetType: "market_collection",
+    targetId: collectionId,
+    metadata: {
+      summary: report.summary,
+      effectiveFrom: input.effectiveFrom,
+      versionId,
+      invalidatedCurrentMembershipRuns,
+      invalidatedHistoricalWeeks,
+    },
   });
 
   return {
     ...report,
+    collectionId,
     versionId,
     effectiveFrom: input.effectiveFrom,
     invalidatedCurrentMembershipRuns,
     invalidatedHistoricalWeeks,
+    created,
   };
 }
 
-// Batched INSERT ... ON CONFLICT for matched rows (already-active rows
-// need no write). Split out from importCollectionCsv for testability (see
-// market-collections.import-bulk-writes.test.ts).
+// Identity (name/code) is always derived from `filename` via the one canonical normalizeBseCollectionFilename - callers never supply their own code/name for a bulk-import file.
+export async function previewBulkImportFile(input: { exchange: string; filename: string; csvContent: string }) {
+  const { name, code } = normalizeBseCollectionFilename(input.filename);
+  const existing = await findCollectionByCode(input.exchange, code);
+  const report = await classifyCollectionImport(
+    existing ? { id: existing.id, exchange: input.exchange } : { id: null, exchange: input.exchange },
+    input.csvContent
+  );
+  return { report, existingCollectionId: existing?.id ?? null, name, code };
+}
+
+export async function importBulkFile(input: {
+  exchange: string;
+  filename: string;
+  csvContent: string;
+  sourceName?: string;
+  sourceDate?: string;
+  effectiveFrom: string;
+  actorUserId: string;
+}) {
+  const { name, code } = normalizeBseCollectionFilename(input.filename);
+  const existing = await findCollectionByCode(input.exchange, code);
+
+  const result = await importCollectionCsv({
+    id: existing ? existing.id : { code, name, exchange: input.exchange },
+    csvContent: input.csvContent,
+    sourceName: input.sourceName,
+    sourceDate: input.sourceDate,
+    effectiveFrom: input.effectiveFrom,
+    actorUserId: input.actorUserId,
+  });
+
+  return { ...result, name, code };
+}
+
+// Batched INSERT ... ON CONFLICT for matched rows (already-active rows need no write).
 export async function upsertMatchedCollectionMembers(
   tx: DbOrTx,
   collectionId: string,
@@ -571,9 +632,7 @@ export async function upsertMatchedCollectionMembers(
   }
 }
 
-// Batched deactivation - collectionId stays a real equality filter (not
-// folded into the IN-list) so this can never cross-affect another
-// collection's row for the same instrument.
+// Batched deactivation - collectionId stays a real equality filter (not folded into the IN-list) so this can never cross-affect another collection's row for the same instrument.
 export async function deactivateCollectionMembers(tx: DbOrTx, collectionId: string, instrumentIds: string[]) {
   for (let index = 0; index < instrumentIds.length; index += COLLECTION_MEMBER_WRITE_CHUNK_SIZE) {
     const chunk = instrumentIds.slice(index, index + COLLECTION_MEMBER_WRITE_CHUNK_SIZE);
@@ -584,33 +643,42 @@ export async function deactivateCollectionMembers(tx: DbOrTx, collectionId: stri
   }
 }
 
-async function classifyCollectionImport(
-  collection: { id: string; exchange: string },
-  csvContent: string
-): Promise<CollectionImportReport> {
-  const { candidateSymbols, duplicates, invalid } = parseCollectionCsv(csvContent);
-
+export async function resolveCollectionInstrumentMatches(exchange: string, candidateSymbols: string[]) {
   const instrumentRows =
     candidateSymbols.length > 0
       ? await db
           .select({ id: instruments.id, symbol: instruments.symbol })
           .from(instruments)
-          .where(
-            and(eq(instruments.exchange, collection.exchange), inArray(instruments.symbol, candidateSymbols))
-          )
+          .where(and(eq(instruments.exchange, exchange), inArray(instruments.symbol, candidateSymbols)))
       : [];
   const instrumentIdBySymbol = new Map(instrumentRows.map((row) => [row.symbol, row.id]));
   const unmatched = candidateSymbols.filter((symbol) => !instrumentIdBySymbol.has(symbol));
 
-  const currentMembers = await db
-    .select({
-      instrumentId: marketCollectionMembers.instrumentId,
-      symbol: instruments.symbol,
-      active: marketCollectionMembers.active,
-    })
-    .from(marketCollectionMembers)
-    .innerJoin(instruments, eq(marketCollectionMembers.instrumentId, instruments.id))
-    .where(eq(marketCollectionMembers.collectionId, collection.id));
+  return { instrumentIdBySymbol, unmatched };
+}
+
+async function classifyCollectionImport(
+  collection: { id: string | null; exchange: string },
+  csvContent: string
+): Promise<CollectionImportReport> {
+  const { candidateSymbols, duplicates, invalid } = parseCollectionCsv(csvContent);
+  const { instrumentIdBySymbol, unmatched } = await resolveCollectionInstrumentMatches(
+    collection.exchange,
+    candidateSymbols
+  );
+
+  // A null id means "this collection doesn't exist yet" (bulk-import create path previewing before creation) - no current membership to diff against, so every matched symbol classifies as "new" and nothing is queued for deactivation.
+  const currentMembers = collection.id
+    ? await db
+        .select({
+          instrumentId: marketCollectionMembers.instrumentId,
+          symbol: instruments.symbol,
+          active: marketCollectionMembers.active,
+        })
+        .from(marketCollectionMembers)
+        .innerJoin(instruments, eq(marketCollectionMembers.instrumentId, instruments.id))
+        .where(eq(marketCollectionMembers.collectionId, collection.id))
+    : [];
   const activeMemberInstrumentIds = new Set(
     currentMembers.filter((member) => member.active).map((member) => member.instrumentId)
   );
@@ -651,12 +719,7 @@ async function classifyCollectionImport(
   };
 }
 
-// Accepts a bare newline list of symbols, a single-column CSV with a
-// "symbol" header, or NSE's own index-constituent CSV export (where Symbol
-// isn't the first column). Uses a "symbol" header column if present,
-// otherwise the first field per line. Non-ticker-shaped entries are
-// reported as invalid, never silently dropped. Reused as-is by
-// market-collection-versions.service.ts's replace/correction workflow.
+// Accepts a bare newline list, a single-column CSV with a "symbol" header, or NSE's own index-constituent CSV export; uses the "symbol" header if present, otherwise the first field per line, and reports non-ticker-shaped entries as invalid rather than dropping them. Reused as-is by market-collection-versions.service.ts's replace/correction workflow.
 export function parseCollectionCsv(csvContent: string) {
   const lines = csvContent
     .split(/\r?\n/)
@@ -694,9 +757,7 @@ export function parseCollectionCsv(csvContent: string) {
   return { candidateSymbols, duplicates: [...duplicates], invalid };
 }
 
-// Exported for weekly-strong-backtest.service.ts's own admin (by id) and
-// public (by code) collection lookups - same active/404 rules, not
-// reimplemented there.
+// Exported for weekly-strong-backtest.generation.ts's admin (by id) and weekly-strong-backtest.queries.ts's public (by code) lookups - same active/404 rules, not reimplemented there.
 export async function requireCollectionById(id: string) {
   const [collection] = await db.select().from(marketCollections).where(eq(marketCollections.id, id));
   if (!collection) throw notFound("Collection not found");
@@ -713,22 +774,4 @@ export async function requireCollectionByCode(code: string) {
     .limit(1);
   if (!collection) throw notFound("Collection not found");
   return collection;
-}
-
-// Exported for market-collection-versions.service.ts (same audit_logs
-// table, same shape - not reimplemented there).
-export async function audit(
-  actorUserId: string | null,
-  action: string,
-  targetType?: string,
-  targetId?: string,
-  metadata: Record<string, unknown> = {}
-) {
-  await db.insert(auditLogs).values({
-    actorUserId,
-    action,
-    targetType,
-    targetId,
-    metadata,
-  });
 }
