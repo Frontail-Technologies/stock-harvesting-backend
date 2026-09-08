@@ -7,27 +7,13 @@ import { getLatestExpectedTradingDay } from "./trading-calendar";
 export type DashboardSnapshotScopeType = "collection" | "index_exchange";
 export type DashboardSnapshotMetricType = "relative_strength" | "weekly_strong";
 
-// Not a hash of the proprietary formula - just an identifier so a future
-// intentional change to the RS calculation can tell old and new snapshots
-// apart (mirrors weekly-strong-evaluator.ts's WEEKLY_STRONG_EVALUATOR_VERSION
-// for the other metric type). Lives in this dependency-free module (rather
-// than dashboard-snapshots.service.ts, which needs market-data.service.ts)
-// so market-data.service.ts's own getIndexRelativeStrength can use the
-// exact same version tag without creating an import cycle.
-// v2: 55-day-change-only ranking (Dashboard top-widget metric change) -
-// dropped the near-250-week-high pre-filter and the weekly MACD/monthly
-// terms, so a v1 snapshot's row set and values are no longer valid under
-// the current formula and must be treated as a miss (see
-// readDashboardSnapshotWithMeta's version-aware callers).
+// Version tag (not a formula hash) so old/new RS snapshots can be told apart, mirroring weekly-strong-evaluator.ts's own version constant; lives in this dependency-free module so market-data.service.ts can reuse it without an import cycle. v2 switched to 55-day-change-only ranking (dropped the near-250-week-high pre-filter and weekly MACD/monthly terms), so a v1 snapshot's row set/values are invalid under the current formula and must be treated as a miss - see readDashboardSnapshotWithMeta's version-aware callers.
 export const RELATIVE_STRENGTH_SNAPSHOT_VERSION = "relative-strength-v2";
 
-// Deliberately zero dependency on market-data.service.ts (or anything that
-// imports it) - this is pure schema-level read/write/delete, kept as its
-// own tiny module specifically so BOTH market-data.service.ts (for the
-// "index_exchange" scope, used by getIndexRelativeStrength) and
-// dashboard-snapshots.service.ts (for the "collection" scope, which DOES
-// need market-data.service.ts's compute functions) can depend on it
-// one-directionally without a cycle.
+// Same idea for the Weekly Strong snapshot, but its OWN version tag, separate from WEEKLY_STRONG_EVALUATOR_VERSION which tags the pass/fail decision logic itself and is persisted on immutable Backtest history - bumping this one only forces a Dashboard cache refresh. v2 added returnPct; a v1 row is missing the field entirely (not the same as returnPct: null), so it must be treated as a cache miss.
+export const WEEKLY_STRONG_SNAPSHOT_VERSION = "weekly-strong-snapshot-v2";
+
+// Deliberately zero dependency on market-data.service.ts - pure schema-level read/write/delete kept as its own tiny module so both market-data.service.ts and dashboard-snapshots.service.ts can depend on it one-directionally without a cycle.
 
 export async function readDashboardSnapshot<T extends unknown[]>(
   scopeType: DashboardSnapshotScopeType,
@@ -55,14 +41,7 @@ export type DashboardSnapshotRecord<T> = {
   evaluatorVersion: string;
 };
 
-// Superset of readDashboardSnapshot above - also surfaces asOfDate (the
-// real trading-day the payload was computed as of) and evaluatorVersion,
-// so a caller can (a) treat a stale-formula row as a miss instead of
-// serving it, and (b) display the genuine as-of date instead of "now".
-// Kept as a separate function rather than changing readDashboardSnapshot's
-// return shape, so the existing weekly_strong callers (which don't need
-// either field and are explicitly out of scope for this change) keep
-// their exact current behavior untouched.
+// Superset of readDashboardSnapshot above - also surfaces asOfDate and evaluatorVersion so a caller can treat a stale-formula row as a miss and display the genuine as-of date; kept separate so existing weekly_strong callers keep their current behavior untouched.
 export async function readDashboardSnapshotWithMeta<T extends unknown[]>(
   scopeType: DashboardSnapshotScopeType,
   scopeKey: string,
@@ -128,13 +107,7 @@ export async function writeDashboardSnapshot(input: {
   return { asOfDate };
 }
 
-// Deletes every metric snapshot for one scope (e.g. both
-// relative_strength and weekly_strong for one collection) - the
-// invalidation half of "recompute when underlying data actually changed,
-// not on a fixed TTL". Deleting rather than marking stale
-// is deliberate: the next read simply finds nothing, computes fresh, and
-// re-persists - one code path handles both "never generated yet" and
-// "just invalidated", instead of two.
+// Deletes every metric snapshot for one scope - the invalidation half of "recompute on data change, not fixed TTL"; deleting rather than marking stale means one code path handles both "never generated" and "just invalidated".
 export async function deleteDashboardSnapshots(
   scopeType: DashboardSnapshotScopeType,
   scopeKey: string

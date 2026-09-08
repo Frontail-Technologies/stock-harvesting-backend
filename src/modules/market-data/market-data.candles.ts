@@ -7,11 +7,7 @@ import { logger } from "../../shared/logger";
 import type { ProviderDailyCandle } from "../data-provider/data-provider.types";
 import { aggregateWeeklyCandles } from "./candle-aggregation";
 
-// Pure candle-table DB access (reads, upserts, atomic replacement) plus the
-// handful of in-memory row transforms tightly coupled to those reads.
-// Deliberately does NOT own: provider fetching, freshness decisions, or
-// backfill/refresh orchestration - those stay in market-data.service.ts,
-// which calls into this module rather than the other way around.
+// Pure candle-table DB access (reads, upserts, atomic replacement) plus tightly coupled in-memory row transforms; deliberately does NOT own provider fetching, freshness decisions, or backfill/refresh orchestration - those stay in market-data.service.ts, which calls into this module.
 
 const CANDLE_UPSERT_CHUNK_SIZE = 500;
 
@@ -66,6 +62,38 @@ export async function readCandleHistoryRange(input: {
   };
 }
 
+// Bulk equivalent of readCandleHistoryRange's "earliest stored candle" check for many symbols at once (collection preparation's coverage scan); only decides whether a backfill *attempt* is worth making, never the final availability verdict (see hasSufficientWeeklyStrongHistory for that).
+export async function findSymbolsNeedingHistoryBackfill(input: {
+  exchange: string;
+  symbols: string[];
+  requiredFromDate: string;
+  timeframe?: CandleTimeframe;
+}): Promise<string[]> {
+  if (input.symbols.length === 0) return [];
+
+  const rows = await db
+    .select({
+      symbol: candles.symbol,
+      earliest: sql<string>`min(${candles.time})`,
+    })
+    .from(candles)
+    .where(
+      and(
+        eq(candles.exchange, input.exchange),
+        inArray(candles.symbol, input.symbols),
+        eq(candles.timeframe, input.timeframe ?? CANDLE_TIMEFRAME.day)
+      )
+    )
+    .groupBy(candles.symbol);
+
+  const earliestBySymbol = new Map(rows.map((row) => [row.symbol, row.earliest]));
+
+  return input.symbols.filter((symbol) => {
+    const earliest = earliestBySymbol.get(symbol);
+    return !earliest || earliest > input.requiredFromDate;
+  });
+}
+
 export async function readChartCandles(input: {
   symbol: string;
   timeframe: CandleTimeframe;
@@ -81,12 +109,7 @@ export async function readChartCandles(input: {
     input.to ? lte(candles.time, input.to) : undefined,
   ].filter(Boolean);
 
-  // Narrowed projection, not `.select()` — every consumer of this function
-  // (getChartCandles' response mapping, deriveStoredCandlesForTimeframe's
-  // weekly/monthly aggregation) only ever reads these 7 columns; the rest
-  // (id, exchange, symbol, timeframe, source, createdAt, updatedAt) are
-  // dead weight on what can be a several-thousand-row result for a chart's
-  // full history.
+  // Narrowed projection, not `.select()` — every consumer only reads these 7 columns; the rest (id, exchange, symbol, timeframe, source, createdAt, updatedAt) are dead weight on a several-thousand-row chart history result.
   const rows = await db
     .select({
       instrumentId: candles.instrumentId,
@@ -219,11 +242,7 @@ export async function upsertCandles(inputs: CandleUpsertInput[], dbClient: DbOrT
     const chunk = dedupedInputs.slice(index, index + CANDLE_UPSERT_CHUNK_SIZE);
     if (chunk.length === 0) continue;
 
-    // `xmax = 0` is a well-known Postgres idiom for distinguishing an
-    // INSERT from an UPDATE inside a single ON CONFLICT statement: a freshly
-    // inserted row has no prior transaction ID recorded in xmax, an updated
-    // row does. Used only to report accurate insert/update counts below -
-    // never part of application logic.
+    // `xmax = 0` is the standard Postgres idiom for distinguishing an INSERT from an UPDATE inside one ON CONFLICT statement; used only to report accurate insert/update counts below, never part of application logic.
     const results = await dbClient
       .insert(candles)
       .values(
@@ -292,14 +311,7 @@ function dedupeCandleUpsertInputs(inputs: CandleUpsertInput[]) {
   return deduped;
 }
 
-// Deletes the requested exchange/symbol/date-range across all 3 timeframes,
-// then upserts the fresh daily/weekly/monthly rows - all inside one
-// transaction, so a failure at any step (including a duplicate-key error
-// surfaced from upsertCandles) rolls back the delete too, instead of
-// leaving the range empty. Takes an explicit dbClient (not the module-level
-// db) so it can be exercised directly against a fake DbOrTx in tests,
-// without needing to also fake the provider-fetch layer that
-// backfillDailyCandles wraps around it.
+// Deletes the requested exchange/symbol/date-range across all 3 timeframes then upserts fresh rows, all inside one transaction so any failure rolls back the delete too. Takes an explicit dbClient (not module-level db) so it can be tested against a fake DbOrTx without faking the provider-fetch layer backfillDailyCandles wraps around it.
 export async function replaceCandlesAtomically(
   dbClient: DbOrTx,
   input: {

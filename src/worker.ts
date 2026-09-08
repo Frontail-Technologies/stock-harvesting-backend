@@ -1,6 +1,5 @@
 import { Worker, type Job } from "bullmq";
 import { eq } from "drizzle-orm";
-
 import { db, pool } from "./db/client";
 import { syncJobs } from "./db/schema";
 import {
@@ -8,20 +7,32 @@ import {
   syncProviderInstruments,
 } from "./modules/market-data/market-data.service";
 import { getRedisConnectionOptions } from "./modules/jobs/queues";
+import { prepareCollectionData } from "./modules/market-collections/market-collection-preparation.service";
 import {
   runWeeklyStrongBacktestBackfill,
   runWeeklyStrongBacktestHistoricalRebuild,
   syncWeeklyStrongBacktestIncremental,
-} from "./modules/weekly-strong-backtest/weekly-strong-backtest.service";
+} from "./modules/weekly-strong-backtest/weekly-strong-backtest.generation";
 import { JOB_NAMES, JOB_STATUS, QUEUE_NAMES } from "./shared/constants";
+import { env } from "./shared/env";
 import { getErrorMessage } from "./shared/errors";
 import { logger } from "./shared/logger";
+import {
+  bullmqJobDurationSeconds,
+  bullmqJobRunsTotal,
+  safeInc,
+} from "./shared/metrics/metrics";
+import { startWorkerMetricsServer } from "./shared/metrics/worker-metrics-server";
 
 const connection = getRedisConnectionOptions();
 
 if (!connection) {
   logger.warn("REDIS_URL is not configured; worker did not start");
   process.exit(0);
+}
+
+if (env.METRICS_ENABLED) {
+  startWorkerMetricsServer();
 }
 
 async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
@@ -33,14 +44,24 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
       .where(eq(syncJobs.id, syncJobId));
   }
 
+  const endTimer = bullmqJobDurationSeconds.startTimer({
+    queue: QUEUE_NAMES.marketData,
+    job_type: job.name,
+  });
+
   try {
     const result = await run();
     if (syncJobId) {
       await db
         .update(syncJobs)
-        .set({ status: JOB_STATUS.completed, payload: result as Record<string, unknown>, updatedAt: new Date() })
+        .set({
+          status: JOB_STATUS.completed,
+          payload: result as Record<string, unknown>,
+          updatedAt: new Date(),
+        })
         .where(eq(syncJobs.id, syncJobId));
     }
+    recordJobOutcome(endTimer, job.name, "success");
     return result;
   } catch (error) {
     if (syncJobId) {
@@ -53,30 +74,43 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
         })
         .where(eq(syncJobs.id, syncJobId));
     }
+    recordJobOutcome(endTimer, job.name, "failed");
     throw error;
+  }
+}
+
+function recordJobOutcome(
+  endTimer: (labels?: Record<string, string>) => number,
+  jobType: string,
+  outcome: string,
+) {
+  try {
+    endTimer({ outcome });
+    safeInc(bullmqJobRunsTotal, {
+      queue: QUEUE_NAMES.marketData,
+      job_type: jobType,
+      outcome,
+    });
+  } catch {
+    // Metrics must never break job execution.
   }
 }
 
 const worker = new Worker(
   QUEUE_NAMES.marketData,
   async (job) => {
-    const exchange = typeof job.data.exchange === "string" ? job.data.exchange : undefined;
+    const exchange =
+      typeof job.data.exchange === "string" ? job.data.exchange : undefined;
 
     if (job.name === JOB_NAMES.instrumentSync) {
       return runTrackedJob(job, async () => {
         const result = await syncProviderInstruments(exchange);
         await refreshAllLatestInstrumentPrices(exchange);
-        // Weekly incremental Weekly Strong backtest update - hooked onto
-        // this existing 30-min-per-exchange job rather than a new
-        // schedule. Idempotent (skips collections whose latest completed
-        // week is already persisted) and only ever touches collections
-        // already backfilled at least once, so this is a cheap no-op on
-        // every run except the one where a new week has actually closed.
         if (exchange) {
           await syncWeeklyStrongBacktestIncremental(exchange).catch((error) => {
             logger.error(
               { exchange, message: getErrorMessage(error, "Unknown error") },
-              "Weekly Strong backtest incremental sync failed"
+              "Weekly Strong backtest incremental sync failed",
             );
           });
         }
@@ -85,25 +119,60 @@ const worker = new Worker(
     }
 
     if (job.name === JOB_NAMES.priceRefresh) {
-      return runTrackedJob(job, () => refreshAllLatestInstrumentPrices(exchange));
+      return runTrackedJob(job, () =>
+        refreshAllLatestInstrumentPrices(exchange),
+      );
     }
 
     if (job.name === JOB_NAMES.weeklyStrongBacktestBackfill) {
-      const collectionId = typeof job.data.collectionId === "string" ? job.data.collectionId : undefined;
-      const weeks = typeof job.data.weeks === "number" ? job.data.weeks : undefined;
-      if (!collectionId) throw new Error("weeklyStrongBacktestBackfill job missing collectionId");
-      return runTrackedJob(job, () => runWeeklyStrongBacktestBackfill({ collectionId, weeks }));
+      const collectionId =
+        typeof job.data.collectionId === "string"
+          ? job.data.collectionId
+          : undefined;
+      const weeks =
+        typeof job.data.weeks === "number" ? job.data.weeks : undefined;
+      if (!collectionId)
+        throw new Error(
+          "weeklyStrongBacktestBackfill job missing collectionId",
+        );
+      return runTrackedJob(job, () =>
+        runWeeklyStrongBacktestBackfill({ collectionId, weeks }),
+      );
     }
 
     if (job.name === JOB_NAMES.weeklyStrongBacktestHistoricalRebuild) {
-      const collectionId = typeof job.data.collectionId === "string" ? job.data.collectionId : undefined;
-      if (!collectionId) throw new Error("weeklyStrongBacktestHistoricalRebuild job missing collectionId");
-      return runTrackedJob(job, () => runWeeklyStrongBacktestHistoricalRebuild({ collectionId }));
+      const collectionId =
+        typeof job.data.collectionId === "string"
+          ? job.data.collectionId
+          : undefined;
+      if (!collectionId)
+        throw new Error(
+          "weeklyStrongBacktestHistoricalRebuild job missing collectionId",
+        );
+      return runTrackedJob(job, () =>
+        runWeeklyStrongBacktestHistoricalRebuild({ collectionId }),
+      );
+    }
+
+    if (job.name === JOB_NAMES.collectionPrepare) {
+      const collectionId =
+        typeof job.data.collectionId === "string"
+          ? job.data.collectionId
+          : undefined;
+      const membershipVersionId =
+        typeof job.data.membershipVersionId === "string"
+          ? job.data.membershipVersionId
+          : null;
+      if (!collectionId)
+        throw new Error("collectionPrepare job missing collectionId");
+      return runTrackedJob(job, () =>
+        prepareCollectionData(collectionId, membershipVersionId),
+      );
     }
 
     throw new Error(`Unsupported job: ${job.name}`);
   },
-  { connection }
+  { connection },
 );
 
 worker.on("completed", (job) => {

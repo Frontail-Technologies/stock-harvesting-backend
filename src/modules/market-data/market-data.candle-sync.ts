@@ -12,17 +12,26 @@ import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provi
 import { GLOBAL_DATAFEEDS_INDEX_EXCHANGE } from "../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
 import type { DataProviderAdapter, ProviderDailyCandle, ProviderSymbolDailyCandle } from "../data-provider/data-provider.types";
 import { aggregateMonthlyCandles, aggregateWeeklyCandles } from "./candle-aggregation";
+import {
+  COMPLETED_CHART_BACKFILL_COOLDOWN_MS,
+  FAILED_LATEST_CANDLE_SYNC_COOLDOWN_MS,
+} from "./market-data.constants";
 import { replaceCandlesAtomically, upsertCandles, type CandleUpsertInput } from "./market-data.candles";
 import { getInstrumentsBySymbol, refreshLatestInstrumentStats } from "./market-data.instruments";
 import { ensureInstrumentsForSymbols, getOrCreateInstrument } from "./market-data.instrument-sync";
 import { getDateDaysAgo, getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
 import { deleteDashboardSnapshots } from "./dashboard-snapshot-store";
+import {
+  candleBackfillDurationSeconds,
+  candleBackfillsTotal,
+  candlesUpsertedTotal,
+  latestCandleRefreshDurationSeconds,
+  latestCandleRefreshRunsTotal,
+  latestCandleRefreshSymbolsTotal,
+  safeInc,
+} from "../../shared/metrics/metrics";
 
-// Provider-backed candle synchronization/refresh orchestration: full-range
-// backfill, latest-daily-candle sync, full-market price refresh, and the
-// in-flight/cooldown single-flight wrappers getChartCandles calls into.
-// Does not own the freshness decision itself (stays pure in the service) or
-// metric-input/FX/listStocks orchestration - those call into this module.
+// Provider-backed candle sync/refresh orchestration, plus the in-flight/cooldown single-flight wrappers getChartCandles calls into.
 
 async function safeProviderAction<T>(action: string, run: () => Promise<T>): Promise<T | null> {
   try {
@@ -38,17 +47,12 @@ async function safeProviderAction<T>(action: string, run: () => Promise<T>): Pro
       "Market data provider action failed"
     );
 
-    // A 401/403 from the provider means the stored token itself was
-    // rejected (expired/revoked), not just this one request failing - the
-    // connection's "connected" status would otherwise stay stale forever,
-    // since nothing else ever re-checks it after the initial OAuth login.
+    // A 401/403 means the stored token was rejected - mark the connection expired so its status doesn't stay stale forever.
     const details = error instanceof AppError ? (error.details as
       | { provider?: string; status?: number; message?: string }
       | undefined) : undefined;
     if (details?.provider && (details.status === 401 || details.status === 403)) {
-      // Best-effort by design (a failure here shouldn't fail the request
-      // that triggered it) - but silent before, so a broken expiry-marking
-      // path could hide indefinitely. Now at least logged.
+      // Best-effort - a failure here shouldn't fail the request that triggered it, but is still logged.
       void markProviderConnectionExpired(details.provider, details.message).catch(
         (markError: unknown) => {
           logger.warn(
@@ -110,77 +114,89 @@ export async function backfillDailyCandles(
 ) {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
+  const startedAt = Date.now();
 
-  // Checked before touching anything (including instrument creation) - a
-  // disabled/unconfigured provider must be a true no-op here, never a
-  // reason to delete or alter existing stored candles.
-  const adapter = await getEligibleProviderAdapter({
-    exchange,
-    capability: "historical_daily_candles",
-  });
-  if (!adapter) {
-    return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 };
-  }
-
-  const instrument = await getOrCreateInstrument(symbol, exchange, dbClient);
-
-  if (!instrument) {
-    return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 };
-  }
-
-  // Everything that can fail for reasons outside our control (network,
-  // vendor errors, rate limits) happens before we touch existing rows -
-  // deleteCandlesForRefresh only runs once we already have validated
-  // replacement data in hand, inside the transaction below.
-  const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
-  let daily: ProviderDailyCandle[];
   try {
-    daily = await adapter.fetchDailyCandles({
-      accessToken,
-      instrumentToken: instrument.instrumentToken,
+    // A disabled/unconfigured provider must be a true no-op here, never a reason to delete or alter existing stored candles.
+    const adapter = await getEligibleProviderAdapter({
+      exchange,
+      capability: "historical_daily_candles",
+    });
+    if (!adapter) {
+      recordCandleBackfill(exchange, "success", startedAt);
+      return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 };
+    }
+
+    const instrument = await getOrCreateInstrument(symbol, exchange, dbClient);
+
+    if (!instrument) {
+      recordCandleBackfill(exchange, "success", startedAt);
+      return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 };
+    }
+
+    // Everything that can fail (network, vendor, rate limits) happens before existing rows are touched - deleteCandlesForRefresh only runs with validated replacement data in hand.
+    const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
+    let daily: ProviderDailyCandle[];
+    try {
+      daily = await adapter.fetchDailyCandles({
+        accessToken,
+        instrumentToken: instrument.instrumentToken,
+        symbol,
+        from: input.from,
+        to: input.to,
+        exchangeCode: exchange,
+      });
+      void recordProviderSuccess(adapter.providerKey);
+    } catch (error) {
+      void recordProviderFailure(adapter.providerKey, error);
+      throw error;
+    }
+
+    const weekly = aggregateWeeklyCandles(daily);
+    const monthly = aggregateMonthlyCandles(daily);
+
+    await replaceCandlesAtomically(dbClient, {
+      instrumentId: instrument.id,
+      exchange,
       symbol,
       from: input.from,
       to: input.to,
-      exchangeCode: exchange,
+      daily,
+      weekly,
+      monthly,
     });
-    void recordProviderSuccess(adapter.providerKey);
+
+    // A denormalized read-cache refresh - if this fails, candles are still correctly replaced, only instruments.latest* stays stale until next sync.
+    await refreshLatestInstrumentStats(exchange, [symbol], dbClient);
+
+    recordCandleBackfill(exchange, "success", startedAt);
+    safeInc(
+      candlesUpsertedTotal,
+      { exchange, operation: "historical_backfill" },
+      daily.length + weekly.length + monthly.length
+    );
+
+    return {
+      insertedDaily: daily.length,
+      insertedWeekly: weekly.length,
+      insertedMonthly: monthly.length,
+    };
   } catch (error) {
-    void recordProviderFailure(adapter.providerKey, error);
+    recordCandleBackfill(exchange, "failed", startedAt);
     throw error;
   }
-
-  const weekly = aggregateWeeklyCandles(daily);
-  const monthly = aggregateMonthlyCandles(daily);
-
-  await replaceCandlesAtomically(dbClient, {
-    instrumentId: instrument.id,
-    exchange,
-    symbol,
-    from: input.from,
-    to: input.to,
-    daily,
-    weekly,
-    monthly,
-  });
-
-  // A denormalized read-cache refresh, not part of the replacement
-  // invariant above - runs after commit so it reads the now-durable rows.
-  // If this step fails, the candles are still correctly replaced; only the
-  // instruments.latest* cache stays stale until the next sync.
-  await refreshLatestInstrumentStats(exchange, [symbol], dbClient);
-
-  return {
-    insertedDaily: daily.length,
-    insertedWeekly: weekly.length,
-    insertedMonthly: monthly.length,
-  };
 }
 
-// Backfills full price history for the small (~120), explicitly synced set
-// of index instruments on one index exchange (NSE_IDX or BSE_IDX) - a
-// deliberate, bounded admin action, not proactive bulk backfill for the
-// whole market. Reuses backfillDailyCandles unchanged; it's already
-// exchange-generic. Defaults to NSE_IDX to preserve existing callers.
+function recordCandleBackfill(exchange: string, outcome: "success" | "failed" | "deduplicated", startedAt: number) {
+  safeInc(candleBackfillsTotal, { exchange, outcome });
+  try {
+    candleBackfillDurationSeconds.observe({ exchange, outcome }, (Date.now() - startedAt) / 1000);
+  } catch {
+    // Metrics must never break the operation they observe.
+  }
+}
+
+// Backfills the small (~120) explicitly synced index instrument set on one index exchange - a bounded admin action, not whole-market backfill.
 export async function backfillIndexCandles(exchange: string = NSE_INDEX_EXCHANGE) {
   const indexInstruments = await db
     .select({ symbol: instruments.symbol })
@@ -192,8 +208,7 @@ export async function backfillIndexCandles(exchange: string = NSE_INDEX_EXCHANGE
   let backfilled = 0;
   const failedSymbols: string[] = [];
 
-  // One slow/unhistoried index shouldn't sink backfill for the rest -
-  // continue past a per-symbol failure and report it instead of aborting.
+  // One slow/unhistoried index shouldn't sink backfill for the rest - continue past a per-symbol failure and report it instead of aborting.
   for (const row of indexInstruments) {
     try {
       await backfillDailyCandles({ symbol: row.symbol, from, to, exchange });
@@ -275,7 +290,6 @@ async function fetchLatestDailyCandlesFromStoredInstruments(input: {
   return latestCandles;
 }
 
-const FAILED_LATEST_CANDLE_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
 const failedLatestCandleSyncAtBySymbol = new Map<string, number>();
 
 function shouldRetryLatestCandleSync(symbol: string) {
@@ -361,21 +375,13 @@ export async function syncLatestDailyCandlesForSymbols(
 
 const FULL_PRICE_REFRESH_CHUNK_SIZE = 200;
 
-// Mirrors the frontend's own INDEX_EXCHANGE_BY_EQUITY_EXCHANGE
-// (DashboardSegmentContent.tsx) - which virtual index exchange the Index
-// card ranks for a given equity exchange. Only used here to know which
-// "index_exchange" snapshot to invalidate alongside an equity exchange's
-// own collection snapshots; an imprecise/missing mapping is harmless
-// (worst case: one extra or one skipped invalidation, never wrong data).
+// Mirrors the frontend's INDEX_EXCHANGE_BY_EQUITY_EXCHANGE - which index snapshot to invalidate alongside an equity exchange's own; an imprecise mapping is harmless.
 const INDEX_EXCHANGE_BY_EQUITY_EXCHANGE: Record<string, string> = {
   NSE: NSE_INDEX_EXCHANGE,
   BSE: GLOBAL_DATAFEEDS_INDEX_EXCHANGE,
 };
 
-// Clears every persisted Dashboard snapshot whose candle pool could have
-// changed for this exchange - every active collection plus its
-// index-exchange snapshot. Deletes only; the next read recomputes and
-// re-persists on its own.
+// Clears every persisted Dashboard snapshot whose candle pool could have changed - deletes only, the next read recomputes and re-persists on its own.
 async function invalidateDashboardSnapshotsForExchange(exchange: string) {
   const collectionRows = await db
     .select({ id: marketCollections.id })
@@ -390,39 +396,53 @@ async function invalidateDashboardSnapshotsForExchange(exchange: string) {
   }
 }
 
-// Unlike listStocks' lazy per-page hydration (which only ever touches
-// symbols someone happened to request), this walks every active instrument
-// for the exchange so gainers/decliners filtering and displayed prices stay
-// complete table-wide, not just for pages a user has actually visited.
+// Unlike listStocks' lazy per-page hydration, this walks every active instrument for the exchange so gainers/decliners stay complete table-wide.
 export async function refreshAllLatestInstrumentPrices(exchange: string = DEFAULT_EXCHANGE) {
-  const rows = await db
-    .select({ symbol: instruments.symbol })
-    .from(instruments)
-    .where(and(eq(instruments.exchange, exchange), eq(instruments.active, true)));
+  const startedAt = Date.now();
 
-  const symbols = rows.map((row) => row.symbol);
-  let refreshed = 0;
+  try {
+    const rows = await db
+      .select({ symbol: instruments.symbol })
+      .from(instruments)
+      .where(and(eq(instruments.exchange, exchange), eq(instruments.active, true)));
 
-  for (let index = 0; index < symbols.length; index += FULL_PRICE_REFRESH_CHUNK_SIZE) {
-    const chunk = symbols.slice(index, index + FULL_PRICE_REFRESH_CHUNK_SIZE);
-    const result = await safeProviderAction("market-data.full-price-refresh", () =>
-      syncLatestDailyCandlesForSymbols(chunk, exchange)
-    );
-    refreshed += result?.insertedDaily ?? 0;
+    const symbols = rows.map((row) => row.symbol);
+    let refreshed = 0;
+
+    for (let index = 0; index < symbols.length; index += FULL_PRICE_REFRESH_CHUNK_SIZE) {
+      const chunk = symbols.slice(index, index + FULL_PRICE_REFRESH_CHUNK_SIZE);
+      const result = await safeProviderAction("market-data.full-price-refresh", () =>
+        syncLatestDailyCandlesForSymbols(chunk, exchange)
+      );
+      refreshed += result?.insertedDaily ?? 0;
+      safeInc(latestCandleRefreshSymbolsTotal, { exchange, outcome: result ? "success" : "failed" }, chunk.length);
+      if (result) {
+        safeInc(candlesUpsertedTotal, { exchange, operation: "latest_refresh" }, result.insertedDaily);
+      }
+    }
+
+    // Authoritative invalidation trigger for Dashboard snapshots (not a fixed TTL) - only invalidates when a candle actually changed.
+    if (refreshed > 0) {
+      await invalidateDashboardSnapshotsForExchange(exchange);
+    }
+
+    recordLatestCandleRefreshRun(exchange, "success", startedAt);
+    return { symbolCount: symbols.length, refreshed };
+  } catch (error) {
+    recordLatestCandleRefreshRun(exchange, "failed", startedAt);
+    throw error;
   }
-
-  // Authoritative invalidation trigger for the Dashboard's persisted
-  // snapshots (not a fixed TTL) - deletes rather than recomputes inline, so
-  // collections nobody opens between syncs never pay the recompute cost.
-  // Only invalidates when a candle actually changed.
-  if (refreshed > 0) {
-    await invalidateDashboardSnapshotsForExchange(exchange);
-  }
-
-  return { symbolCount: symbols.length, refreshed };
 }
 
-const COMPLETED_CHART_BACKFILL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+function recordLatestCandleRefreshRun(exchange: string, outcome: "success" | "failed", startedAt: number) {
+  safeInc(latestCandleRefreshRunsTotal, { exchange, outcome });
+  try {
+    latestCandleRefreshDurationSeconds.observe({ exchange, outcome }, (Date.now() - startedAt) / 1000);
+  } catch {
+    // Metrics must never break the operation they observe.
+  }
+}
+
 const chartBackfillPromises = new Map<string, Promise<unknown>>();
 const completedChartBackfillAtByKey = new Map<string, number>();
 const latestCandleRefreshPromises = new Map<string, Promise<unknown>>();
@@ -439,11 +459,15 @@ export function runChartBackfillOnce(input: {
     completedAt !== undefined &&
     Date.now() - completedAt < COMPLETED_CHART_BACKFILL_COOLDOWN_MS
   ) {
+    safeInc(candleBackfillsTotal, { exchange: input.exchange, outcome: "deduplicated" });
     return Promise.resolve({ skipped: true });
   }
 
   const existing = chartBackfillPromises.get(key);
-  if (existing) return existing;
+  if (existing) {
+    safeInc(candleBackfillsTotal, { exchange: input.exchange, outcome: "deduplicated" });
+    return existing;
+  }
 
   const promise = backfillDailyCandles(input)
     .then((result) => {
@@ -457,11 +481,7 @@ export function runChartBackfillOnce(input: {
   return promise;
 }
 
-// Concurrent chart requests for the same stale exchange+symbol collapse into
-// one provider call instead of each firing its own - same in-flight-Promise
-// pattern as runChartBackfillOnce above, keyed more loosely (just
-// exchange:symbol, not also a date range) since this always targets "the
-// latest candle", not a specific from/to window.
+// Same in-flight-Promise pattern as runChartBackfillOnce, keyed more loosely (exchange:symbol only) since this always targets the latest candle.
 export function runLatestCandleRefreshOnce(input: { symbol: string; exchange: string }) {
   const key = `${input.exchange}:${input.symbol}`;
   const existing = latestCandleRefreshPromises.get(key);

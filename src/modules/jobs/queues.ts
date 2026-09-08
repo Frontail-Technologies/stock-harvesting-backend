@@ -8,6 +8,19 @@ import {
 import { env } from "../../shared/env";
 import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
+import { registerBullmqJobsCollector } from "../../shared/metrics/metrics";
+
+const BULLMQ_JOB_STATES = ["waiting", "active", "delayed", "failed", "completed"] as const;
+
+registerBullmqJobsCollector(async (gauge) => {
+  const queue = getMarketDataQueue();
+  if (!queue) return;
+
+  const counts = await queue.getJobCounts(...BULLMQ_JOB_STATES);
+  for (const state of BULLMQ_JOB_STATES) {
+    gauge.set({ queue: QUEUE_NAMES.marketData, state }, counts[state] ?? 0);
+  }
+});
 
 const REPEATABLE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
 
@@ -70,6 +83,29 @@ export async function scheduleRepeatableMarketDataSync() {
         "Failed to schedule repeatable market data sync",
       );
     }
+  }
+}
+
+// Best-effort cleanup - the real safety net against a stale job acting on a deleted collection is prepareCollectionData's own no-op check, not this removal.
+export async function removeQueuedCollectionPrepareJobs(collectionIds: string[]) {
+  const queue = getMarketDataQueue();
+  if (!queue || collectionIds.length === 0) return;
+
+  const idsToRemove = new Set(collectionIds);
+  try {
+    const jobs = await queue.getJobs(["waiting", "delayed"]);
+    await Promise.all(
+      jobs
+        .filter(
+          (job) => job.name === JOB_NAMES.collectionPrepare && idsToRemove.has(job.data?.collectionId)
+        )
+        .map((job) => job.remove())
+    );
+  } catch (error) {
+    logger.warn(
+      { collectionIds, message: getErrorMessage(error, "Unknown error") },
+      "Failed to remove queued collection preparation jobs"
+    );
   }
 }
 

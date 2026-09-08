@@ -33,7 +33,7 @@ vi.mock("./market-data.candle-sync", () => ({
 
 vi.mock("./weekly-strong-evaluator", async () => {
   const actual = await vi.importActual<typeof import("./weekly-strong-evaluator")>("./weekly-strong-evaluator");
-  return { ...actual, evaluateWeeklyStrongLatest: vi.fn() };
+  return { ...actual, evaluateWeeklyStrongLatest: vi.fn(), evaluateWeeklyStrongSeries: vi.fn() };
 });
 
 import * as candlesModule from "./market-data.candles";
@@ -54,15 +54,11 @@ const readMetricCandles = vi.mocked(candlesModule.readMetricCandles);
 const safeProviderAction = vi.mocked(candleSyncModule.safeProviderAction);
 const backfillDailyCandles = vi.mocked(candleSyncModule.backfillDailyCandles);
 const evaluateWeeklyStrongLatest = vi.mocked(evaluatorModule.evaluateWeeklyStrongLatest);
+const evaluateWeeklyStrongSeries = vi.mocked(evaluatorModule.evaluateWeeklyStrongSeries);
 
 type FakeCandle = { symbol: string; time: string; open: number; high: number; low: number; close: number; volume: number };
 
-// Generates `count` consecutive daily rows ending TODAY (ascending order,
-// oldest first) - so they fall inside every lookback window under test
-// (readDailyAndWeeklyMetricCandles's own dailyFrom/weeklyFrom filters) and,
-// critically, so the LAST row lands in the current, still-forming week -
-// exactly what's needed to exercise excludeIncompleteTradingWeek for real
-// when the real deriveWeeklyMetricCandlesFromDaily aggregation runs on them.
+// Generates `count` consecutive daily rows ending TODAY (oldest first) so they fall inside every lookback window under test and, critically, the LAST row lands in the current still-forming week - what's needed to exercise excludeIncompleteTradingWeek for real.
 function buildDailyRows(symbol: string, count: number, startClose = 100): FakeCandle[] {
   const today = new Date();
   return Array.from({ length: count }, (_, i) => {
@@ -91,6 +87,8 @@ beforeEach(() => {
     }
   });
   backfillDailyCandles.mockResolvedValue({ insertedDaily: 1, insertedWeekly: 1, insertedMonthly: 1 } as never);
+  // Safe default for tests that don't care about Return specifically - an empty series means findCurrentStreakEntryIndex returns null, so returnPct comes out null rather than crashing on an unconfigured mock.
+  evaluateWeeklyStrongSeries.mockReturnValue([]);
 });
 
 describe("readDailyAndWeeklyMetricCandles", () => {
@@ -147,9 +145,7 @@ describe("readDailyAndWeeklyMetricCandles", () => {
 
     expect(safeProviderAction).not.toHaveBeenCalled();
     expect(result.dailyCandles.length).toBe(20);
-    // Real deriveWeeklyMetricCandlesFromDaily ran - weekly output exists
-    // and is grouped per symbol (proves the real candles.ts helper was
-    // actually invoked, not stubbed).
+    // Real deriveWeeklyMetricCandlesFromDaily ran - weekly output exists and is grouped per symbol (proves the real candles.ts helper was invoked, not stubbed).
     expect(result.weeklyCandles.some((row) => row.symbol === "AAA")).toBe(true);
     expect(result.weeklyCandles.some((row) => row.symbol === "BBB")).toBe(true);
   });
@@ -198,10 +194,7 @@ describe("computeAllRelativeStrengthMetrics orchestration", () => {
 
 describe("computeWeeklyStrongStocks orchestration", () => {
   it("delegates the pass/fail decision to the canonical evaluateWeeklyStrongLatest, not a reimplementation", async () => {
-    // Only one readMetricCandles call happens here: dailyFrom === weeklyFrom
-    // for computeWeeklyStrongStocks, so readDailyAndWeeklyMetricCandles
-    // fetches daily once and derives weekly from it via the real
-    // deriveWeeklyMetricCandlesFromDaily aggregation - not a second fetch.
+    // Only one readMetricCandles call happens here: dailyFrom === weeklyFrom for computeWeeklyStrongStocks, so readDailyAndWeeklyMetricCandles fetches daily once and derives weekly via the real aggregation, not a second fetch.
     const dailyRows = buildDailyRows("PASSSYM", 400);
     readMetricCandles.mockResolvedValueOnce(dailyRows);
     evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
@@ -243,6 +236,51 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     expect(result).toEqual([]);
     expect(evaluateWeeklyStrongLatest).not.toHaveBeenCalled();
   });
+
+  it("Return uses the real current-streak-entry helper, not a reimplementation - entry close to today's close", async () => {
+    const dailyRows = buildDailyRows("RETSYM", 400, 100);
+    readMetricCandles.mockResolvedValueOnce(dailyRows);
+    evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
+
+    // Mirrors computeWeeklyStrongStocks' real (unmocked) weekly derivation plus its incomplete-trailing-week trim, so this fixture's `time` values line up with the weekly rows the function under test actually works with.
+    const weeklyRows = deriveWeeklyMetricCandlesFromDaily(dailyRows, "2000-01-01").slice(0, -1);
+    const entryRow = weeklyRows[weeklyRows.length - 4];
+    const latestClose = dailyRows[dailyRows.length - 1].close;
+
+    evaluateWeeklyStrongSeries.mockReturnValue(
+      weeklyRows.slice(-4).map((row) => ({
+        time: row.time,
+        passes: row.time >= entryRow.time,
+        passesDaily: row.time >= entryRow.time,
+        passesWeekly: row.time >= entryRow.time,
+      }))
+    );
+
+    const result = await computeWeeklyStrongStocks(
+      [{ symbol: "RETSYM", name: "Return Co", exchange: "NSE" }],
+      "NSE"
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].returnPct).toBeCloseTo(((latestClose - entryRow.close) / entryRow.close) * 100);
+  });
+
+  it("Return is null (not 0%) when the series has no currently-open qualifying streak", async () => {
+    const dailyRows = buildDailyRows("NOENTRY", 400);
+    readMetricCandles.mockResolvedValueOnce(dailyRows);
+    evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
+    evaluateWeeklyStrongSeries.mockReturnValue([
+      { time: "2024-01-05", passes: false, passesDaily: false, passesWeekly: false },
+    ]);
+
+    const result = await computeWeeklyStrongStocks(
+      [{ symbol: "NOENTRY", name: "No Entry Co", exchange: "NSE" }],
+      "NSE"
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].returnPct).toBeNull();
+  });
 });
 
 describe("deriveSectorIndustryTaxonomy", () => {
@@ -264,9 +302,7 @@ describe("deriveSectorIndustryTaxonomy", () => {
   }
 
   it("resolves a sector/industry pair that only appears after index 500 in a >500-row pool, without losing or duplicating any other entry", () => {
-    // 500 rows split across two sector/industry pairs (each repeated 250x,
-    // proving de-duplication), then one more row past index 500 introducing
-    // a brand-new pair that a ranked/limited top-N sample would have missed.
+    // 500 rows split across two sector/industry pairs (each repeated 250x, proving de-duplication), plus one more row past index 500 with a brand-new pair a ranked/limited top-N sample would have missed.
     const rows: RelativeStrengthMetricRow[] = [];
     for (let i = 0; i < 500; i++) {
       const isA = i % 2 === 0;
@@ -284,19 +320,16 @@ describe("deriveSectorIndustryTaxonomy", () => {
     expect(lateEntry).toBeDefined();
     expect(lateEntry?.industries).toContain("Late Industry");
 
-    // Nothing lost: exactly the three distinct sectors survive, none merged
-    // or dropped because of array size.
+    // Nothing lost: exactly the three distinct sectors survive, none merged or dropped because of array size.
     expect(taxonomy.map((row) => row.sector).sort()).toEqual(["Late Sector", "Sector A", "Sector B"]);
 
-    // 250 duplicate rows per sector collapse to a single industry entry
-    // each - duplicates are deduplicated, not repeated per occurrence.
+    // 250 duplicate rows per sector collapse to a single industry entry each - duplicates are deduplicated, not repeated per occurrence.
     const sectorA = taxonomy.find((row) => row.sector === "Sector A");
     const sectorB = taxonomy.find((row) => row.sector === "Sector B");
     expect(sectorA?.industries).toEqual(["Industry A1"]);
     expect(sectorB?.industries).toEqual(["Industry B1"]);
 
-    // No proprietary score/ranking field leaks into the taxonomy shape -
-    // every entry is exactly {sector, industries}.
+    // No proprietary score/ranking field leaks into the taxonomy shape - every entry is exactly {sector, industries}.
     for (const entry of taxonomy) {
       expect(Object.keys(entry).sort()).toEqual(["industries", "sector"]);
     }
@@ -324,11 +357,7 @@ describe("getSymbolWeeklyStrongSeriesInput", () => {
   });
 
   it("trims an incomplete trailing week from the weekly series before returning it", async () => {
-    // buildDailyRows' last row is always dated today, so the real
-    // deriveWeeklyMetricCandlesFromDaily aggregation (run internally by
-    // readDailyAndWeeklyMetricCandles) always produces a last weekly
-    // candle for the current, still-forming week - exactly what
-    // excludeIncompleteTradingWeek is supposed to trim.
+    // buildDailyRows' last row is always dated today, so the real weekly aggregation (run internally by readDailyAndWeeklyMetricCandles) always produces a last weekly candle for the current, still-forming week - what excludeIncompleteTradingWeek is supposed to trim.
     const dailyRows = buildDailyRows("TRIMSYM", 400);
     const untrimmedWeekly = deriveWeeklyMetricCandlesFromDaily(dailyRows, dailyRows[0].time);
     readMetricCandles.mockResolvedValueOnce(dailyRows);

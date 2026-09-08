@@ -16,24 +16,18 @@ import {
   evaluateWeeklyStrongLatest,
   evaluateWeeklyStrongSeries,
   excludeIncompleteTradingWeek,
+  findCurrentStreakEntryIndex,
   hasSufficientWeeklyStrongHistory,
   WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS,
 } from "./weekly-strong-evaluator";
 
-// Analytical data preparation/orchestration for Relative Strength and
-// Weekly Strong: fetches/prepares candle series, then composes them with
-// the canonical decision logic in weekly-strong-evaluator.ts - never
-// duplicates or inlines evaluator rules here, only calls them.
+// Analytical data preparation/orchestration for Relative Strength and Weekly Strong: fetches/prepares candle series, then composes them with the canonical decision logic in weekly-strong-evaluator.ts - never duplicates or inlines evaluator rules here, only calls them.
 
 export type { MetricCandle };
 
 const RELATIVE_STRENGTH_SEED_BACKFILL_LIMIT = 20;
 
-// Fetches daily+weekly candles for a symbol pool, and if a collection has
-// never been viewed before (no candles synced for any member yet) triggers a
-// best-effort one-time seed backfill for the first N symbols so the page
-// isn't permanently empty - the same fallback pattern relative-strength
-// metrics already rely on.
+// Fetches daily+weekly candles for a symbol pool, and if a collection has never been viewed before triggers a best-effort one-time seed backfill for the first N symbols so the page isn't permanently empty - the same fallback pattern relative-strength metrics rely on.
 export async function readDailyAndWeeklyMetricCandles(input: {
   exchange: string;
   symbols: string[];
@@ -107,10 +101,7 @@ export async function readDailyAndWeeklyMetricCandles(input: {
   return { dailyCandles, weeklyCandles };
 }
 
-// THE canonical 55-day change calculation - the only formula every
-// relative-strength Dashboard widget ranks by. Compares the latest close
-// to the close 54 trading sessions earlier (actual daily candles, not
-// calendar days, so weekends/holidays don't skew the lookback).
+// THE canonical 55-day change calculation - the only formula every relative-strength Dashboard widget ranks by; compares latest close to the close 54 trading sessions earlier (actual daily candles, not calendar days, so weekends/holidays don't skew it).
 export const CHANGE_55D_LOOKBACK_BARS = 54;
 
 export function calculate55DayChange(dailyRows: MetricCandle[]): number {
@@ -129,9 +120,7 @@ export type RelativeStrengthMetricRow = {
   industry: string | null;
   close: number;
   volume: number;
-  // THE single metric every relative-strength Dashboard widget
-  // (Index/Sector/Industry/Stock) ranks and averages by - see
-  // calculate55DayChange below. No other factor is folded into it.
+  // THE single metric every relative-strength Dashboard widget ranks and averages by - see calculate55DayChange below; no other factor is folded into it.
   change55dPct: number;
 };
 
@@ -143,14 +132,7 @@ export type RelativeStrengthInstrumentInput = {
   industry?: string | null;
 };
 
-// Computes the 55-day change metric for every instrument in the pool with
-// enough history - no top-N slicing (unlike computeRelativeStrengthMetrics
-// below) and no other filtering, since computeGroupRelativeStrength needs
-// every qualifying row to average per sector/industry.
-//
-// The expensive step (candle I/O per member) - exported so
-// dashboard-snapshots.service.ts can call it once per invalidation cycle
-// and persist the result, rather than every read recomputing it.
+// Computes the 55-day change metric for every instrument in the pool with enough history - no top-N slicing (unlike computeRelativeStrengthMetrics below) and no other filtering, since computeGroupRelativeStrength needs every qualifying row. The expensive step (candle I/O per member) - exported so dashboard-snapshots.service.ts can call it once per invalidation cycle and persist the result.
 export async function computeAllRelativeStrengthMetrics(
   instrumentRows: RelativeStrengthInstrumentInput[],
   exchange: string
@@ -158,9 +140,7 @@ export async function computeAllRelativeStrengthMetrics(
   const symbols = instrumentRows.map((row) => row.symbol);
   if (symbols.length === 0) return [];
 
-  // Only daily candles are needed for a 55-session change - no weekly
-  // fetch (weeklyFrom === dailyFrom collapses readDailyAndWeeklyMetricCandles's
-  // internal fetch window to just the last 140 days instead of 5 years).
+  // Only daily candles are needed for a 55-session change - no weekly fetch (weeklyFrom === dailyFrom collapses readDailyAndWeeklyMetricCandles's fetch window to the last 140 days instead of 5 years).
   const dailyFrom = getDateDaysAgo(140);
   const { dailyCandles } = await readDailyAndWeeklyMetricCandles({
     exchange,
@@ -176,11 +156,7 @@ export async function computeAllRelativeStrengthMetrics(
       const latestDaily = dailyRows[dailyRows.length - 1];
       if (!latestDaily) return null;
 
-      // A symbol with only a handful of candles (e.g. just synced
-      // today's close, no real history yet) can't produce a genuine
-      // 55-day reading - calculate55DayChange falls back to 0 when it
-      // doesn't have enough bars, which would otherwise look identical to
-      // a real "flat" score instead of "we don't have enough data yet".
+      // A symbol with only a handful of candles can't produce a genuine 55-day reading - calculate55DayChange falls back to 0 when short on bars, which would otherwise look identical to a real "flat" score instead of "not enough data yet".
       if (dailyRows.length <= 54) return null;
 
       const change55dPct = calculate55DayChange(dailyRows);
@@ -199,9 +175,7 @@ export async function computeAllRelativeStrengthMetrics(
     .filter((row): row is RelativeStrengthMetricRow => Boolean(row));
 }
 
-// All 4 Dashboard cards rank by the same 55-day change %, so this is a
-// single top-N selection. Pure/cheap (no candle I/O) - safe to call on
-// read against a stored snapshot.
+// All 4 Dashboard cards rank by the same 55-day change %, so this is a single top-N selection; pure/cheap (no candle I/O) - safe to call on read against a stored snapshot.
 export function pickTopRelativeStrengthRows(
   rows: RelativeStrengthMetricRow[],
   limit: number
@@ -224,10 +198,7 @@ export type GroupRelativeStrengthRow = {
   memberCount: number;
 };
 
-// "Sector rotation" ranking: ranks sector/industry categories by the mean
-// 55-day change % of their member stocks. A row with no classification for
-// the requested groupBy is silently excluded, never lumped into a
-// misleading "unclassified" group. Pure/cheap (no candle I/O).
+// "Sector rotation" ranking: ranks sector/industry categories by mean 55-day change % of member stocks; a row with no classification for the requested groupBy is silently excluded, never lumped into a misleading "unclassified" group. Pure/cheap (no candle I/O).
 export function groupRelativeStrengthMetrics(
   allMetrics: RelativeStrengthMetricRow[],
   groupBy: "sector" | "industry",
@@ -270,12 +241,7 @@ export type SectorIndustryTaxonomyRow = {
   industries: string[];
 };
 
-// Full sector -> industries membership taxonomy, no ranking/scoring and no
-// top-N slicing - every classified stock in the pool contributes, so a
-// sector/industry with no strong movers still resolves correctly. Rows
-// missing either classification are excluded, same convention as
-// groupRelativeStrengthMetrics above. Pure/cheap (no candle I/O) - the
-// caller already has allMetrics from a cached base computation.
+// Full sector -> industries membership taxonomy, no ranking/scoring/top-N - every classified stock contributes so a sector/industry with no strong movers still resolves correctly; rows missing either classification are excluded, same convention as groupRelativeStrengthMetrics above. Pure/cheap - caller already has allMetrics from a cached base computation.
 export function deriveSectorIndustryTaxonomy(
   allMetrics: RelativeStrengthMetricRow[]
 ): SectorIndustryTaxonomyRow[] {
@@ -293,10 +259,7 @@ export function deriveSectorIndustryTaxonomy(
     .sort((a, b) => a.sector.localeCompare(b.sector));
 }
 
-// The Weekly Strong breakout screen. Unlike the relative-strength metrics
-// above (which rank everything), this filters down to only the stocks
-// that pass the qualification rule. See weekly-strong-evaluator.ts for the
-// actual decision logic and constants - not restated here.
+// The Weekly Strong breakout screen. Unlike the relative-strength metrics above (which rank everything), this filters down to only the stocks that pass the qualification rule - see weekly-strong-evaluator.ts for the actual decision logic and constants, not restated here.
 
 export type WeeklyStrongStockRow = {
   symbol: string;
@@ -304,6 +267,8 @@ export type WeeklyStrongStockRow = {
   exchange: string;
   close: number;
   changePct: number;
+  // Performance from when this stock's *current* qualifying streak began (same entry concept computeSymbolBreakoutBacktest uses for a closed trade, here for a still-open streak) through today's latest close - not the same as changePct (yesterday-to-today); null when no reference point exists rather than a misleading 0%.
+  returnPct: number | null;
   volume: number;
   sector: string | null;
   industry: string | null;
@@ -335,11 +300,7 @@ export async function computeWeeklyStrongStocks(
 
   for (const instrument of instrumentRows) {
     const dailyRows = dailyCandlesBySymbol.get(instrument.symbol) ?? [];
-    // Drops a trailing in-progress week before it can ever be evaluated as
-    // "the latest completed week" - see excludeIncompleteTradingWeek. Only
-    // the weekly leg needs this: a synced daily candle is complete the
-    // moment it exists, but a weekly bucket keeps accumulating until its
-    // own week ends.
+    // Drops a trailing in-progress week before it can ever be evaluated as "the latest completed week" - see excludeIncompleteTradingWeek. Only the weekly leg needs this: a daily candle is complete the moment it's synced, but a weekly bucket keeps accumulating until its week ends.
     const weeklyRows = excludeIncompleteTradingWeek(
       weeklyCandlesBySymbol.get(instrument.symbol) ?? [],
       exchange
@@ -348,10 +309,7 @@ export async function computeWeeklyStrongStocks(
     const latestWeekly = weeklyRows[weeklyRows.length - 1];
     if (!latestDaily || !latestWeekly) continue;
 
-    // A near-empty window (e.g. just today's candle, no real history) has
-    // its own "high" equal to roughly its own close, which trivially
-    // passes a "near the high" check - that's a data gap, not a real
-    // breakout. Skip symbols without a reasonably substantial sample.
+    // A near-empty window has its own "high" roughly equal to its own close, which trivially passes a "near the high" check - that's a data gap, not a real breakout, so skip symbols without a reasonably substantial sample.
     if (!hasSufficientWeeklyStrongHistory(dailyRows.length, weeklyRows.length)) continue;
 
     const decision = evaluateWeeklyStrongLatest(
@@ -366,12 +324,25 @@ export async function computeWeeklyStrongStocks(
         ? ((latestDaily.close - previousDaily.close) * 100) / previousDaily.close
         : 0;
 
+    // Return: entry close (start of the still-open qualifying streak) through today's latest close. Reuses the same series evaluator the decision above already ran a "latest" version of - no new reference point invented, no extra candle fetch.
+    const series = evaluateWeeklyStrongSeries(dailyRows, weeklyRows);
+    const entryIndex = findCurrentStreakEntryIndex(series);
+    let returnPct: number | null = null;
+    if (entryIndex !== null) {
+      const entryTime = series[entryIndex].time;
+      const entryClose = weeklyRows.find((row) => row.time === entryTime)?.close;
+      if (entryClose !== undefined && entryClose > 0) {
+        returnPct = ((latestDaily.close - entryClose) / entryClose) * 100;
+      }
+    }
+
     rows.push({
       symbol: instrument.symbol,
       name: instrument.name,
       exchange: instrument.exchange,
       close: latestDaily.close,
       changePct,
+      returnPct,
       volume: latestDaily.volume,
       sector: instrument.sector ?? null,
       industry: instrument.industry ?? null,
@@ -381,13 +352,10 @@ export async function computeWeeklyStrongStocks(
   return rows.sort((a, b) => b.changePct - a.changePct);
 }
 
-// Re-runs the weekly-strong breakout check at every historical week
-// (instead of just today) and counts how many pool members passed at each
-// point - powers the persisted backtest backfill.
+// Re-runs the weekly-strong breakout check at every historical week (instead of just today) and counts how many pool members passed at each point - powers the persisted backtest backfill.
 export const WEEKLY_STRONG_BACKTEST_DEFAULT_WEEKS = 250;
-// 10 years comfortably covers both the oldest backtest week's own trailing
-// evaluator lookback and the backtest range itself.
-const WEEKLY_STRONG_BACKTEST_FETCH_YEARS = 10;
+// 10 years comfortably covers both the oldest backtest week's trailing evaluator lookback and the backtest range itself; exported so collection preparation requests this same fetch window rather than a second, possibly-diverging constant - a fetch window only, never an availability threshold (see hasSufficientWeeklyStrongHistory for that).
+export const WEEKLY_STRONG_BACKTEST_FETCH_YEARS = 10;
 
 export type WeeklyStrongBacktestMemberRow = {
   symbol: string;
@@ -402,9 +370,7 @@ export type WeeklyStrongBacktestWeekMembers = {
   passing: WeeklyStrongBacktestMemberRow[];
 };
 
-// Fetches each pool member's full history once, then runs the evaluator's
-// full-series pass per instrument, instead of fetching per week evaluated.
-// The backfill job persists this output; nothing recomputes it on read.
+// Fetches each pool member's full history once, then runs the evaluator's full-series pass per instrument, instead of fetching per week evaluated; the backfill job persists this output, nothing recomputes it on read.
 export async function computeWeeklyStrongBacktestMembers(
   instrumentRows: Array<{
     symbol: string;
@@ -433,23 +399,15 @@ export async function computeWeeklyStrongBacktestMembers(
 
   for (const instrument of instrumentRows) {
     const dailyRows = dailyCandlesBySymbol.get(instrument.symbol) ?? [];
-    // Same completed-week trim as computeWeeklyStrongStocks - persisted
-    // history must never include today's still-forming week.
+    // Same completed-week trim as computeWeeklyStrongStocks - persisted history must never include today's still-forming week.
     const weeklyRows = excludeIncompleteTradingWeek(
       weeklyCandlesBySymbol.get(instrument.symbol) ?? [],
       exchange
     );
-    // Same data-gap guard as computeWeeklyStrongStocks: a symbol with
-    // barely any history can't produce a meaningful "near its own close high"
-    // reading at any point in the backtest either.
+    // Same data-gap guard as computeWeeklyStrongStocks: a symbol with barely any history can't produce a meaningful "near its own close high" reading at any point in the backtest either.
     if (!hasSufficientWeeklyStrongHistory(dailyRows.length, weeklyRows.length)) continue;
 
-    // Evaluated over this symbol's full available series (not pre-sliced
-    // to the last `weeks`) - the trailing-window max at any index only
-    // ever looks backward, so slicing the OUTPUT to the last `weeks` below
-    // is equivalent to (and simpler/safer than) starting the walk
-    // partway through, just with a few extra early-history decisions
-    // computed and discarded.
+    // Evaluated over this symbol's full available series (not pre-sliced to the last `weeks`) - the trailing-window max at any index only looks backward, so slicing the OUTPUT below is equivalent to (and simpler/safer than) starting the walk partway through.
     const seriesPoints = evaluateWeeklyStrongSeries(dailyRows, weeklyRows);
 
     for (const point of seriesPoints.slice(-weeks)) {
@@ -492,10 +450,7 @@ export type SymbolWeeklyStrongSeriesInput = {
   weeklyRows: MetricCandle[];
 };
 
-// Shared fetch+gate step for any per-symbol Weekly Strong evaluation - the
-// Scanner's live scan and this file's own backtest both need the same
-// daily+weekly series, completed-week trim, and minimum-history gate, so
-// they can't silently diverge on what data they evaluate.
+// Shared fetch+gate step for any per-symbol Weekly Strong evaluation - the Scanner's live scan and this file's own backtest both need the same daily+weekly series, completed-week trim, and minimum-history gate, so they can't silently diverge.
 export async function getSymbolWeeklyStrongSeriesInput(
   symbol: string,
   exchange: string
@@ -509,9 +464,7 @@ export async function getSymbolWeeklyStrongSeriesInput(
   });
 
   const dailyRows = groupMetricCandlesBySymbol(dailyCandles).get(normalizedSymbol) ?? [];
-  // Same completed-week trim used everywhere else in the Weekly Strong
-  // pipeline - the series must stop at the latest COMPLETED week, never
-  // include today's still-forming week, live or historical.
+  // Same completed-week trim used everywhere else in the Weekly Strong pipeline - the series must stop at the latest COMPLETED week, never today's still-forming week, live or historical.
   const weeklyRows = excludeIncompleteTradingWeek(
     groupMetricCandlesBySymbol(weeklyCandles).get(normalizedSymbol) ?? [],
     exchange
@@ -524,9 +477,7 @@ export async function getSymbolWeeklyStrongSeriesInput(
   return { dailyRows, weeklyRows };
 }
 
-// Trade-by-trade backtest of the same two-condition breakout rule as
-// computeWeeklyStrongStocks, for one symbol over its full available
-// history - powers the Scanner's backtest stats overlay.
+// Trade-by-trade backtest of the same two-condition breakout rule as computeWeeklyStrongStocks, for one symbol over its full available history - powers the Scanner's backtest stats overlay.
 export async function computeSymbolBreakoutBacktest(
   symbol: string,
   exchange: string,
@@ -536,15 +487,13 @@ export async function computeSymbolBreakoutBacktest(
   if (!seriesInput) return null;
   const { dailyRows, weeklyRows } = seriesInput;
 
-  // lookbackWeeks is caller-chosen (Scanner's lookback multiplier), kept
-  // separate from the fixed-window Weekly Strong screen elsewhere.
+  // lookbackWeeks is caller-chosen (Scanner's lookback multiplier), kept separate from the fixed-window Weekly Strong screen elsewhere.
   const { dailyLookbackBars, weeklyLookbackBars } = deriveScannerLookbackBars(lookbackWeeks);
   const seriesPoints = evaluateWeeklyStrongSeries(dailyRows, weeklyRows, {
     dailyLookbackBars,
     weeklyLookbackBars,
   });
-  // Re-aligned to weeklyRows by time - the evaluator can skip a leading
-  // stretch of weeks with no daily data yet; those default to `false`.
+  // Re-aligned to weeklyRows by time - the evaluator can skip a leading stretch of weeks with no daily data yet; those default to `false`.
   const passesByTime = new Map(seriesPoints.map((point) => [point.time, point.passes]));
   const matched: boolean[] = weeklyRows.map((row) => passesByTime.get(row.time) ?? false);
 

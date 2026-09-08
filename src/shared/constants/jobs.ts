@@ -7,6 +7,7 @@ export const JOB_NAMES = {
   priceRefresh: "price-refresh",
   weeklyStrongBacktestBackfill: "weekly-strong-backtest-backfill",
   weeklyStrongBacktestHistoricalRebuild: "weekly-strong-backtest-historical-rebuild",
+  collectionPrepare: "collection-prepare",
 } as const;
 
 export const SYNC_JOB_TYPES = {
