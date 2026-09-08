@@ -25,8 +25,7 @@ export const adminUsersQuerySchema = z
   })
   .strict();
 
-// Same filters as adminUsersQuerySchema minus page/limit — export always
-// returns every user matching the current filters, not one page of them.
+// Same filters as adminUsersQuerySchema minus page/limit — export returns every matching user, not one page.
 export const adminUsersExportQuerySchema = z
   .object({
     q: z.string().trim().max(160).optional(),
@@ -49,8 +48,7 @@ export const providerSyncBodySchema = z
   })
   .strict();
 
-// Same closed whitelist as indexRelativeStrengthQuerySchema — only ever a
-// handful of real index exchanges, worth rejecting anything else up front.
+// Same closed whitelist as indexRelativeStrengthQuerySchema — only a handful of real index exchanges, so reject anything else up front.
 export const indexCandleBackfillBodySchema = z
   .object({
     exchange: z.enum([NSE_INDEX_EXCHANGE, GLOBAL_DATAFEEDS_INDEX_EXCHANGE]).default(NSE_INDEX_EXCHANGE),
@@ -128,9 +126,7 @@ export const updateCollectionBodySchema = z
   })
   .strict();
 
-// Dry-run preview only diffs symbols against current membership - it never
-// creates a version, so effectiveFrom isn't needed here (a dry-run must
-// never create a version).
+// Dry-run preview only diffs symbols against current membership and never creates a version, so effectiveFrom isn't needed here.
 export const importCollectionCsvBodySchema = z
   .object({
     csvContent: z.string().min(1).max(2_000_000),
@@ -139,12 +135,17 @@ export const importCollectionCsvBodySchema = z
   })
   .strict();
 
-// Confirming an import additionally requires the date this constituent
-// snapshot becomes authoritative for historical membership resolution -
-// required here, unlike the dry-run schema above.
+// Confirming an import additionally requires the date this snapshot becomes authoritative for historical membership resolution, unlike the dry-run schema above.
 export const confirmCollectionImportBodySchema = importCollectionCsvBodySchema.extend({
   effectiveFrom: z.string().date(),
 });
+
+// Deduplicated server-side by the service - a duplicate id in the array is never trusted as a distinct row.
+export const bulkDeleteCollectionsBodySchema = z
+  .object({
+    collectionIds: z.array(z.string().uuid()).min(1).max(100),
+  })
+  .strict();
 
 export const collectionVersionIdParamsSchema = z
   .object({
@@ -152,6 +153,21 @@ export const collectionVersionIdParamsSchema = z
     versionId: z.string().uuid(),
   })
   .strict();
+
+// Bulk import is BSE-only in v1 - exchange is a hardcoded literal never trusted from the client; name/code are derived server-side from `filename` via normalizeBseCollectionFilename.
+export const bulkImportPreviewBodySchema = z
+  .object({
+    exchange: z.literal("BSE"),
+    filename: z.string().trim().min(1).max(255),
+    csvContent: z.string().min(1).max(2_000_000),
+  })
+  .strict();
+
+export const bulkImportFileBodySchema = bulkImportPreviewBodySchema.extend({
+  sourceName: z.string().trim().max(160).optional(),
+  sourceDate: z.string().date().optional(),
+  effectiveFrom: z.string().date(),
+});
 
 export const replaceCollectionVersionBodySchema = z
   .object({
@@ -165,8 +181,7 @@ export const dataProviderKeyParamsSchema = z
   })
   .strict();
 
-// Empty string clears a previously-set disable reason, matching the
-// monetization module's own empty-string-means-clear convention.
+// Empty string clears a previously-set disable reason, matching the monetization module's empty-string-means-clear convention.
 export const updateDataProviderSettingsBodySchema = z
   .object({
     enabled: z.boolean().optional(),

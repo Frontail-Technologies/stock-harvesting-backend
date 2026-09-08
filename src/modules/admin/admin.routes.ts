@@ -14,7 +14,9 @@ import {
   type UserPlan,
   type UserRole,
 } from "../../shared/constants";
+import { getErrorMessage } from "../../shared/errors";
 import { sendAccepted, sendData } from "../../shared/http";
+import { logger } from "../../shared/logger";
 import {
   asyncHandler,
   getAuthUserId,
@@ -27,6 +29,9 @@ import {
   adminUsersQuerySchema,
   backfillCandlesBodySchema,
   brandingBodySchema,
+  bulkDeleteCollectionsBodySchema,
+  bulkImportFileBodySchema,
+  bulkImportPreviewBodySchema,
   collectionIdParamsSchema,
   collectionVersionIdParamsSchema,
   confirmCollectionImportBodySchema,
@@ -70,12 +75,19 @@ import {
   updateUserPlan,
   updateUserRole,
 } from "./admin.service";
+import { triggerCollectionPreparation } from "../market-collections/market-collection-preparation.service";
+import {
+  bulkDeleteMarketCollections,
+  deleteMarketCollection,
+} from "../market-collections/market-collection-deletion.service";
 import {
   createCollection,
   getCollection,
   getCollectionMembersById,
+  importBulkFile,
   importCollectionCsv,
   listCollections,
+  previewBulkImportFile,
   previewCollectionImport,
   updateCollection,
 } from "../market-collections/market-collections.service";
@@ -431,6 +443,29 @@ adminRouter.patch(
   })
 );
 
+adminRouter.delete(
+  "/market-collections/:id",
+  validate({ params: collectionIdParamsSchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { id: string };
+    const result = await deleteMarketCollection({ id: params.id, actorUserId: getAuthUserId(req) });
+    sendData(res, result);
+  })
+);
+
+adminRouter.post(
+  "/market-collections/bulk-delete",
+  validate({ body: bulkDeleteCollectionsBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { collectionIds: string[] };
+    const result = await bulkDeleteMarketCollections({
+      ids: body.collectionIds,
+      actorUserId: getAuthUserId(req),
+    });
+    sendData(res, result);
+  })
+);
+
 adminRouter.post(
   "/market-collections/:id/import/dry-run",
   validate({ params: collectionIdParamsSchema, body: importCollectionCsvBodySchema }),
@@ -458,7 +493,63 @@ adminRouter.post(
       actorUserId: getAuthUserId(req),
       ...body,
     });
+    void triggerCollectionPreparation(params.id, report.versionId).catch((error: unknown) => {
+      logger.error(
+        { collectionId: params.id, message: getErrorMessage(error, "Unknown error") },
+        "Failed to trigger collection preparation"
+      );
+    });
     sendData(res, { report });
+  })
+);
+
+adminRouter.post(
+  "/market-collections/bulk-import/preview",
+  validate({ body: bulkImportPreviewBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { exchange: "BSE"; filename: string; csvContent: string };
+    sendData(res, await previewBulkImportFile(body));
+  })
+);
+
+adminRouter.post(
+  "/market-collections/bulk-import",
+  validate({ body: bulkImportFileBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      exchange: "BSE";
+      filename: string;
+      csvContent: string;
+      sourceName?: string;
+      sourceDate?: string;
+      effectiveFrom: string;
+    };
+    const report = await importBulkFile({ ...body, actorUserId: getAuthUserId(req) });
+    void triggerCollectionPreparation(report.collectionId, report.versionId).catch((error: unknown) => {
+      logger.error(
+        { collectionId: report.collectionId, message: getErrorMessage(error, "Unknown error") },
+        "Failed to trigger collection preparation"
+      );
+    });
+    sendData(res, { report });
+  })
+);
+
+adminRouter.post(
+  "/market-collections/:id/prepare",
+  validate({ params: collectionIdParamsSchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { id: string };
+    const collection = await getCollection(params.id);
+    void triggerCollectionPreparation(params.id, collection.latestMembershipVersionId).catch(
+      (error: unknown) => {
+        logger.error(
+          { collectionId: params.id, message: getErrorMessage(error, "Unknown error") },
+          "Failed to trigger collection preparation retry"
+        );
+      }
+    );
+    sendAccepted(res, { collectionId: params.id });
   })
 );
 
