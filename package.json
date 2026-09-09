@@ -15,6 +15,7 @@
     "provider:test:global-datafeeds": "tsx src/modules/data-provider/adapters/global-datafeeds/global-datafeeds.diagnostics.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:seed:admin": "tsx src/scripts/seed-admin.ts",
     "candles:bootstrap:bse": "tsx src/scripts/bootstrap-bse-candles.ts"
   },
   "dependencies": {
