@@ -5,6 +5,7 @@ vi.mock("../modules/market-data/market-data.candle-sync", () => ({ backfillDaily
 import * as candleSyncModule from "../modules/market-data/market-data.candle-sync";
 import {
   DEFAULT_CONCURRENCY,
+  isBseEquitySegment,
   MAX_CONCURRENCY,
   parseArgs,
   processQueue,
@@ -17,6 +18,41 @@ import {
 } from "./bootstrap-bse-candles";
 
 const backfillDailyCandles = vi.mocked(candleSyncModule.backfillDailyCandles);
+
+describe("isBseEquitySegment", () => {
+  it("includes a normal Group A/B equity segment", () => {
+    expect(isBseEquitySegment("A")).toBe(true);
+    expect(isBseEquitySegment("B")).toBe(true);
+  });
+
+  it("includes SME segments", () => {
+    expect(isBseEquitySegment("M")).toBe(true);
+    expect(isBseEquitySegment("MT")).toBe(true);
+    expect(isBseEquitySegment("MS")).toBe(true);
+  });
+
+  it("includes T/TS/Z/ZP/X/XT/NS/NT/P equity sub-segments", () => {
+    for (const segment of ["T", "TS", "Z", "ZP", "X", "XT", "NS", "NT", "P"]) {
+      expect(isBseEquitySegment(segment)).toBe(true);
+    }
+  });
+
+  it("excludes the debt/fixed-income segment", () => {
+    expect(isBseEquitySegment("F")).toBe(false);
+  });
+
+  it("excludes InvIT/REIT trust units", () => {
+    expect(isBseEquitySegment("IF")).toBe(false);
+  });
+
+  it("excludes rights entitlements", () => {
+    expect(isBseEquitySegment("R")).toBe(false);
+  });
+
+  it("excludes an unclassified (null) segment rather than assuming it's equity", () => {
+    expect(isBseEquitySegment(null)).toBe(false);
+  });
+});
 
 describe("parseArgs", () => {
   it("parses --key=value pairs and boolean flags", () => {

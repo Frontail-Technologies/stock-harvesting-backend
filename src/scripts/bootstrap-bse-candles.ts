@@ -11,6 +11,7 @@ import { getDefaultChartHistoryFromDate, getTodayDate } from "../modules/market-
 export const EXCHANGE = "BSE";
 export const DEFAULT_CONCURRENCY = 4;
 export const MAX_CONCURRENCY = 10;
+export const NON_EQUITY_BSE_SEGMENTS = ["F", "IF", "R"] as const;
 const AGGREGATE_PROGRESS_INTERVAL_MS = 30_000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -25,6 +26,10 @@ export type InstrumentResult = {
 };
 
 export type QueueItem = { symbol: string; needsBackfill: boolean };
+
+export function isBseEquitySegment(segment: string | null): boolean {
+  return Boolean(segment) && !(NON_EQUITY_BSE_SEGMENTS as readonly string[]).includes(segment as string);
+}
 
 export function parseArgs(argv: string[]): Record<string, string | boolean> {
   const args: Record<string, string | boolean> = {};
@@ -170,10 +175,11 @@ async function main() {
 
   console.log(`Bootstrap range: ${from} to ${to}, concurrency=${concurrency}, force=${force}`);
 
-  const allInstruments = await db
-    .select({ symbol: instruments.symbol })
+  const activeInstruments = await db
+    .select({ symbol: instruments.symbol, segment: instruments.segment })
     .from(instruments)
     .where(and(eq(instruments.exchange, EXCHANGE), eq(instruments.active, true)));
+  const allInstruments = activeInstruments.filter((row) => isBseEquitySegment(row.segment));
   console.log(`BSE instruments discovered: ${allInstruments.length}`);
 
   let selected = allInstruments;
