@@ -12,6 +12,10 @@ export const EXCHANGE = "BSE";
 export const DEFAULT_CONCURRENCY = 4;
 export const MAX_CONCURRENCY = 10;
 export const NON_EQUITY_BSE_SEGMENTS = ["F", "IF", "R"] as const;
+// Matches COLLECTION_MEMBER_WRITE_CHUNK_SIZE's own reasoning elsewhere in the
+// codebase: comfortably under Postgres's 65,535-param protocol limit while
+// keeping each coverage query's IN(...) list a manageable, boundable size.
+export const COVERAGE_BATCH_SIZE = 500;
 const AGGREGATE_PROGRESS_INTERVAL_MS = 30_000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -63,6 +67,35 @@ export function resolveLimit(raw: unknown): number | undefined {
   if (typeof raw !== "string") return undefined;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+// Splits a potentially huge symbol list into bounded IN(...) queries against
+// the existing canonical findSymbolsNeedingHistoryBackfill, then unions the
+// missing-symbol results. This does NOT change that function's own behavior
+// or its other caller (market-collection-preparation.service.ts) - batching
+// is purely a script-local wrapper. Batches run sequentially: this happens
+// once at startup before any provider work begins, so a few seconds of
+// sequential indexed queries is acceptable, and it avoids risking DB pool
+// exhaustion from many large concurrent IN-queries. Any batch's rejection
+// propagates immediately and is NOT swallowed - callers must fail closed
+// rather than treat a coverage-query failure as "nothing missing" or
+// "everything missing".
+export async function findMissingSymbolsInBatches(input: {
+  exchange: string;
+  symbols: string[];
+  requiredFromDate: string;
+}): Promise<string[]> {
+  const missing: string[] = [];
+  for (let start = 0; start < input.symbols.length; start += COVERAGE_BATCH_SIZE) {
+    const batch = input.symbols.slice(start, start + COVERAGE_BATCH_SIZE);
+    const batchMissing = await findSymbolsNeedingHistoryBackfill({
+      exchange: input.exchange,
+      symbols: batch,
+      requiredFromDate: input.requiredFromDate,
+    });
+    missing.push(...batchMissing);
+  }
+  return missing;
 }
 
 export async function runWithConcurrency<T>(
@@ -187,15 +220,26 @@ async function main() {
   if (typeof limit === "number") selected = selected.slice(0, limit);
   console.log(`Selected for processing: ${selected.length}`);
 
-  const needingBackfill = force
-    ? new Set(selected.map((row) => row.symbol))
-    : new Set(
-        await findSymbolsNeedingHistoryBackfill({
-          exchange: EXCHANGE,
-          symbols: selected.map((row) => row.symbol),
-          requiredFromDate: from,
-        })
-      );
+  let needingBackfill: Set<string>;
+  if (force) {
+    needingBackfill = new Set(selected.map((row) => row.symbol));
+  } else {
+    try {
+      const missing = await findMissingSymbolsInBatches({
+        exchange: EXCHANGE,
+        symbols: selected.map((row) => row.symbol),
+        requiredFromDate: from,
+      });
+      needingBackfill = new Set(missing);
+    } catch (error) {
+      console.error("\nCoverage detection failed - aborting before any provider processing.");
+      console.error(`Reason: ${getErrorMessage(error, "Unknown error")}`);
+      console.error("Refusing to assume all symbols need backfill. Rerun the command to retry coverage detection,");
+      console.error("or pass --force to intentionally bypass coverage detection and reprocess every selected symbol.");
+      process.exit(1);
+      return;
+    }
+  }
 
   const queue: QueueItem[] = selected.map((row) => ({
     symbol: row.symbol,
