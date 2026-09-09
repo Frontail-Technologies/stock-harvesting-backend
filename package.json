@@ -14,7 +14,8 @@
     "provider:test:eodhd": "tsx src/modules/data-provider/adapters/eodhd-provider-diagnostics.ts",
     "provider:test:global-datafeeds": "tsx src/modules/data-provider/adapters/global-datafeeds/global-datafeeds.diagnostics.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "candles:bootstrap:bse": "tsx src/scripts/bootstrap-bse-candles.ts"
   },
   "dependencies": {
     "@types/web-push": "^3.6.4",
