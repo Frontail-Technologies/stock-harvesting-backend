@@ -2,20 +2,28 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "../db/client";
 import { instruments } from "../db/schema";
+import { CANDLE_TIMEFRAME, type CandleBootstrapStatus } from "../shared/constants";
 import { getErrorMessage } from "../shared/errors";
 import { normalizeSymbol } from "../shared/normalize";
 import { backfillDailyCandles } from "../modules/market-data/market-data.candle-sync";
-import { findSymbolsNeedingHistoryBackfill } from "../modules/market-data/market-data.candles";
+import {
+  isCandleBootstrapCheckpointSatisfied,
+  readCandleBootstrapCheckpointsInBatches,
+  upsertCandleBootstrapCheckpoint,
+} from "../modules/market-data/market-data.candle-bootstrap-checkpoints";
 import { getDefaultChartHistoryFromDate, getTodayDate } from "../modules/market-data/market-data.dates";
 
 export const EXCHANGE = "BSE";
 export const DEFAULT_CONCURRENCY = 4;
 export const MAX_CONCURRENCY = 10;
 export const NON_EQUITY_BSE_SEGMENTS = ["F", "IF", "R"] as const;
-// Matches COLLECTION_MEMBER_WRITE_CHUNK_SIZE's own reasoning elsewhere in the
-// codebase: comfortably under Postgres's 65,535-param protocol limit while
-// keeping each coverage query's IN(...) list a manageable, boundable size.
-export const COVERAGE_BATCH_SIZE = 500;
+// Identifies this specific bootstrap operation in candle_bootstrap_checkpoints,
+// distinct from any other future bootstrap kind/exchange. Bump BOOTSTRAP_VERSION
+// (never reuse a version number) whenever the bootstrap's semantics change in a
+// way that must invalidate previously-"success" checkpoints - e.g. a materially
+// earlier requested-from date, or a change to what "complete" means here.
+export const BOOTSTRAP_KIND = "bse_historical_daily";
+export const BOOTSTRAP_VERSION = 1;
 const AGGREGATE_PROGRESS_INTERVAL_MS = 30_000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -69,33 +77,88 @@ export function resolveLimit(raw: unknown): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
-// Splits a potentially huge symbol list into bounded IN(...) queries against
-// the existing canonical findSymbolsNeedingHistoryBackfill, then unions the
-// missing-symbol results. This does NOT change that function's own behavior
-// or its other caller (market-collection-preparation.service.ts) - batching
-// is purely a script-local wrapper. Batches run sequentially: this happens
-// once at startup before any provider work begins, so a few seconds of
-// sequential indexed queries is acceptable, and it avoids risking DB pool
-// exhaustion from many large concurrent IN-queries. Any batch's rejection
-// propagates immediately and is NOT swallowed - callers must fail closed
-// rather than treat a coverage-query failure as "nothing missing" or
-// "everything missing".
-export async function findMissingSymbolsInBatches(input: {
+// Decides which selected symbols actually need a provider fetch this run.
+// Coverage is resolved from candle_bootstrap_checkpoints (a small,
+// dedicated table), never from candles.MIN(time) - an instrument's earliest
+// stored candle reflects when it listed, not whether a bootstrap already
+// completed for it, so it cannot answer "does this still need backfill"
+// (see the module's own comment for why). --force bypasses the checkpoint
+// read entirely, matching the flag's contract of intentionally reprocessing
+// everything. Any checkpoint-read failure propagates to the caller - see
+// main()'s fail-closed handling, which aborts before any provider call
+// rather than treat a lookup failure as "nothing/everything needs backfill".
+export async function resolveBootstrapQueue(input: {
   exchange: string;
   symbols: string[];
   requiredFromDate: string;
-}): Promise<string[]> {
-  const missing: string[] = [];
-  for (let start = 0; start < input.symbols.length; start += COVERAGE_BATCH_SIZE) {
-    const batch = input.symbols.slice(start, start + COVERAGE_BATCH_SIZE);
-    const batchMissing = await findSymbolsNeedingHistoryBackfill({
-      exchange: input.exchange,
-      symbols: batch,
-      requiredFromDate: input.requiredFromDate,
-    });
-    missing.push(...batchMissing);
+  bootstrapVersion: number;
+  kind: string;
+  force: boolean;
+}): Promise<QueueItem[]> {
+  if (input.force) {
+    return input.symbols.map((symbol) => ({ symbol, needsBackfill: true }));
   }
-  return missing;
+
+  const checkpoints = await readCandleBootstrapCheckpointsInBatches({
+    exchange: input.exchange,
+    symbols: input.symbols,
+    timeframe: CANDLE_TIMEFRAME.day,
+    kind: input.kind,
+  });
+
+  return input.symbols.map((symbol) => {
+    const satisfied = isCandleBootstrapCheckpointSatisfied(checkpoints.get(symbol), {
+      bootstrapVersion: input.bootstrapVersion,
+      requestedFrom: input.requiredFromDate,
+    });
+    return { symbol, needsBackfill: !satisfied };
+  });
+}
+
+// Persists each processed instrument's outcome as its new checkpoint so a
+// future run can resume correctly. Deliberately never touches "skipped"
+// results - a skip means an existing checkpoint already satisfied the
+// request, and it's left exactly as it was. A single checkpoint write
+// failure is logged and does not throw: the candle data for that symbol was
+// already durably persisted by processQueue before this runs, and a missing
+// checkpoint only ever costs a redundant (safe, idempotent) reprocessing on
+// the next run - it must never roll back or block on real work that already
+// succeeded.
+export async function recordBootstrapCheckpoints(
+  results: InstrumentResult[],
+  context: {
+    exchange: string;
+    kind: string;
+    bootstrapVersion: number;
+    requestedFrom: string;
+    requestedTo: string;
+  }
+): Promise<void> {
+  for (const result of results) {
+    if (result.outcome === "skipped") continue;
+
+    const status: CandleBootstrapStatus =
+      result.outcome === "success" ? "success" : result.outcome === "partial" ? "partial" : "failed";
+
+    try {
+      await upsertCandleBootstrapCheckpoint({
+        exchange: context.exchange,
+        symbol: result.symbol,
+        timeframe: CANDLE_TIMEFRAME.day,
+        kind: context.kind,
+        bootstrapVersion: context.bootstrapVersion,
+        status,
+        requestedFrom: context.requestedFrom,
+        requestedTo: context.requestedTo,
+        candleCount: result.candles,
+        lastError: result.error,
+      });
+    } catch (error) {
+      console.warn(
+        `Warning: failed to persist bootstrap checkpoint for ${context.exchange}:${result.symbol} - ${getErrorMessage(error, "Unknown error")}. It will be reprocessed on the next run.`
+      );
+    }
+  }
 }
 
 export async function runWithConcurrency<T>(
@@ -220,31 +283,24 @@ async function main() {
   if (typeof limit === "number") selected = selected.slice(0, limit);
   console.log(`Selected for processing: ${selected.length}`);
 
-  let needingBackfill: Set<string>;
-  if (force) {
-    needingBackfill = new Set(selected.map((row) => row.symbol));
-  } else {
-    try {
-      const missing = await findMissingSymbolsInBatches({
-        exchange: EXCHANGE,
-        symbols: selected.map((row) => row.symbol),
-        requiredFromDate: from,
-      });
-      needingBackfill = new Set(missing);
-    } catch (error) {
-      console.error("\nCoverage detection failed - aborting before any provider processing.");
-      console.error(`Reason: ${getErrorMessage(error, "Unknown error")}`);
-      console.error("Refusing to assume all symbols need backfill. Rerun the command to retry coverage detection,");
-      console.error("or pass --force to intentionally bypass coverage detection and reprocess every selected symbol.");
-      process.exit(1);
-      return;
-    }
+  let queue: QueueItem[];
+  try {
+    queue = await resolveBootstrapQueue({
+      exchange: EXCHANGE,
+      symbols: selected.map((row) => row.symbol),
+      requiredFromDate: from,
+      bootstrapVersion: BOOTSTRAP_VERSION,
+      kind: BOOTSTRAP_KIND,
+      force,
+    });
+  } catch (error) {
+    console.error("\nCheckpoint lookup failed - aborting before any provider processing.");
+    console.error(`Reason: ${getErrorMessage(error, "Unknown error")}`);
+    console.error("Refusing to assume all symbols need backfill. Rerun the command to retry checkpoint lookup,");
+    console.error("or pass --force to intentionally bypass checkpoint state and reprocess every selected symbol.");
+    process.exit(1);
+    return;
   }
-
-  const queue: QueueItem[] = selected.map((row) => ({
-    symbol: row.symbol,
-    needsBackfill: needingBackfill.has(row.symbol),
-  }));
 
   const startedAt = Date.now();
   let lastReported = 0;
@@ -264,6 +320,14 @@ async function main() {
   });
 
   clearInterval(aggregateInterval);
+
+  await recordBootstrapCheckpoints(results, {
+    exchange: EXCHANGE,
+    kind: BOOTSTRAP_KIND,
+    bootstrapVersion: BOOTSTRAP_VERSION,
+    requestedFrom: from,
+    requestedTo: to,
+  });
 
   const summary = summarize(results);
   const durationSeconds = (Date.now() - startedAt) / 1000;

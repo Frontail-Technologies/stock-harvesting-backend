@@ -1,6 +1,7 @@
 import { pgEnum } from "drizzle-orm/pg-core";
 
 import {
+  CANDLE_BOOTSTRAP_STATUSES,
   CANDLE_TIMEFRAMES,
   COLLECTION_PREPARATION_STATUSES,
   JOB_STATUSES,
@@ -22,3 +23,4 @@ export const collectionPreparationStatusEnum = pgEnum(
   "collection_preparation_status",
   COLLECTION_PREPARATION_STATUSES
 );
+export const candleBootstrapStatusEnum = pgEnum("candle_bootstrap_status", CANDLE_BOOTSTRAP_STATUSES);

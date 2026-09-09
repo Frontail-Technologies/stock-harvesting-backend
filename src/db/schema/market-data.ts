@@ -2,16 +2,18 @@ import {
   boolean,
   date,
   index,
+  integer,
   numeric,
   pgTable,
   primaryKey,
+  text,
   timestamp,
   unique,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 
-import { candleTimeframeEnum } from "./enums";
+import { candleBootstrapStatusEnum, candleTimeframeEnum } from "./enums";
 
 export const instruments = pgTable(
   "instruments",
@@ -95,6 +97,46 @@ export const candles = pgTable(
       table.symbol,
       table.timeframe,
       table.time,
+    ),
+  }),
+);
+
+// Per-symbol resume checkpoint for a bulk historical candle bootstrap (see
+// bootstrap-bse-candles.ts). One row per (exchange, symbol, timeframe, kind) -
+// deliberately NOT derived from candles.MIN(time), since an instrument's
+// earliest stored candle reflects its listing date, not whether a bootstrap
+// run already completed for it. `kind` distinguishes different bootstrap
+// operations (e.g. different exchanges/scripts) without a schema change;
+// `bootstrapVersion` lets a later change to bootstrap semantics/range
+// invalidate old checkpoints deliberately (see isCandleBootstrapCheckpointSatisfied).
+export const candleBootstrapCheckpoints = pgTable(
+  "candle_bootstrap_checkpoints",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    exchange: varchar("exchange", { length: 16 }).notNull(),
+    symbol: varchar("symbol", { length: 64 }).notNull(),
+    timeframe: candleTimeframeEnum("timeframe").notNull(),
+    kind: varchar("kind", { length: 64 }).notNull(),
+    bootstrapVersion: integer("bootstrap_version").notNull(),
+    status: candleBootstrapStatusEnum("status").notNull(),
+    requestedFrom: date("requested_from").notNull(),
+    requestedTo: date("requested_to"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    candleCount: integer("candle_count"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    identityUnique: unique().on(
+      table.exchange,
+      table.symbol,
+      table.timeframe,
+      table.kind,
     ),
   }),
 );

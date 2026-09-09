@@ -1,28 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../modules/market-data/market-data.candle-sync", () => ({ backfillDailyCandles: vi.fn() }));
-vi.mock("../modules/market-data/market-data.candles", () => ({ findSymbolsNeedingHistoryBackfill: vi.fn() }));
+vi.mock("../modules/market-data/market-data.candle-bootstrap-checkpoints", () => ({
+  readCandleBootstrapCheckpointsInBatches: vi.fn(),
+  upsertCandleBootstrapCheckpoint: vi.fn(),
+  isCandleBootstrapCheckpointSatisfied: vi.fn(),
+}));
 
 import * as candleSyncModule from "../modules/market-data/market-data.candle-sync";
-import * as candlesModule from "../modules/market-data/market-data.candles";
+import * as checkpointsModule from "../modules/market-data/market-data.candle-bootstrap-checkpoints";
 import {
-  COVERAGE_BATCH_SIZE,
+  BOOTSTRAP_KIND,
+  BOOTSTRAP_VERSION,
   DEFAULT_CONCURRENCY,
-  findMissingSymbolsInBatches,
   isBseEquitySegment,
   MAX_CONCURRENCY,
   parseArgs,
   processQueue,
+  recordBootstrapCheckpoints,
+  resolveBootstrapQueue,
   resolveConcurrency,
   resolveDate,
   resolveLimit,
   runWithConcurrency,
   summarize,
+  type InstrumentResult,
   type QueueItem,
 } from "./bootstrap-bse-candles";
 
 const backfillDailyCandles = vi.mocked(candleSyncModule.backfillDailyCandles);
-const findSymbolsNeedingHistoryBackfill = vi.mocked(candlesModule.findSymbolsNeedingHistoryBackfill);
+const readCandleBootstrapCheckpointsInBatches = vi.mocked(checkpointsModule.readCandleBootstrapCheckpointsInBatches);
+const upsertCandleBootstrapCheckpoint = vi.mocked(checkpointsModule.upsertCandleBootstrapCheckpoint);
+const isCandleBootstrapCheckpointSatisfied = vi.mocked(checkpointsModule.isCandleBootstrapCheckpointSatisfied);
 
 describe("isBseEquitySegment", () => {
   it("includes a normal Group A/B equity segment", () => {
@@ -59,87 +68,196 @@ describe("isBseEquitySegment", () => {
   });
 });
 
-describe("findMissingSymbolsInBatches", () => {
+describe("resolveBootstrapQueue", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns an empty result for an empty symbol list without querying", async () => {
-    const result = await findMissingSymbolsInBatches({ exchange: "BSE", symbols: [], requiredFromDate: "2015-01-01" });
-    expect(result).toEqual([]);
-    expect(findSymbolsNeedingHistoryBackfill).not.toHaveBeenCalled();
-  });
+  const baseInput = {
+    exchange: "BSE",
+    requiredFromDate: "1996-09-09",
+    bootstrapVersion: BOOTSTRAP_VERSION,
+    kind: BOOTSTRAP_KIND,
+  };
 
-  it("issues a single batch query for a symbol list at or under the batch size", async () => {
-    const symbols = Array.from({ length: COVERAGE_BATCH_SIZE }, (_, i) => `SYM${i}`);
-    findSymbolsNeedingHistoryBackfill.mockResolvedValue([]);
-
-    await findMissingSymbolsInBatches({ exchange: "BSE", symbols, requiredFromDate: "2015-01-01" });
-
-    expect(findSymbolsNeedingHistoryBackfill).toHaveBeenCalledTimes(1);
-  });
-
-  it("splits a symbol list larger than the batch size into multiple queries and merges results", async () => {
-    const symbols = Array.from({ length: COVERAGE_BATCH_SIZE * 2 + 100 }, (_, i) => `SYM${i}`);
-    findSymbolsNeedingHistoryBackfill.mockImplementation(async (input) => input.symbols.filter((_, i) => i % 2 === 0));
-
-    const result = await findMissingSymbolsInBatches({ exchange: "BSE", symbols, requiredFromDate: "2015-01-01" });
-
-    expect(findSymbolsNeedingHistoryBackfill).toHaveBeenCalledTimes(3);
-    for (const call of findSymbolsNeedingHistoryBackfill.mock.calls) {
-      expect(call[0].symbols.length).toBeLessThanOrEqual(COVERAGE_BATCH_SIZE);
-      expect(call[0].exchange).toBe("BSE");
-      expect(call[0].requiredFromDate).toBe("2015-01-01");
-    }
-    // Every-other-symbol-missing mock implementation applied per batch: result should union
-    // the per-batch "missing" subsets, not just reflect the last batch or a single call.
-    expect(result.length).toBe(Math.ceil(symbols.length / 2));
-    expect(new Set(result).size).toBe(result.length);
-  });
-
-  it("excludes a symbol with adequate coverage from the missing result", async () => {
-    findSymbolsNeedingHistoryBackfill.mockResolvedValue([]);
-
-    const result = await findMissingSymbolsInBatches({
-      exchange: "BSE",
-      symbols: ["COVERED"],
-      requiredFromDate: "2015-01-01",
+  it("--force marks every symbol as needing backfill without reading checkpoints at all", async () => {
+    const queue = await resolveBootstrapQueue({
+      ...baseInput,
+      symbols: ["TCS", "NEWLISTCO"],
+      force: true,
     });
 
-    expect(result).toEqual([]);
+    expect(queue).toEqual([
+      { symbol: "TCS", needsBackfill: true },
+      { symbol: "NEWLISTCO", needsBackfill: true },
+    ]);
+    expect(readCandleBootstrapCheckpointsInBatches).not.toHaveBeenCalled();
   });
 
-  it("includes a symbol with missing/insufficient coverage in the result", async () => {
-    findSymbolsNeedingHistoryBackfill.mockResolvedValue(["MISSING"]);
+  it("a symbol whose checkpoint is satisfied is not queued for backfill (skipped on resume)", async () => {
+    const checkpoint = { symbol: "TCS", status: "success" as const, bootstrapVersion: 1, requestedFrom: "1996-09-09" };
+    readCandleBootstrapCheckpointsInBatches.mockResolvedValue(new Map([["TCS", checkpoint]]));
+    isCandleBootstrapCheckpointSatisfied.mockReturnValue(true);
 
-    const result = await findMissingSymbolsInBatches({
-      exchange: "BSE",
-      symbols: ["MISSING"],
-      requiredFromDate: "2015-01-01",
+    const queue = await resolveBootstrapQueue({ ...baseInput, symbols: ["TCS"], force: false });
+
+    expect(queue).toEqual([{ symbol: "TCS", needsBackfill: false }]);
+  });
+
+  it("a newly-listed instrument whose successful checkpoint's requestedFrom equals what's requested now is skipped, even though its first candle is decades after 1996", async () => {
+    // The checkpoint records the *requested* from-date, not the instrument's actual earliest
+    // candle - so a company that listed in 2015 and was fully bootstrapped is correctly
+    // recognized as complete, instead of being reprocessed forever (the bug being fixed).
+    const checkpoint = {
+      symbol: "NEWLISTCO",
+      status: "success" as const,
+      bootstrapVersion: BOOTSTRAP_VERSION,
+      requestedFrom: "1996-09-09",
+    };
+    readCandleBootstrapCheckpointsInBatches.mockResolvedValue(new Map([["NEWLISTCO", checkpoint]]));
+    isCandleBootstrapCheckpointSatisfied.mockReturnValue(true);
+
+    const queue = await resolveBootstrapQueue({ ...baseInput, symbols: ["NEWLISTCO"], force: false });
+
+    expect(queue).toEqual([{ symbol: "NEWLISTCO", needsBackfill: false }]);
+  });
+
+  it("a symbol with a failed checkpoint is queued for backfill (retried)", async () => {
+    const checkpoint = { symbol: "BAD", status: "failed" as const, bootstrapVersion: 1, requestedFrom: "1996-09-09" };
+    readCandleBootstrapCheckpointsInBatches.mockResolvedValue(new Map([["BAD", checkpoint]]));
+    isCandleBootstrapCheckpointSatisfied.mockReturnValue(false);
+
+    const queue = await resolveBootstrapQueue({ ...baseInput, symbols: ["BAD"], force: false });
+
+    expect(queue).toEqual([{ symbol: "BAD", needsBackfill: true }]);
+  });
+
+  it("a symbol with a partial checkpoint is queued for backfill (retried)", async () => {
+    const checkpoint = { symbol: "PARTIAL", status: "partial" as const, bootstrapVersion: 1, requestedFrom: "1996-09-09" };
+    readCandleBootstrapCheckpointsInBatches.mockResolvedValue(new Map([["PARTIAL", checkpoint]]));
+    isCandleBootstrapCheckpointSatisfied.mockReturnValue(false);
+
+    const queue = await resolveBootstrapQueue({ ...baseInput, symbols: ["PARTIAL"], force: false });
+
+    expect(queue).toEqual([{ symbol: "PARTIAL", needsBackfill: true }]);
+  });
+
+  it("a symbol with no checkpoint at all is queued for backfill", async () => {
+    readCandleBootstrapCheckpointsInBatches.mockResolvedValue(new Map());
+    isCandleBootstrapCheckpointSatisfied.mockReturnValue(false);
+
+    const queue = await resolveBootstrapQueue({ ...baseInput, symbols: ["NOCHECKPOINT"], force: false });
+
+    expect(queue).toEqual([{ symbol: "NOCHECKPOINT", needsBackfill: true }]);
+  });
+
+  it("a materially earlier requested range invalidates an otherwise-successful checkpoint (delegated to isCandleBootstrapCheckpointSatisfied, verified via its own call args)", async () => {
+    const checkpoint = { symbol: "TCS", status: "success" as const, bootstrapVersion: 1, requestedFrom: "2010-01-01" };
+    readCandleBootstrapCheckpointsInBatches.mockResolvedValue(new Map([["TCS", checkpoint]]));
+    isCandleBootstrapCheckpointSatisfied.mockReturnValue(false);
+
+    await resolveBootstrapQueue({ ...baseInput, symbols: ["TCS"], requiredFromDate: "1996-09-09", force: false });
+
+    expect(isCandleBootstrapCheckpointSatisfied).toHaveBeenCalledWith(checkpoint, {
+      bootstrapVersion: BOOTSTRAP_VERSION,
+      requestedFrom: "1996-09-09",
     });
-
-    expect(result).toEqual(["MISSING"]);
   });
 
-  it("propagates a single failed batch's error rather than swallowing it", async () => {
-    const symbols = Array.from({ length: COVERAGE_BATCH_SIZE * 2 }, (_, i) => `SYM${i}`);
-    findSymbolsNeedingHistoryBackfill.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error("Query read timeout"));
+  it("a bootstrap version bump invalidates an old checkpoint (delegated the same way)", async () => {
+    const checkpoint = { symbol: "TCS", status: "success" as const, bootstrapVersion: 1, requestedFrom: "1996-09-09" };
+    readCandleBootstrapCheckpointsInBatches.mockResolvedValue(new Map([["TCS", checkpoint]]));
+    isCandleBootstrapCheckpointSatisfied.mockReturnValue(false);
 
-    await expect(
-      findMissingSymbolsInBatches({ exchange: "BSE", symbols, requiredFromDate: "2015-01-01" })
-    ).rejects.toThrow("Query read timeout");
+    const queue = await resolveBootstrapQueue({ ...baseInput, symbols: ["TCS"], bootstrapVersion: 2, force: false });
+
+    expect(queue).toEqual([{ symbol: "TCS", needsBackfill: true }]);
   });
 
-  it("a failed batch never causes the result to be treated as every symbol missing", async () => {
-    const symbols = Array.from({ length: COVERAGE_BATCH_SIZE * 2 }, (_, i) => `SYM${i}`);
-    findSymbolsNeedingHistoryBackfill.mockRejectedValue(new Error("Query read timeout"));
+  it("a checkpoint lookup failure propagates rather than being swallowed as all-covered or all-missing", async () => {
+    readCandleBootstrapCheckpointsInBatches.mockRejectedValue(new Error("Query read timeout"));
 
-    let thrown: unknown;
-    try {
-      await findMissingSymbolsInBatches({ exchange: "BSE", symbols, requiredFromDate: "2015-01-01" });
-    } catch (error) {
-      thrown = error;
-    }
+    await expect(resolveBootstrapQueue({ ...baseInput, symbols: ["TCS"], force: false })).rejects.toThrow(
+      "Query read timeout"
+    );
+  });
 
-    expect(thrown).toBeInstanceOf(Error);
+  it("zero-candle (partial) provider responses are not treated as complete", async () => {
+    // Modeled via isCandleBootstrapCheckpointSatisfied returning false for a "partial" checkpoint -
+    // recordBootstrapCheckpoints' own tests cover that a zero-candle outcome is written as "partial".
+    const checkpoint = { symbol: "ZERO", status: "partial" as const, bootstrapVersion: 1, requestedFrom: "1996-09-09" };
+    readCandleBootstrapCheckpointsInBatches.mockResolvedValue(new Map([["ZERO", checkpoint]]));
+    isCandleBootstrapCheckpointSatisfied.mockReturnValue(false);
+
+    const queue = await resolveBootstrapQueue({ ...baseInput, symbols: ["ZERO"], force: false });
+
+    expect(queue).toEqual([{ symbol: "ZERO", needsBackfill: true }]);
+  });
+});
+
+describe("recordBootstrapCheckpoints", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const context = {
+    exchange: "BSE",
+    kind: BOOTSTRAP_KIND,
+    bootstrapVersion: BOOTSTRAP_VERSION,
+    requestedFrom: "1996-09-09",
+    requestedTo: "2026-09-09",
+  };
+
+  it("writes a success checkpoint for a successful result", async () => {
+    upsertCandleBootstrapCheckpoint.mockResolvedValue(undefined);
+    const results: InstrumentResult[] = [{ symbol: "TCS", outcome: "success", candles: 5000, durationMs: 10 }];
+
+    await recordBootstrapCheckpoints(results, context);
+
+    expect(upsertCandleBootstrapCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "TCS", status: "success", candleCount: 5000 })
+    );
+  });
+
+  it("writes a partial checkpoint for a zero-candle result, not success", async () => {
+    upsertCandleBootstrapCheckpoint.mockResolvedValue(undefined);
+    const results: InstrumentResult[] = [{ symbol: "ZERO", outcome: "partial", candles: 0, durationMs: 5 }];
+
+    await recordBootstrapCheckpoints(results, context);
+
+    expect(upsertCandleBootstrapCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "ZERO", status: "partial" })
+    );
+  });
+
+  it("writes a failed checkpoint with the error message for a failed result", async () => {
+    upsertCandleBootstrapCheckpoint.mockResolvedValue(undefined);
+    const results: InstrumentResult[] = [
+      { symbol: "BAD", outcome: "failed", candles: 0, durationMs: 5, error: "provider timeout" },
+    ];
+
+    await recordBootstrapCheckpoints(results, context);
+
+    expect(upsertCandleBootstrapCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "BAD", status: "failed", lastError: "provider timeout" })
+    );
+  });
+
+  it("never writes a checkpoint for a skipped result - an existing satisfied checkpoint is left untouched", async () => {
+    const results: InstrumentResult[] = [{ symbol: "ALREADYDONE", outcome: "skipped", candles: 0, durationMs: 0 }];
+
+    await recordBootstrapCheckpoints(results, context);
+
+    expect(upsertCandleBootstrapCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("one checkpoint write failure does not throw and does not block the rest", async () => {
+    upsertCandleBootstrapCheckpoint
+      .mockRejectedValueOnce(new Error("write failed"))
+      .mockResolvedValueOnce(undefined);
+    const results: InstrumentResult[] = [
+      { symbol: "FAILSTOWRITE", outcome: "success", candles: 10, durationMs: 5 },
+      { symbol: "OK", outcome: "success", candles: 10, durationMs: 5 },
+    ];
+
+    await expect(recordBootstrapCheckpoints(results, context)).resolves.toBeUndefined();
+    expect(upsertCandleBootstrapCheckpoint).toHaveBeenCalledTimes(2);
   });
 });
 

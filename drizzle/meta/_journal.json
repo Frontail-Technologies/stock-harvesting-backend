@@ -134,6 +134,13 @@
       "when": 1788807416957,
       "tag": "0018_nostalgic_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788957835556,
+      "tag": "0019_first_ravenous",
+      "breakpoints": true
     }
   ]
 }

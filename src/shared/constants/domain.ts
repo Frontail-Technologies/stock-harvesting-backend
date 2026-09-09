@@ -115,6 +115,17 @@ export const CANDLE_SOURCE = {
   derived: "derived",
 } as const;
 
+// Per-symbol resume checkpoint for a bulk historical candle bootstrap (e.g. bootstrap-bse-candles.ts).
+// "success" is the only status a resumed run treats as already-complete - "partial"/"failed" are always retried.
+export const CANDLE_BOOTSTRAP_STATUSES = ["success", "partial", "failed"] as const;
+export type CandleBootstrapStatus = (typeof CANDLE_BOOTSTRAP_STATUSES)[number];
+
+export const CANDLE_BOOTSTRAP_STATUS = {
+  success: "success",
+  partial: "partial",
+  failed: "failed",
+} as const satisfies Record<CandleBootstrapStatus, CandleBootstrapStatus>;
+
 export const AUTH_PROVIDER = {
   google: "google",
 } as const;
