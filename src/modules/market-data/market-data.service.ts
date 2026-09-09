@@ -185,6 +185,12 @@ export async function getChartCandles(input: {
     freshnessAction === "backfill" &&
     (!isGapOnlyBackfillTrigger || shouldRetryHistoryGapBackfill(exchange, symbol))
   ) {
+    // Missing/discontinuous/insufficient history is the rare, serious case -
+    // stays synchronous (the caller waits for real data rather than getting
+    // a broken/empty chart) and keeps its existing cooldown-gated self-heal
+    // behavior exactly as before. See the freshnessAction === "incremental-refresh"
+    // branch below for the common, low-severity staleness case, which is NOT
+    // synchronous for exactly this reason.
     await safeProviderAction("market-data.chart-candle-backfill", () =>
       runChartBackfillOnce({
         symbol,
@@ -205,17 +211,18 @@ export async function getChartCandles(input: {
       markHistoryGapBackfillAttempted(exchange, symbol);
     }
   } else if (freshnessAction === "incremental-refresh") {
-    // Only the latest row is out of date, so this does a targeted incremental fetch (syncLatestDailyCandlesForSymbols, a ~14-day window) instead of the full-range backfill above.
-    await safeProviderAction("market-data.chart-candle-freshness-refresh", () =>
+    // Only the latest row is out of date (self-healing still runs - this is
+    // NOT removed), but persisted history is otherwise complete and
+    // authoritative, so the request must not block on a provider round-trip
+    // for a single day's candle. Fire-and-forget: runLatestCandleRefreshOnce
+    // already dedupes concurrent calls for the same symbol via its own
+    // in-flight-promise map, and safeProviderAction already swallows/logs
+    // any failure internally, so this can't produce an unhandled rejection.
+    // The next request for this symbol (this one included, moments later)
+    // picks up the refreshed row once it lands - see docs/MARKET_DATA.md.
+    void safeProviderAction("market-data.chart-candle-freshness-refresh", () =>
       runLatestCandleRefreshOnce({ symbol, exchange })
     );
-    dailyRows = await readChartCandles({
-      symbol,
-      timeframe: CANDLE_TIMEFRAME.day,
-      from: input.from,
-      to: input.to,
-      exchange,
-    });
   }
 
   if (dailyRows.length > 0) {
