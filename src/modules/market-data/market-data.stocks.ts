@@ -306,28 +306,28 @@ async function listStocksUncached(input: {
 
   if (rows.length === 0) {
     if (input.q?.trim()) {
-      await safeProviderAction("market-data.instrument-search", () =>
+      // A local miss is the common, frequent case for an interactive search
+      // box (typos, partial input, or a genuinely-not-yet-synced symbol) -
+      // it must not block the response on a provider round-trip. GDF's
+      // fetchInstruments (behind syncProviderInstrumentSearch) fetches the
+      // FULL exchange instrument list with no bound short of the provider
+      // client's own default timeout, and was measured hanging the search
+      // endpoint for 15s+ in production. Fire-and-forget: an empty result
+      // now is accurate (nothing local matches yet); if the query really is
+      // a valid, not-yet-synced symbol, this discovers/persists it in the
+      // background and it appears on the next search for the same term.
+      // safeProviderAction already swallows/logs failures internally, so
+      // this can't produce an unhandled rejection.
+      void safeProviderAction("market-data.instrument-search", () =>
         syncProviderInstrumentSearch(input.q ?? "", exchange)
       );
-      if (!queryInput.includeUnpriced && !realtimePricedList) {
-        await safeProviderAction("market-data.search-price-hydration", async () => {
-          const unpricedSymbols = await readUnpricedStockSymbols(
-            queryInput,
-            Math.min(input.limit, 12)
-          );
-
-          if (unpricedSymbols.length > 0) {
-            await syncLatestDailyCandlesForSymbols(unpricedSymbols, exchange);
-          }
-        });
-      }
     } else {
       await safeProviderAction("market-data.default-instrument-hydration", () =>
         hydrateDefaultMarketInstruments(exchange)
       );
+      rows = await readStockRows(queryInput);
+      total = await countStockRows(queryInput);
     }
-    rows = await readStockRows(queryInput);
-    total = await countStockRows(queryInput);
   }
 
   if (

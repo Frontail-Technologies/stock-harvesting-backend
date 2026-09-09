@@ -153,6 +153,27 @@ describe("listStocks hydration orchestration", () => {
     expect(syncProviderInstrumentSearch).toHaveBeenCalledWith("ZZZNOTFOUND", exchange);
   });
 
+  it("C2. a search query with zero local matches resolves without waiting on the provider search - fire-and-forget, not blocking", async () => {
+    installFakeDb([]);
+    let releaseProviderSearch: (() => void) | undefined;
+    syncProviderInstrumentSearch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseProviderSearch = () => resolve({ count: 0 } as never);
+        })
+    );
+
+    const exchange = `NSE_C2_${Date.now()}`;
+    // If listStocks were still awaiting the provider search, this would hang
+    // forever (releaseProviderSearch is never called) - it must resolve on
+    // its own instead. A production incident measured this exact call
+    // blocking a real request for 15s+ before this fix.
+    await listStocks({ page: 1, limit: 25, exchange, q: "ZZZNOTFOUND" });
+
+    expect(syncProviderInstrumentSearch).toHaveBeenCalledWith("ZZZNOTFOUND", exchange);
+    expect(releaseProviderSearch).toBeDefined();
+  });
+
   it("D. a realtime-priced exchange (BSE) refreshes stats for rows missing a price instead of syncing candles directly", async () => {
     const rows: FakeInstrumentRow[] = Array.from({ length: 1200 }, (_, i) => ({
       symbol: `BSESYM${i}`,
