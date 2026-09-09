@@ -23,6 +23,7 @@ import {
   getActiveProviderAccessToken,
   getEligibleProviderAdapter,
   getEodhdDataProviderAdapter,
+  getProviderStatus,
 } from "../data-provider/data-provider.service";
 import {
   isProviderEnabled,
@@ -42,6 +43,7 @@ import {
 import {
   applyLatestInstrumentStats,
   dedupeInstrumentUpsertInputs,
+  hasActiveInstruments,
   type InstrumentUpsertInput,
   type LatestInstrumentStat,
 } from "./market-data.instruments";
@@ -574,6 +576,27 @@ const GLOBAL_DATAFEEDS_PROVIDER_EXCHANGES: ProviderExchange[] = [
   },
 ];
 
+// "Enabled" (isProviderEnabled) only means an admin hasn't explicitly
+// turned the provider off - it defaults to true and says nothing about
+// whether the provider is actually connected or has ever synced any real
+// data. Reuses the same canonical connection check the admin Data
+// Providers page itself uses (getProviderStatus), rather than duplicating
+// OAuth/connection-state logic here. Any failure to determine connection
+// state is treated as "not connected" - ambiguous must never advertise an
+// exchange that might be empty.
+async function isZerodhaConnected(): Promise<boolean> {
+  try {
+    const status = await getProviderStatus(DATA_PROVIDER_KEY.zerodha);
+    return status.connected;
+  } catch (error) {
+    logger.warn(
+      { message: getErrorMessage(error, "Unknown provider error") },
+      "Unable to determine Zerodha connection status for exchange availability"
+    );
+    return false;
+  }
+}
+
 // EODHD's exchange list is the source of truth for everything except NSE (Zerodha-only). Cached 24h since exchange metadata rarely changes; data-provider-settings.service.ts invalidates this cache prefix on every admin toggle, so disable/enable still takes effect immediately.
 export async function listSupportedExchanges(): Promise<ProviderExchange[]> {
   return getOrSetCache("supportedExchanges", SUPPORTED_EXCHANGES_CACHE_TTL_MS, async () => {
@@ -582,6 +605,22 @@ export async function listSupportedExchanges(): Promise<ProviderExchange[]> {
       isProviderEnabled(DATA_PROVIDER_KEY.zerodha),
       isProviderEnabled(DATA_PROVIDER_KEY.globalDatafeeds),
       isProviderEnabled(eodhdAdapter.providerKey),
+    ]);
+
+    // An exchange is only genuinely usable - and only then advertised -
+    // when it's enabled AND (for NSE specifically) actually connected AND
+    // has at least one real active instrument. Enabled-but-unconnected or
+    // enabled-but-empty must never be offered: a caller who then searches
+    // that exchange would get nothing back.
+    const [nseAvailable, bseAvailable] = await Promise.all([
+      nseEnabled
+        ? isZerodhaConnected().then(
+            (connected) => connected && hasActiveInstruments("NSE", DATA_PROVIDER_KEY.zerodha)
+          )
+        : Promise.resolve(false),
+      globalDatafeedsEnabled
+        ? hasActiveInstruments("BSE", DATA_PROVIDER_KEY.globalDatafeeds)
+        : Promise.resolve(false),
     ]);
 
     let eodhdExchanges: ProviderExchange[] = [];
@@ -597,8 +636,10 @@ export async function listSupportedExchanges(): Promise<ProviderExchange[]> {
     }
 
     const fixedExchanges = [
-      ...(nseEnabled ? [NSE_PROVIDER_EXCHANGE] : []),
-      ...(globalDatafeedsEnabled ? GLOBAL_DATAFEEDS_PROVIDER_EXCHANGES : []),
+      ...(nseAvailable ? [NSE_PROVIDER_EXCHANGE] : []),
+      ...(globalDatafeedsEnabled
+        ? GLOBAL_DATAFEEDS_PROVIDER_EXCHANGES.filter((exchange) => exchange.code !== "BSE" || bseAvailable)
+        : []),
     ];
     const fixedCodes = new Set(fixedExchanges.map((exchange) => exchange.code));
 

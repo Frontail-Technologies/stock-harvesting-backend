@@ -28,6 +28,35 @@ export async function getInstrumentsBySymbol(symbols: string[], exchange: string
   return new Map(rows.map((row) => [row.symbol, row]));
 }
 
+// Existence-only check ("does this exchange have any usable data at all"),
+// deliberately not routed through buildStockFilters/countStockRows - those
+// apply search-listing shaping (price>0 unless includeUnpriced, move
+// filters, etc.) that would under-report availability for a freshly-synced
+// instrument that hasn't been priced yet. `provider` narrows this to the
+// exact provider a caller's own filter would require (e.g. NSE only ever
+// matches `provider = zerodha` rows, same as buildStockFilters) - passing
+// it keeps this check accurate to what a real search on that exchange
+// would actually find, not just "any row exists at all".
+export async function hasActiveInstruments(
+  exchange: string,
+  provider?: string,
+  dbClient: DbOrTx = db
+): Promise<boolean> {
+  const [row] = await dbClient
+    .select({ id: instruments.id })
+    .from(instruments)
+    .where(
+      and(
+        eq(instruments.exchange, exchange),
+        eq(instruments.active, true),
+        provider ? eq(instruments.provider, provider) : undefined
+      )
+    )
+    .limit(1);
+
+  return Boolean(row);
+}
+
 export type InstrumentIdentity = { exchange: string; symbol: string };
 
 export async function resolveInstrumentsForSymbols(identities: InstrumentIdentity[]) {
