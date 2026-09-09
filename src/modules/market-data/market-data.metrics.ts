@@ -11,6 +11,7 @@ import {
   type MetricCandle,
 } from "./market-data.candles";
 import { getDateDaysAgo, getDateYearsAgo, getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
+import { getWeekEndingFriday } from "./trading-calendar";
 import {
   deriveScannerLookbackBars,
   evaluateWeeklyStrongLatest,
@@ -269,6 +270,8 @@ export type WeeklyStrongStockRow = {
   changePct: number;
   // Performance from when this stock's *current* qualifying streak began (same entry concept computeSymbolBreakoutBacktest uses for a closed trade, here for a still-open streak) through today's latest close - not the same as changePct (yesterday-to-today); null when no reference point exists rather than a misleading 0%.
   returnPct: number | null;
+  // The canonical week-ending Friday this streak's entry week resolves to - same entryIndex as returnPct above, never a second streak lookup; null exactly when returnPct is null.
+  inSince: string | null;
   volume: number;
   sector: string | null;
   industry: string | null;
@@ -328,8 +331,10 @@ export async function computeWeeklyStrongStocks(
     const series = evaluateWeeklyStrongSeries(dailyRows, weeklyRows);
     const entryIndex = findCurrentStreakEntryIndex(series);
     let returnPct: number | null = null;
+    let inSince: string | null = null;
     if (entryIndex !== null) {
       const entryTime = series[entryIndex].time;
+      inSince = getWeekEndingFriday(entryTime);
       const entryClose = weeklyRows.find((row) => row.time === entryTime)?.close;
       if (entryClose !== undefined && entryClose > 0) {
         returnPct = ((latestDaily.close - entryClose) / entryClose) * 100;
@@ -343,6 +348,7 @@ export async function computeWeeklyStrongStocks(
       close: latestDaily.close,
       changePct,
       returnPct,
+      inSince,
       volume: latestDaily.volume,
       sector: instrument.sector ?? null,
       industry: instrument.industry ?? null,
@@ -411,10 +417,12 @@ export async function computeWeeklyStrongBacktestMembers(
     const seriesPoints = evaluateWeeklyStrongSeries(dailyRows, weeklyRows);
 
     for (const point of seriesPoints.slice(-weeks)) {
-      allWeeklyDates.add(point.time);
+      // Canonicalized to the ISO week's Friday - different members' own weekly candles can land on different raw days for the same week, which would otherwise split one week into two here.
+      const weekEnding = getWeekEndingFriday(point.time);
+      allWeeklyDates.add(weekEnding);
       if (!point.passes) continue;
 
-      const existing = membersByDate.get(point.time) ?? [];
+      const existing = membersByDate.get(weekEnding) ?? [];
       existing.push({
         symbol: instrument.symbol,
         name: instrument.name,
@@ -422,7 +430,7 @@ export async function computeWeeklyStrongBacktestMembers(
         sector: instrument.sector ?? null,
         industry: instrument.industry ?? null,
       });
-      membersByDate.set(point.time, existing);
+      membersByDate.set(weekEnding, existing);
     }
   }
 

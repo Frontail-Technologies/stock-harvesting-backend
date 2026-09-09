@@ -39,9 +39,11 @@ vi.mock("./weekly-strong-evaluator", async () => {
 import * as candlesModule from "./market-data.candles";
 import { deriveWeeklyMetricCandlesFromDaily } from "./market-data.candles";
 import * as candleSyncModule from "./market-data.candle-sync";
+import { getWeekEndingFriday } from "./trading-calendar";
 import * as evaluatorModule from "./weekly-strong-evaluator";
 import {
   computeAllRelativeStrengthMetrics,
+  computeWeeklyStrongBacktestMembers,
   computeWeeklyStrongStocks,
   deriveSectorIndustryTaxonomy,
   getSymbolWeeklyStrongSeriesInput,
@@ -263,9 +265,11 @@ describe("computeWeeklyStrongStocks orchestration", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].returnPct).toBeCloseTo(((latestClose - entryRow.close) / entryRow.close) * 100);
+    // D: inSince derives from the exact same entryIndex Return itself just used.
+    expect(result[0].inSince).toBe(getWeekEndingFriday(entryRow.time));
   });
 
-  it("Return is null (not 0%) when the series has no currently-open qualifying streak", async () => {
+  it("Return is null (not 0%) when the series has no currently-open qualifying streak, and inSince is null too", async () => {
     const dailyRows = buildDailyRows("NOENTRY", 400);
     readMetricCandles.mockResolvedValueOnce(dailyRows);
     evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
@@ -280,6 +284,112 @@ describe("computeWeeklyStrongStocks orchestration", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].returnPct).toBeNull();
+    expect(result[0].inSince).toBeNull();
+  });
+
+  it("A: an uninterrupted 4-week streak reports inSince as the first (oldest) week of that streak", async () => {
+    const dailyRows = buildDailyRows("STREAK4", 400);
+    readMetricCandles.mockResolvedValueOnce(dailyRows);
+    evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
+    evaluateWeeklyStrongSeries.mockReturnValue([
+      { time: "2026-08-14", passes: true, passesDaily: true, passesWeekly: true },
+      { time: "2026-08-21", passes: true, passesDaily: true, passesWeekly: true },
+      { time: "2026-08-28", passes: true, passesDaily: true, passesWeekly: true },
+      { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+    ]);
+
+    const result = await computeWeeklyStrongStocks(
+      [{ symbol: "STREAK4", name: "Streak Co", exchange: "NSE" }],
+      "NSE"
+    );
+
+    expect(result[0].inSince).toBe("2026-08-14");
+  });
+
+  it("B/C: a broken streak (drop out then re-enter) resets inSince to the latest re-entry week only", async () => {
+    const dailyRows = buildDailyRows("REENTRY", 400);
+    readMetricCandles.mockResolvedValueOnce(dailyRows);
+    evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
+    evaluateWeeklyStrongSeries.mockReturnValue([
+      { time: "2026-08-14", passes: true, passesDaily: true, passesWeekly: true },
+      { time: "2026-08-21", passes: true, passesDaily: true, passesWeekly: true },
+      { time: "2026-08-28", passes: false, passesDaily: false, passesWeekly: false },
+      { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+    ]);
+
+    const result = await computeWeeklyStrongStocks(
+      [{ symbol: "REENTRY", name: "Re-entry Co", exchange: "NSE" }],
+      "NSE"
+    );
+
+    // C: a fresh one-week streak reports inSince as that same current week, not the earlier pre-break streak.
+    expect(result[0].inSince).toBe("2026-09-04");
+  });
+
+  it("E: a non-Friday entry-week candle date is converted to the canonical week-ending Friday, never returned raw", async () => {
+    const dailyRows = buildDailyRows("RAWDATE", 400);
+    readMetricCandles.mockResolvedValueOnce(dailyRows);
+    evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
+    // 2026-08-10 is a Monday - its ISO week's Friday is 2026-08-14.
+    evaluateWeeklyStrongSeries.mockReturnValue([
+      { time: "2026-08-10", passes: true, passesDaily: true, passesWeekly: true },
+    ]);
+
+    const result = await computeWeeklyStrongStocks(
+      [{ symbol: "RAWDATE", name: "Raw Date Co", exchange: "NSE" }],
+      "NSE"
+    );
+
+    expect(result[0].inSince).toBe("2026-08-14");
+  });
+});
+
+describe("computeWeeklyStrongBacktestMembers: cross-instrument week grouping", () => {
+  // Regression for a real bug hit against a live collection: two members' own weekly candles
+  // landed on different raw days for the same calendar week (ragged per-instrument daily
+  // coverage), and the union of raw point.time values split one week into two persisted rows.
+  it("merges two members whose evaluator series report different raw dates for the same ISO week into one week", async () => {
+    const dailyA = buildDailyRows("MEMBERA", 400);
+    const dailyB = buildDailyRows("MEMBERB", 400);
+    readMetricCandles.mockResolvedValueOnce([...dailyA, ...dailyB]);
+
+    evaluateWeeklyStrongSeries
+      .mockReturnValueOnce([{ time: "2025-02-03", passes: true }] as never)
+      .mockReturnValueOnce([{ time: "2025-02-04", passes: true }] as never);
+
+    const result = await computeWeeklyStrongBacktestMembers(
+      [
+        { symbol: "MEMBERA", name: "Member A", exchange: "NSE" },
+        { symbol: "MEMBERB", name: "Member B", exchange: "NSE" },
+      ],
+      "NSE",
+      10
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].time).toBe("2025-02-07");
+    expect(result[0].passing.map((row) => row.symbol).sort()).toEqual(["MEMBERA", "MEMBERB"]);
+  });
+
+  it("keeps two members' points as separate weeks when their raw dates genuinely fall in different ISO weeks", async () => {
+    const dailyA = buildDailyRows("MEMBERA", 400);
+    const dailyB = buildDailyRows("MEMBERB", 400);
+    readMetricCandles.mockResolvedValueOnce([...dailyA, ...dailyB]);
+
+    evaluateWeeklyStrongSeries
+      .mockReturnValueOnce([{ time: "2025-02-04", passes: true }] as never)
+      .mockReturnValueOnce([{ time: "2025-02-11", passes: true }] as never);
+
+    const result = await computeWeeklyStrongBacktestMembers(
+      [
+        { symbol: "MEMBERA", name: "Member A", exchange: "NSE" },
+        { symbol: "MEMBERB", name: "Member B", exchange: "NSE" },
+      ],
+      "NSE",
+      10
+    );
+
+    expect(result.map((point) => point.time)).toEqual(["2025-02-07", "2025-02-14"]);
   });
 });
 

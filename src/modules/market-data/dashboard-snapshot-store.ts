@@ -11,7 +11,7 @@ export type DashboardSnapshotMetricType = "relative_strength" | "weekly_strong";
 export const RELATIVE_STRENGTH_SNAPSHOT_VERSION = "relative-strength-v2";
 
 // Same idea for the Weekly Strong snapshot, but its OWN version tag, separate from WEEKLY_STRONG_EVALUATOR_VERSION which tags the pass/fail decision logic itself and is persisted on immutable Backtest history - bumping this one only forces a Dashboard cache refresh. v2 added returnPct; a v1 row is missing the field entirely (not the same as returnPct: null), so it must be treated as a cache miss.
-export const WEEKLY_STRONG_SNAPSHOT_VERSION = "weekly-strong-snapshot-v2";
+export const WEEKLY_STRONG_SNAPSHOT_VERSION = "weekly-strong-snapshot-v3";
 
 // Deliberately zero dependency on market-data.service.ts - pure schema-level read/write/delete kept as its own tiny module so both market-data.service.ts and dashboard-snapshots.service.ts can depend on it one-directionally without a cycle.
 

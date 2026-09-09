@@ -59,6 +59,7 @@ function buildRow(
     close: 100,
     changePct: 1.5,
     returnPct: 12.5,
+    inSince: "2026-08-14",
     volume: 1000,
     sector: null,
     industry: null,
