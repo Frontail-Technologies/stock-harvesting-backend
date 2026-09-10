@@ -7,13 +7,19 @@ import {
   fetchSectors,
 } from "./global-datafeeds-fundamentals.client";
 
-// Regression: a production `POST /sector-classification-sync` failed with a raw
-// `TypeError: fetch failed` / `SocketError: other side closed` (the Fundamentals
-// Kestrel host dropped the TCP connection with no HTTP response) that escaped as
-// an unhandled HTTP 500. Transport-level failures must now normalize to a
-// PROVIDER_ERROR (502) with a credential-free message; a genuine transient
-// socket error gets a small bounded retry; a real 4xx like "Key Expired" is
-// returned as-is and never retried.
+// Regression coverage for the Fundamentals client's two bounded retry paths:
+//
+//  - Transport: a raw `TypeError: fetch failed` / `SocketError: other side
+//    closed` (the Kestrel host dropping the TCP connection) must normalize to
+//    PROVIDER_ERROR 502 with a credential-free message; a transient socket
+//    error gets a small bounded retry; a real 4xx like "Key Expired" is
+//    returned as-is and never retried.
+//  - Auth handshake: an HTTP 408 whose body is exactly "Authentication
+//    request received. Try request data in next moment." is the provider
+//    asking us to reissue the same request; retried up to twice with a short
+//    delay, then a deterministic PROVIDER_ERROR. An unrelated 408 is not.
+//
+// Total HTTP attempts are additively bounded (1 + 2 network + 2 handshake = 5).
 
 const ACCESS_KEY = "test-fundamentals-access-key-1234567";
 
@@ -40,6 +46,13 @@ function okJson(value: unknown) {
 
 function httpError(status: number, body: string) {
   return { ok: false, status, text: async () => body } as unknown as Response;
+}
+
+const HANDSHAKE_BODY =
+  "Authentication request received. Try request data in next moment.";
+
+function handshake408() {
+  return { ok: false, status: 408, text: async () => HANDSHAKE_BODY } as unknown as Response;
 }
 
 beforeEach(() => {
@@ -182,5 +195,82 @@ describe("global-datafeeds-fundamentals client - transport error normalization",
       { code: "2", name: "Financials" },
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("global-datafeeds-fundamentals client - auth handshake retry", () => {
+  it("retries the same request after a first handshake 408 and returns the eventual data", async () => {
+    fetchMock
+      .mockResolvedValueOnce(handshake408())
+      .mockResolvedValueOnce(okJson([{ Code: "5", Name: "Healthcare" }]));
+
+    const { value } = await run(fetchSectors());
+
+    expect(value).toEqual([{ code: "5", name: "Healthcare" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("tolerates two consecutive handshake responses and still succeeds within the bound", async () => {
+    fetchMock
+      .mockResolvedValueOnce(handshake408())
+      .mockResolvedValueOnce(handshake408())
+      .mockResolvedValueOnce(okJson([{ Code: "7", Name: "Utilities" }]));
+
+    const { value } = await run(fetchSectoralClassificationBySector("Utilities"));
+
+    expect(value).toEqual([{ Code: "7", Name: "Utilities" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("fails deterministically with PROVIDER_ERROR after the max handshake retries (3 attempts)", async () => {
+    fetchMock.mockResolvedValue(handshake408());
+
+    const { error } = await run(fetchSectors());
+    const appError = error as AppError;
+
+    expect(appError).toBeInstanceOf(AppError);
+    expect(appError.status).toBe(502);
+    expect(appError.code).toBe(ERROR_CODES.providerError);
+    expect(appError.details).toEqual({
+      provider: "global-datafeeds-fundamentals",
+      status: 408,
+      reason: "auth-handshake",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const serialized = `${appError.message} ${JSON.stringify(appError.details ?? {})}`;
+    expect(serialized).not.toContain(ACCESS_KEY);
+    expect(serialized).not.toContain("accessKey=");
+  });
+
+  it("does NOT retry an unrelated 408 (no handshake body) - exactly 1 attempt", async () => {
+    fetchMock.mockResolvedValue(httpError(408, "Gateway timed out waiting for upstream"));
+
+    const { error } = await run(fetchSectors());
+    const appError = error as AppError;
+
+    expect(appError.status).toBe(502);
+    expect(appError.code).toBe(ERROR_CODES.providerError);
+    expect(appError.message).toContain("408");
+    expect(appError.details).toEqual({
+      provider: "global-datafeeds-fundamentals",
+      status: 408,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps transport and handshake retries additive - total attempts never exceed 5", async () => {
+    fetchMock
+      .mockRejectedValueOnce(socketClosedError())
+      .mockRejectedValueOnce(socketClosedError())
+      .mockResolvedValueOnce(handshake408())
+      .mockResolvedValueOnce(handshake408())
+      .mockResolvedValueOnce(handshake408())
+      .mockResolvedValue(okJson([{ Code: "9", Name: "Unreached" }]));
+
+    const { error } = await run(fetchSectors());
+
+    expect((error as AppError).status).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 });

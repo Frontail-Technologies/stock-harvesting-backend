@@ -7,6 +7,7 @@ export const HTTP_STATUS = {
   unauthorized: 401,
   forbidden: 403,
   notFound: 404,
+  requestTimeout: 408,
   conflict: 409,
   tooManyRequests: 429,
   internalServerError: 500,

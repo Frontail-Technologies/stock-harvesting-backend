@@ -30,19 +30,48 @@ export type GlobalDatafeedsClassificationRow = {
 // `details` so an admin can tell which upstream failed.
 const FUNDAMENTALS_PROVIDER_LABEL = "global-datafeeds-fundamentals";
 
-// The Fundamentals REST host is an old Kestrel/.NET service. It has been seen
-// to drop the TCP connection with no HTTP response at all (undici surfaces
-// this as `TypeError: fetch failed` -> `SocketError: other side closed`),
-// e.g. when the configured base URL scheme/port don't match what the server
-// actually speaks, or on a transient network blip. Without handling, that
-// raw TypeError escaped as an unhandled 500. These bounds turn every
-// transport-level failure into a normal PROVIDER_ERROR (502) with a
-// credential-free message, and give a genuinely transient socket error a
-// small bounded retry - never a 4xx like "Key Expired", which is returned
-// as-is.
+// The Fundamentals REST host is an old Kestrel/.NET service with two quirks
+// this client has to absorb:
+//
+//  1. Transport: it has been seen to drop the TCP connection with no HTTP
+//     response at all (undici surfaces this as `TypeError: fetch failed` ->
+//     `SocketError: other side closed`), e.g. on a transient network blip.
+//     Without handling, that raw TypeError escaped as an unhandled 500.
+//
+//  2. Auth handshake: the FIRST request against a cold server-side session
+//     can come back as `HTTP 408` with the exact body
+//     "Authentication request received. Try request data in next moment." -
+//     the provider is telling us to reissue the SAME request a moment later.
+//     This is a documented-by-behaviour handshake state, not a real failure.
+//
+// Retries for the two are counted SEPARATELY and the loop is capped by an
+// additive total (see FUNDAMENTALS_MAX_TOTAL_ATTEMPTS) so they can never
+// multiply into a retry storm. Everything else - 400 "Key Expired",
+// 401/403, an unrelated 408, any other 4xx/5xx - is final on the first
+// response, never retried.
 const FUNDAMENTALS_REQUEST_TIMEOUT_MS = 15_000;
-const FUNDAMENTALS_NETWORK_ATTEMPTS = 3; // 1 initial try + 2 retries
+const FUNDAMENTALS_MAX_NETWORK_RETRIES = 2;
 const FUNDAMENTALS_NETWORK_RETRY_BASE_DELAY_MS = 400;
+const FUNDAMENTALS_MAX_HANDSHAKE_RETRIES = 2;
+const FUNDAMENTALS_HANDSHAKE_RETRY_DELAY_MS = 800;
+// 1 initial attempt + every network retry + every handshake retry. Additive,
+// not multiplicative: worst case is 1 + 2 + 2 = 5 HTTP attempts.
+const FUNDAMENTALS_MAX_TOTAL_ATTEMPTS =
+  1 + FUNDAMENTALS_MAX_NETWORK_RETRIES + FUNDAMENTALS_MAX_HANDSHAKE_RETRIES;
+
+// The provider's auth-handshake holding response. Matched on both stable
+// fragments (case-insensitive) so a generic gateway/proxy 408 - which never
+// carries this text - is NOT mistaken for the handshake and is failed
+// immediately.
+const AUTH_HANDSHAKE_BODY_FRAGMENTS = [
+  "authentication request received",
+  "try request data",
+];
+
+function isAuthHandshakePendingBody(bodyText: string): boolean {
+  const normalized = bodyText.toLowerCase();
+  return AUTH_HANDSHAKE_BODY_FRAGMENTS.every((fragment) => normalized.includes(fragment));
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -156,6 +185,8 @@ function buildUrl(path: string, params: Record<string, string>) {
 
 const NETWORK_FAILURE_MESSAGE =
   "GlobalDataFeeds Fundamentals is currently unreachable. Verify the Fundamentals base URL (scheme/host/port) and network access, then retry.";
+const HANDSHAKE_FAILURE_MESSAGE =
+  "GlobalDataFeeds Fundamentals did not complete its authentication handshake after several attempts. Retry the sync shortly.";
 
 async function requestValue<T>(
   path: string,
@@ -165,7 +196,13 @@ async function requestValue<T>(
 
   const url = buildUrl(path, params);
 
-  for (let attempt = 1; attempt <= FUNDAMENTALS_NETWORK_ATTEMPTS; attempt++) {
+  // Two independent budgets, drained by two unrelated conditions. Total HTTP
+  // attempts can never exceed FUNDAMENTALS_MAX_TOTAL_ATTEMPTS regardless of
+  // how they interleave.
+  let networkRetriesLeft = FUNDAMENTALS_MAX_NETWORK_RETRIES;
+  let handshakeRetriesLeft = FUNDAMENTALS_MAX_HANDSHAKE_RETRIES;
+
+  for (let attempt = 1; attempt <= FUNDAMENTALS_MAX_TOTAL_ATTEMPTS; attempt++) {
     let response: Response;
     try {
       response = await fetch(url, {
@@ -181,7 +218,8 @@ async function requestValue<T>(
         "GlobalDataFeeds Fundamentals transport error",
       );
 
-      if (net.retryable && attempt < FUNDAMENTALS_NETWORK_ATTEMPTS) {
+      if (net.retryable && networkRetriesLeft > 0) {
+        networkRetriesLeft -= 1;
         await sleep(FUNDAMENTALS_NETWORK_RETRY_BASE_DELAY_MS * attempt);
         continue;
       }
@@ -192,9 +230,37 @@ async function requestValue<T>(
     }
 
     if (!response.ok) {
-      // A real HTTP response from the provider (e.g. 400 "Key Expired") -
-      // surfaced as-is, never retried.
       const bodyText = await response.text().catch(() => "");
+
+      // The one provider-specific state we retry: a cold-session auth
+      // handshake. ONLY an HTTP 408 whose body carries the exact holding
+      // message qualifies - any other 408 (a gateway timeout, say) is a
+      // normal failure.
+      const isAuthHandshake =
+        response.status === HTTP_STATUS.requestTimeout &&
+        isAuthHandshakePendingBody(bodyText);
+
+      if (isAuthHandshake && handshakeRetriesLeft > 0) {
+        handshakeRetriesLeft -= 1;
+        logger.info(
+          { provider: FUNDAMENTALS_PROVIDER_LABEL, path, attempt },
+          "GlobalDataFeeds Fundamentals auth handshake pending - reissuing the request",
+        );
+        await sleep(FUNDAMENTALS_HANDSHAKE_RETRY_DELAY_MS);
+        continue;
+      }
+
+      if (isAuthHandshake) {
+        // Handshake budget exhausted - deterministic, clearly-labelled error.
+        throw providerError(HANDSHAKE_FAILURE_MESSAGE, {
+          provider: FUNDAMENTALS_PROVIDER_LABEL,
+          status: response.status,
+          reason: "auth-handshake",
+        });
+      }
+
+      // Any other HTTP error (400 "Key Expired", 401/403, unrelated 408,
+      // 5xx, ...) - surfaced as-is, never retried.
       throw providerError(
         `Global Datafeeds Fundamentals request failed (${response.status}): ${bodyText.slice(0, 300)}`,
         { provider: FUNDAMENTALS_PROVIDER_LABEL, status: response.status },
@@ -212,7 +278,9 @@ async function requestValue<T>(
     }
   }
 
-  // Loop only exits via return/throw above; this satisfies the type checker.
+  // Unreachable: every attempt above either returns or throws once both
+  // retry budgets are spent. Kept so the bound stays enforced if the
+  // constants ever change.
   throw providerError(NETWORK_FAILURE_MESSAGE, {
     provider: FUNDAMENTALS_PROVIDER_LABEL,
     reason: "network",
