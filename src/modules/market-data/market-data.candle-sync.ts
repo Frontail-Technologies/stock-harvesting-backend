@@ -196,8 +196,26 @@ function recordCandleBackfill(exchange: string, outcome: "success" | "failed" | 
   }
 }
 
-// Backfills the small (~120) explicitly synced index instrument set on one index exchange - a bounded admin action, not whole-market backfill.
-export async function backfillIndexCandles(exchange: string = NSE_INDEX_EXCHANGE) {
+// Bounded concurrency for the index history backfill. GDF GetHistory is the
+// flaky call (see the adapter's own retry note) and this runs one HTTP request
+// per index over the WS, so keep the in-flight count small.
+const INDEX_CANDLE_BACKFILL_CONCURRENCY = 4;
+
+// Backfills daily (+ derived weekly/monthly) history for the explicitly synced
+// index instrument set on ONE index exchange (e.g. BSE_IDX ~130 rows) - a
+// bounded admin action, not a whole-market backfill and NOT the equity
+// bootstrap path. Idempotent per symbol (replaceCandlesAtomically), failure
+// isolated per symbol, bounded concurrency. `deps` is a test seam only.
+export async function backfillIndexCandles(
+  exchange: string = NSE_INDEX_EXCHANGE,
+  deps: {
+    backfill?: (input: { symbol: string; from: string; to: string; exchange: string }) => Promise<unknown>;
+    concurrency?: number;
+  } = {}
+) {
+  const backfill = deps.backfill ?? backfillDailyCandles;
+  const concurrency = deps.concurrency ?? INDEX_CANDLE_BACKFILL_CONCURRENCY;
+
   const indexInstruments = await db
     .select({ symbol: instruments.symbol })
     .from(instruments)
@@ -209,10 +227,10 @@ export async function backfillIndexCandles(exchange: string = NSE_INDEX_EXCHANGE
   const failedSymbols: string[] = [];
 
   // One slow/unhistoried index shouldn't sink backfill for the rest - continue past a per-symbol failure and report it instead of aborting.
-  for (const row of indexInstruments) {
+  await runWithConcurrency(indexInstruments, concurrency, async (row) => {
     try {
-      await backfillDailyCandles({ symbol: row.symbol, from, to, exchange });
-      backfilled++;
+      await backfill({ symbol: row.symbol, from, to, exchange });
+      backfilled += 1;
     } catch (error) {
       failedSymbols.push(row.symbol);
       logger.warn(
@@ -224,6 +242,16 @@ export async function backfillIndexCandles(exchange: string = NSE_INDEX_EXCHANGE
         "Index candle backfill failed for symbol"
       );
     }
+  });
+
+  // The index Relative Strength snapshot (dashboard "Index Harvest") is keyed
+  // ("index_exchange", <exchange code>) and is NOT reached by
+  // invalidateDashboardSnapshotsForExchange (that maps an *equity* exchange to
+  // its index). Without this, a freshly-backfilled index would keep serving a
+  // stale/empty cached snapshot until an unrelated BSE equity price refresh
+  // happened to clear it.
+  if (backfilled > 0) {
+    await deleteDashboardSnapshots("index_exchange", exchange);
   }
 
   return { indexCount: indexInstruments.length, backfilled, failedSymbols };

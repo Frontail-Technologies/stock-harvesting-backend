@@ -194,6 +194,68 @@ describe("computeAllRelativeStrengthMetrics orchestration", () => {
   });
 });
 
+// Dashboard "Index Harvest" (useIndexRelativeStrength(150, "BSE_IDX")) runs
+// through this exact function with exchange "BSE_IDX". These lock in the
+// identity + the candle-eligibility gate that made production return
+// `{"metrics":[],"asOfDate":...}` when BSE index history had never been
+// backfilled (instruments present, but every symbol had <=54 1D candles).
+describe("computeAllRelativeStrengthMetrics - BSE_IDX (Index Harvest read path)", () => {
+  const bseIndexPool: RelativeStrengthInstrumentInput[] = [
+    { symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" },
+    { symbol: "BANKEX", name: "BSE BANKEX", exchange: "BSE_IDX" },
+  ];
+
+  it("reads candles for exchange BSE_IDX with the exact index symbols", async () => {
+    readMetricCandles.mockResolvedValue([]);
+
+    await computeAllRelativeStrengthMetrics(bseIndexPool, "BSE_IDX");
+
+    expect(readMetricCandles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exchange: "BSE_IDX",
+        symbols: ["SENSEX", "BANKEX"],
+        timeframe: "1D",
+      })
+    );
+  });
+
+  it("returns empty metrics when BSE_IDX instruments exist but have no 1D candles (the production symptom)", async () => {
+    // initial daily read, legacy weekly read, re-read after seed backfill
+    readMetricCandles
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await computeAllRelativeStrengthMetrics(bseIndexPool, "BSE_IDX");
+
+    expect(result).toEqual([]);
+  });
+
+  it("still returns empty metrics when a BSE index has candles but <=54 of them", async () => {
+    readMetricCandles.mockResolvedValueOnce(buildDailyRows("SENSEX", 40));
+
+    const result = await computeAllRelativeStrengthMetrics(
+      [{ symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" }],
+      "BSE_IDX"
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it("returns a populated BSE_IDX metric once an index has >54 1D candles", async () => {
+    readMetricCandles.mockResolvedValueOnce(buildDailyRows("SENSEX", 120));
+
+    const result = await computeAllRelativeStrengthMetrics(
+      [{ symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" }],
+      "BSE_IDX"
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ symbol: "SENSEX", exchange: "BSE_IDX" });
+    expect(typeof result[0].change55dPct).toBe("number");
+  });
+});
+
 describe("computeWeeklyStrongStocks orchestration", () => {
   it("delegates the pass/fail decision to the canonical evaluateWeeklyStrongLatest, not a reimplementation", async () => {
     // Only one readMetricCandles call happens here: dailyFrom === weeklyFrom for computeWeeklyStrongStocks, so readDailyAndWeeklyMetricCandles fetches daily once and derives weekly via the real aggregation, not a second fetch.

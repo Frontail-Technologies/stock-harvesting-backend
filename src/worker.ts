@@ -15,7 +15,7 @@ import {
 } from "./modules/weekly-strong-backtest/weekly-strong-backtest.generation";
 import { JOB_NAMES, JOB_STATUS, QUEUE_NAMES } from "./shared/constants";
 import { env } from "./shared/env";
-import { getErrorMessage } from "./shared/errors";
+import { getErrorMessage, serializeError } from "./shared/errors";
 import { logger } from "./shared/logger";
 import {
   bullmqJobDurationSeconds,
@@ -33,6 +33,20 @@ if (!connection) {
 
 if (env.METRICS_ENABLED) {
   startWorkerMetricsServer();
+}
+
+// Log-safe job context: never the whole job.data (can carry tokens on some
+// job types) - only the identifying fields.
+function jobLogContext(job: Job | undefined) {
+  const data = (job?.data ?? {}) as Record<string, unknown>;
+  return {
+    jobId: job?.id,
+    name: job?.name,
+    syncJobId: typeof data.syncJobId === "string" ? data.syncJobId : undefined,
+    exchange: typeof data.exchange === "string" ? data.exchange : undefined,
+    collectionId: typeof data.collectionId === "string" ? data.collectionId : undefined,
+    attemptsMade: job?.attemptsMade,
+  };
 }
 
 async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
@@ -75,6 +89,13 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
         .where(eq(syncJobs.id, syncJobId));
     }
     recordJobOutcome(endTimer, job.name, "failed");
+    // Structured record at the point of failure - the real exception (name,
+    // message, code, cause), not just a string, and not the bare-Error `{}`
+    // the queue-level "failed" handler used to emit.
+    logger.error(
+      { ...jobLogContext(job), err: serializeError(error) },
+      "Job run failed",
+    );
     throw error;
   }
 }
@@ -180,7 +201,14 @@ worker.on("completed", (job) => {
 });
 
 worker.on("failed", (job, error) => {
-  logger.error({ jobId: job?.id, name: job?.name, error }, "Job failed");
+  logger.error(
+    {
+      ...jobLogContext(job),
+      failedReason: job?.failedReason,
+      err: serializeError(error),
+    },
+    "Job failed",
+  );
 });
 
 async function shutdown(signal: string) {
