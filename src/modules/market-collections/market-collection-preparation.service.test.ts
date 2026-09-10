@@ -245,6 +245,79 @@ describe("prepareCollectionData", () => {
     expect(failedCall).toBeDefined();
     expect((failedCall?.[0] as { preparationError?: string }).preparationError).toContain("db exploded");
   });
+
+  it("coverage-detection failure fails closed: status failed, no backfill or backtest started", async () => {
+    const set = mockUpdateChain();
+    db.select.mockReset();
+    db.select
+      .mockReturnValueOnce(selectResult([EXISTING_COLLECTION_ROW]) as never)
+      .mockImplementation(() => selectResult([{ latestMembershipVersionId: "v1" }]) as never);
+    findSymbolsNeedingHistoryBackfill.mockRejectedValue(
+      new Error("canceling statement due to statement timeout")
+    );
+
+    const result = await prepareCollectionData("col-1", "v1");
+
+    expect(result.skipped).toBe(false);
+    expect(runChartBackfillOnce).not.toHaveBeenCalled();
+    expect(runWeeklyStrongBacktestBackfill).not.toHaveBeenCalled();
+    const failedCall = set.mock.calls.find(
+      (call) => (call[0] as { preparationStatus?: string }).preparationStatus === "failed"
+    );
+    expect(failedCall).toBeDefined();
+    const persisted = (failedCall?.[0] as { preparationError?: string }).preparationError ?? "";
+    expect(persisted).toMatch(/^coverage_detection: /);
+  });
+
+  it("persists a compact, stage-tagged error with the DB code and no SQL text", async () => {
+    const set = mockUpdateChain();
+    db.select.mockReset();
+    db.select
+      .mockReturnValueOnce(selectResult([EXISTING_COLLECTION_ROW]) as never)
+      .mockImplementation(() => selectResult([{ latestMembershipVersionId: "v1" }]) as never);
+    // Shape of a Drizzle error: the whole SQL is prefixed onto .message, the
+    // real cause (pg DatabaseError) is on .cause.
+    const drizzleError = Object.assign(
+      new Error(
+        'select "symbol", "time", "open", "high", "low", "close", "volume" from "candles" where ...'
+      ),
+      {
+        cause: { code: "57014", message: "canceling statement due to statement timeout" },
+      }
+    );
+    runWeeklyStrongBacktestBackfill.mockRejectedValue(drizzleError);
+
+    await prepareCollectionData("col-1", "v1");
+
+    const failedCall = set.mock.calls.find(
+      (call) => (call[0] as { preparationStatus?: string }).preparationStatus === "failed"
+    );
+    const persisted = (failedCall?.[0] as { preparationError?: string }).preparationError ?? "";
+    expect(persisted).toBe(
+      "current_membership_backtest: [57014] canceling statement due to statement timeout"
+    );
+    expect(persisted).not.toMatch(/select |from "candles"/i);
+    expect(persisted.length).toBeLessThanOrEqual(280);
+  });
+
+  it("falls back to 'database query failed' when only a SQL-prefixed message is available", async () => {
+    const set = mockUpdateChain();
+    db.select.mockReset();
+    db.select
+      .mockReturnValueOnce(selectResult([EXISTING_COLLECTION_ROW]) as never)
+      .mockImplementation(() => selectResult([{ latestMembershipVersionId: "v1" }]) as never);
+    runWeeklyStrongBacktestBackfill.mockRejectedValue(
+      new Error('select "symbol" from "candles" where "x" = $1\nparams: BSE')
+    );
+
+    await prepareCollectionData("col-1", "v1");
+
+    const failedCall = set.mock.calls.find(
+      (call) => (call[0] as { preparationStatus?: string }).preparationStatus === "failed"
+    );
+    const persisted = (failedCall?.[0] as { preparationError?: string }).preparationError ?? "";
+    expect(persisted).toBe("current_membership_backtest: database query failed");
+  });
 });
 
 describe("triggerCollectionPreparation", () => {

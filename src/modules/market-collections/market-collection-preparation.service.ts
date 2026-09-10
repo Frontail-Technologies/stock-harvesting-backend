@@ -76,6 +76,58 @@ export type CollectionPreparationResult = {
   membersUnavailable: number | null;
 };
 
+// Which pipeline stage was running when preparation failed - persisted into
+// preparation_error and logged, so an admin sees "current_membership_backtest:
+// [57014] canceling statement due to statement timeout" instead of a
+// 500-char SQL dump.
+type PreparationStage =
+  | "coverage_detection"
+  | "candle_backfill"
+  | "current_membership_backtest"
+  | "historical_membership_backtest"
+  | "availability";
+
+const PREPARATION_ERROR_MAX_LENGTH = 280;
+
+// Builds a compact, admin-safe failure string: stage + DB error code (if
+// any) + the underlying cause, never the failing SQL text or a stack trace.
+// Drizzle prefixes the whole query onto error.message, so the useful DB
+// cause lives on error.cause (a pg DatabaseError) - prefer that.
+function summarizePreparationFailure(
+  error: unknown,
+  stage: PreparationStage
+): { message: string; code: string | null } {
+  const cause =
+    error instanceof Error ? (error as { cause?: unknown }).cause : undefined;
+  const dbError =
+    cause && typeof cause === "object"
+      ? (cause as { code?: unknown; message?: unknown })
+      : undefined;
+
+  const code = dbError && typeof dbError.code === "string" ? dbError.code : null;
+
+  let detail: string;
+  if (dbError && typeof dbError.message === "string" && dbError.message.trim()) {
+    detail = dbError.message.trim();
+  } else {
+    const firstLine =
+      getErrorMessage(error, "Preparation failed").split(/\r?\n/, 1)[0]?.trim() ??
+      "Preparation failed";
+    detail = /\b(select|insert into|update |delete from|params:)\b/i.test(firstLine)
+      ? "database query failed"
+      : firstLine;
+  }
+
+  const summary = `${stage}: ${code ? `[${code}] ` : ""}${detail}`;
+  return {
+    message:
+      summary.length > PREPARATION_ERROR_MAX_LENGTH
+        ? `${summary.slice(0, PREPARATION_ERROR_MAX_LENGTH - 3)}...`
+        : summary,
+    code,
+  };
+}
+
 export async function prepareCollectionData(
   collectionId: string,
   membershipVersionId: string | null
@@ -96,6 +148,8 @@ export async function prepareCollectionData(
   const members = await getActiveMemberInstrumentRows(collectionId);
   const symbols = members.map((member) => member.symbol);
 
+  let stage: PreparationStage = "coverage_detection";
+
   try {
     await db
       .update(marketCollections)
@@ -104,12 +158,16 @@ export async function prepareCollectionData(
 
     const requiredFromDate = getDateYearsAgo(WEEKLY_STRONG_BACKTEST_FETCH_YEARS);
     const todayDate = getTodayDate();
+    // Batched + fail-closed inside findSymbolsNeedingHistoryBackfill - a
+    // lookup failure here throws and lands in the catch below, it is never
+    // silently treated as "every symbol needs backfill".
     const symbolsNeedingBackfill = await findSymbolsNeedingHistoryBackfill({
       exchange: collection.exchange,
       symbols,
       requiredFromDate,
     });
 
+    stage = "candle_backfill";
     let backfillSucceeded = 0;
     let backfillFailed = 0;
 
@@ -141,7 +199,10 @@ export async function prepareCollectionData(
       .set({ preparationStatus: COLLECTION_PREPARATION_STATUS.buildingBacktest, updatedAt: new Date() })
       .where(eq(marketCollections.id, collectionId));
 
+    stage = "current_membership_backtest";
     await runWeeklyStrongBacktestBackfill({ collectionId });
+
+    stage = "historical_membership_backtest";
     if (await hasExistingCurrentMembershipBacktest(collectionId)) {
       await runWeeklyStrongBacktestHistoricalRebuild({ collectionId }).catch((error) => {
         logger.warn(
@@ -151,6 +212,7 @@ export async function prepareCollectionData(
       });
     }
 
+    stage = "availability";
     const { membersWithRequiredHistory, membersUnavailable } = await computeAvailabilityCounts(
       collection.exchange,
       symbols
@@ -224,7 +286,7 @@ export async function prepareCollectionData(
       };
     }
 
-    const message = getErrorMessage(error, "Collection preparation failed").slice(0, 500);
+    const { message, code } = summarizePreparationFailure(error, stage);
     await db
       .update(marketCollections)
       .set({
@@ -236,7 +298,15 @@ export async function prepareCollectionData(
       .where(eq(marketCollections.id, collectionId));
 
     logger.error(
-      { collectionId, message, durationMs: Date.now() - startedAt },
+      {
+        collectionId,
+        membershipVersionId,
+        stage,
+        symbolCount: symbols.length,
+        errorCode: code,
+        durationMs: Date.now() - startedAt,
+        message,
+      },
       "Collection preparation failed"
     );
 
