@@ -14,6 +14,42 @@ import {
 } from "./dashboard-snapshot-store";
 import { resolveCompletedWeekEndingFromTradingDay } from "./trading-calendar";
 
+// A persisted snapshot payload freezes each row's sector/industry as they were
+// when it was computed. Sector-classification sync later updates
+// instruments.sector/industry but never invalidates these snapshots, so a
+// payload written before classification keeps serving sector/industry: null -
+// which empties Sector Harvest, Industry Harvest and the taxonomy cross-filter
+// (all three derive from this one base). instruments.sector/industry is the
+// current source of truth for DISPLAY - historical *frozen* taxonomy only
+// matters to backtest history, a separate read path - so re-project it from
+// the live member rows on every cache hit. Nothing else about a row (metric
+// value, close, volume, ordering) is touched, and a row whose taxonomy already
+// matches (or whose symbol is no longer an active member) is returned
+// untouched, so a genuinely unclassified instrument stays null.
+function projectCurrentTaxonomy<
+  T extends { symbol: string; sector: string | null; industry: string | null },
+>(
+  payload: T[],
+  memberRows: ReadonlyArray<{
+    symbol: string;
+    sector?: string | null;
+    industry?: string | null;
+  }>
+): T[] {
+  const bySymbol = new Map(memberRows.map((row) => [row.symbol, row]));
+  let changed = false;
+  const projected = payload.map((row) => {
+    const member = bySymbol.get(row.symbol);
+    if (!member) return row;
+    const sector = member.sector ?? null;
+    const industry = member.industry ?? null;
+    if (sector === row.sector && industry === row.industry) return row;
+    changed = true;
+    return { ...row, sector, industry };
+  });
+  return changed ? projected : payload;
+}
+
 // Returns the full base metrics array for this collection's active-member pool; callers share this one persisted snapshot and derive their own view in-memory, so the expensive base calculation runs once. On a miss this computes and persists inline (bootstrap path); later requests hit the stored row until invalidateCollectionSnapshots runs.
 export async function getOrComputeCollectionRelativeStrengthBase(
   collectionId: string,
@@ -26,7 +62,10 @@ export async function getOrComputeCollectionRelativeStrengthBase(
     "relative_strength"
   );
   if (cached && cached.evaluatorVersion === RELATIVE_STRENGTH_SNAPSHOT_VERSION) {
-    return { metrics: cached.payload, asOfDate: cached.asOfDate };
+    return {
+      metrics: projectCurrentTaxonomy(cached.payload, memberRows),
+      asOfDate: cached.asOfDate,
+    };
   }
 
   const computed = await computeAllRelativeStrengthMetrics(memberRows, exchange);
@@ -53,7 +92,11 @@ export async function getOrComputeWeeklyStrongSnapshot(
     "weekly_strong"
   );
   if (cached && cached.evaluatorVersion === WEEKLY_STRONG_SNAPSHOT_VERSION) {
-    return { items: cached.payload, weekEnding: resolveCompletedWeekEndingFromTradingDay(cached.asOfDate) };
+    // Same stale-frozen-taxonomy correction as the relative_strength base above.
+    return {
+      items: projectCurrentTaxonomy(cached.payload, memberRows),
+      weekEnding: resolveCompletedWeekEndingFromTradingDay(cached.asOfDate),
+    };
   }
 
   const computed = await computeWeeklyStrongStocks(memberRows, exchange);
