@@ -21,11 +21,62 @@ import {
   recordProviderFailure,
   recordProviderSuccess,
 } from "./data-provider-settings.service";
-import type { DataProviderAdapter, ProviderConnectionStatus } from "./data-provider.types";
+import type {
+  DataProviderAdapter,
+  ProviderConnectionStatus,
+  ProviderHealthResult,
+  ProviderHealthStatus,
+  ProviderLocalStatus,
+} from "./data-provider.types";
 
 export { getDataProviderAdapterForExchange, getEodhdDataProviderAdapter };
 
 const PROVIDER_READY_CACHE_TTL_MS = 15_000;
+
+// A non-OAuth provider's health check (adapter.checkConnection) makes a live
+// external call - GlobalDataFeeds pings its WS GetInstruments (up to a 30s
+// client timeout), EODHD fetches sample candles. It is deliberately kept OUT
+// of getProviderStatus / getAllProviderLocalStatuses (the admin Data
+// Providers page's local "Provider config" / connection / lastSynced rows),
+// which must resolve instantly from env + DB. The external check lives only
+// in getProviderHealth, called by the page as an independent background
+// query. This cap - and the swallowed thrown/rejected check - means a slow,
+// dead, or erroring provider surfaces as health status "error" rather than
+// hanging that background request.
+export const PROVIDER_HEALTH_CHECK_TIMEOUT_MS = 6_000;
+
+export async function checkConnectionWithTimeout(
+  adapter: DataProviderAdapter
+): Promise<ProviderHealthStatus> {
+  if (!adapter.checkConnection) {
+    return { connected: true, status: PROVIDER_STATUS.connected, errorMessage: null };
+  }
+
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<ProviderHealthStatus>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          connected: false,
+          status: PROVIDER_STATUS.error,
+          errorMessage: "Health check timed out",
+        }),
+      PROVIDER_HEALTH_CHECK_TIMEOUT_MS
+    );
+  });
+
+  try {
+    return await Promise.race([adapter.checkConnection(), timeout]);
+  } catch (error) {
+    return {
+      connected: false,
+      status: PROVIDER_STATUS.error,
+      errorMessage: error instanceof Error ? error.message : "Health check failed",
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 // isConfigured() alone (env-key presence) is enough for non-OAuth providers,
 // but Zerodha requiresConnection - a present API key doesn't mean there's a
@@ -108,18 +159,32 @@ export function getDataProviderAdapter() {
 // that haven't happened to serve a scanner request recently (recordHealth
 // itself is still throttled per key, so viewing this page repeatedly
 // doesn't spam data_provider_settings writes).
+function recordProviderHealthObservation(
+  providerKey: string,
+  observation: Pick<ProviderConnectionStatus, "connected" | "errorMessage">
+): void {
+  if (observation.connected) {
+    void recordProviderSuccess(providerKey);
+  } else if (observation.errorMessage) {
+    void recordProviderFailure(providerKey, observation.errorMessage);
+  }
+}
+
 async function recordStatusHealth(
   providerKey: string,
   result: ProviderConnectionStatus
 ): Promise<ProviderConnectionStatus> {
-  if (result.connected) {
-    void recordProviderSuccess(providerKey);
-  } else if (result.errorMessage) {
-    void recordProviderFailure(providerKey, result.errorMessage);
-  }
+  recordProviderHealthObservation(providerKey, result);
   return result;
 }
 
+// Local/DB-only provider status - makes NO external provider request. For a
+// non-OAuth provider (GlobalDataFeeds, EODHD) this is purely env-key presence;
+// `connected`/`status` mirror `providerConfigured` because there is no
+// connection concept to check without going to the network - real
+// reachability is getProviderHealth's job, queried independently by the UI.
+// For an OAuth provider (Zerodha) it reads the stored connection row and token
+// expiry exactly as before, including the expired-token write-back.
 export async function getProviderStatus(
   provider: string = DATA_PROVIDER_KEY.zerodha
 ): Promise<ProviderConnectionStatus> {
@@ -137,31 +202,15 @@ export async function getProviderStatus(
   const lastSyncedAt = connection?.lastSyncedAt?.toISOString() ?? null;
 
   if (!adapter.requiresConnection) {
-    if (!providerConfigured) {
-      return recordStatusHealth(adapter.providerKey, {
-        providerConfigured,
-        connected: false,
-        status: PROVIDER_STATUS.disconnected,
-        lastSyncedAt,
-        errorMessage: connection?.errorMessage ?? null,
-      });
-    }
-
-    const health = adapter.checkConnection
-      ? await adapter.checkConnection()
-      : {
-          connected: true,
-          status: PROVIDER_STATUS.connected,
-          errorMessage: null,
-        };
-
-    return recordStatusHealth(adapter.providerKey, {
+    return {
       providerConfigured,
-      connected: health.connected,
-      status: health.status,
+      connected: providerConfigured,
+      status: providerConfigured
+        ? PROVIDER_STATUS.connected
+        : PROVIDER_STATUS.disconnected,
       lastSyncedAt,
-      errorMessage: health.errorMessage ?? connection?.errorMessage ?? null,
-    });
+      errorMessage: connection?.errorMessage ?? null,
+    };
   }
 
   if (!providerConfigured) {
@@ -225,15 +274,55 @@ export async function markProviderConnectionExpired(provider: string, message?: 
   invalidateCacheByPrefix("providerEligibility");
 }
 
-export async function getAllProviderStatuses() {
-  const statuses = await Promise.all(
-    listDataProviderAdapters().map(async (adapter) => ({
-      provider: adapter.providerKey,
-      ...(await getProviderStatus(adapter.providerKey)),
-    }))
+// The admin Data Providers page's "local status" query. Every field here is
+// env- or DB-derived; NOTHING in this call path touches an external provider
+// API, so the whole response resolves in a few ms regardless of whether any
+// provider is slow or down. External health is a separate per-provider query
+// (getProviderHealth) so one dead provider never delays this or another
+// provider's card.
+export async function getAllProviderLocalStatuses(): Promise<{
+  providers: ProviderLocalStatus[];
+}> {
+  const providers = await Promise.all(
+    listDataProviderAdapters().map(async (adapter): Promise<ProviderLocalStatus> => {
+      const [status, enabled, priority] = await Promise.all([
+        getProviderStatus(adapter.providerKey),
+        isProviderEnabled(adapter.providerKey),
+        getProviderPriority(adapter.providerKey),
+      ]);
+
+      return {
+        provider: adapter.providerKey,
+        providerConfigured: status.providerConfigured,
+        enabled,
+        priority,
+        requiresConnection: adapter.requiresConnection,
+        connected: status.connected,
+        status: status.status,
+        lastSyncedAt: status.lastSyncedAt,
+        errorMessage: status.errorMessage,
+      };
+    })
   );
 
-  return { providers: statuses };
+  return { providers };
+}
+
+// The external half of the split: runs the provider's own connectivity check,
+// bounded by checkConnectionWithTimeout, and feeds the result into the
+// throttled health tracker. Called once per provider by an independent
+// frontend query so a GlobalDataFeeds timeout can't delay EODHD's card and
+// vice versa. For an OAuth provider with no checkConnection() this resolves
+// immediately to "connected" (its real connection state is already in the
+// local status via the stored token row).
+export async function getProviderHealth(provider: string): Promise<ProviderHealthResult> {
+  const adapter = getDataProviderAdapterByProvider(provider);
+  if (!adapter) throw notFound("Data provider not found");
+
+  const health = await checkConnectionWithTimeout(adapter);
+  recordProviderHealthObservation(adapter.providerKey, health);
+
+  return { provider: adapter.providerKey, ...health };
 }
 
 export function getProviderConnectUrl() {

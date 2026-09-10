@@ -29,8 +29,9 @@ import {
   runWeeklyStrongBacktestHistoricalRebuild,
 } from "../weekly-strong-backtest/weekly-strong-backtest.generation";
 import {
-  getAllProviderStatuses,
+  getAllProviderLocalStatuses,
   getProviderConnectUrl,
+  getProviderHealth,
   getProviderStatus,
   saveProviderToken,
 } from "../data-provider/data-provider.service";
@@ -256,8 +257,18 @@ export async function getAdminProviderStatus() {
   return getProviderStatus();
 }
 
+// Local/DB-derived only - no external provider request (see
+// getAllProviderLocalStatuses). Kept a thin passthrough so the route layer
+// doesn't reach across modules.
 export async function getAdminProviderStatuses() {
-  return getAllProviderStatuses();
+  return getAllProviderLocalStatuses();
+}
+
+// External connectivity check for one provider, bounded by
+// checkConnectionWithTimeout. Separate endpoint so the admin page can load it
+// as an independent background query per provider.
+export async function getAdminProviderHealth(provider: string) {
+  return getProviderHealth(provider);
 }
 
 export type AdminDataProviderHealth = "disabled" | "healthy" | "error" | "unknown";

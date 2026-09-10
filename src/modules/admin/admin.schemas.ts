@@ -181,6 +181,12 @@ export const dataProviderKeyParamsSchema = z
   })
   .strict();
 
+export const dataProviderHealthParamsSchema = z
+  .object({
+    provider: z.string().trim().min(1).max(32),
+  })
+  .strict();
+
 // Empty string clears a previously-set disable reason, matching the monetization module's empty-string-means-clear convention.
 export const updateDataProviderSettingsBodySchema = z
   .object({

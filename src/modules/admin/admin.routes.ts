@@ -36,6 +36,7 @@ import {
   collectionVersionIdParamsSchema,
   confirmCollectionImportBodySchema,
   createCollectionBodySchema,
+  dataProviderHealthParamsSchema,
   dataProviderKeyParamsSchema,
   importCollectionCsvBodySchema,
   indexCandleBackfillBodySchema,
@@ -56,6 +57,7 @@ import {
   deleteUser,
   exportAdminUsersCsv,
   getAdminDataProviderSettings,
+  getAdminProviderHealth,
   getAdminProviderStatus,
   getAdminProviderStatuses,
   getBrandingSettings,
@@ -189,6 +191,18 @@ adminRouter.get("/data-provider/status", asyncHandler(async (_req, res) => {
 adminRouter.get("/data-provider/statuses", asyncHandler(async (_req, res) => {
   sendData(res, await getAdminProviderStatuses());
 }));
+
+// Per-provider external health check, deliberately its own endpoint: the page
+// fires one background query per provider so a slow/dead provider never blocks
+// the local status above or another provider's card.
+adminRouter.get(
+  "/data-provider/health/:provider",
+  validate({ params: dataProviderHealthParamsSchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { provider: string };
+    sendData(res, await getAdminProviderHealth(params.provider));
+  })
+);
 
 adminRouter.get("/data-providers", asyncHandler(async (_req, res) => {
   sendData(res, { providers: await getAdminDataProviderSettings() });

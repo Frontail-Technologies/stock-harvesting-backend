@@ -16,6 +16,27 @@ export type ProviderHealthStatus = Pick<
   "connected" | "status" | "errorMessage"
 >;
 
+// Local/DB-derived provider status only - resolves without ANY external
+// provider request. `connected`/`status` are DB-derived for OAuth providers
+// (Zerodha's stored connection row + token expiry); for non-OAuth providers
+// they mirror `providerConfigured` (there is no connection concept - real
+// reachability comes from the separate health check). See getProviderHealth
+// for the external `adapter.checkConnection()` path.
+export type ProviderLocalStatus = {
+  provider: string;
+  providerConfigured: boolean;
+  enabled: boolean;
+  priority: number;
+  requiresConnection: boolean;
+  connected: boolean;
+  status: ProviderStatus;
+  lastSyncedAt: string | null;
+  errorMessage: string | null;
+};
+
+// Result of the bounded external health check for a single provider.
+export type ProviderHealthResult = ProviderHealthStatus & { provider: string };
+
 export type ProviderDailyCandle = {
   time: string;
   open: number;
