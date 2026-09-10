@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
-import { weeklyStrongBacktestMembers, weeklyStrongBacktestRuns } from "../../db/schema";
+import { instruments, weeklyStrongBacktestMembers, weeklyStrongBacktestRuns } from "../../db/schema";
 import { notFound } from "../../shared/errors";
 import { requireCollectionByCode } from "../market-collections/market-collections.service";
 import { getIsoWeekRange, getWeekEndingFriday } from "../market-data/trading-calendar";
@@ -107,15 +107,24 @@ export async function getWeeklyStrongBacktestStacked(input: { code: string }) {
   }
 
   const runIds = runs.map((run) => run.id);
+  // The frozen `sector` on the member row is authoritative when it was set
+  // at generation time (a later reclassification must not rewrite a past
+  // week - see the schema comment). But a run generated before sector
+  // classification data existed has `sector = NULL` for every member, which
+  // would collapse the whole chart into "Unclassified" forever. COALESCE to
+  // the instrument's current classification fills only those genuine gaps -
+  // a non-null frozen value is always kept as-is.
+  const coalescedSector = sql<string | null>`coalesce(${weeklyStrongBacktestMembers.sector}, ${instruments.sector})`;
   const sectorRows = await db
     .select({
       runId: weeklyStrongBacktestMembers.runId,
-      sector: weeklyStrongBacktestMembers.sector,
+      sector: coalescedSector,
       count: sql<number>`count(*)::int`,
     })
     .from(weeklyStrongBacktestMembers)
+    .innerJoin(instruments, eq(instruments.id, weeklyStrongBacktestMembers.instrumentId))
     .where(inArray(weeklyStrongBacktestMembers.runId, runIds))
-    .groupBy(weeklyStrongBacktestMembers.runId, weeklyStrongBacktestMembers.sector);
+    .groupBy(weeklyStrongBacktestMembers.runId, coalescedSector);
 
   const sectorsByRunId = new Map<string, WeeklyStrongBacktestSectorCount[]>();
   for (const row of sectorRows) {
@@ -199,10 +208,12 @@ export async function getWeeklyStrongBacktestWeekDetail(input: { code: string; w
       symbol: weeklyStrongBacktestMembers.symbol,
       name: weeklyStrongBacktestMembers.name,
       exchange: weeklyStrongBacktestMembers.exchange,
-      sector: weeklyStrongBacktestMembers.sector,
-      industry: weeklyStrongBacktestMembers.industry,
+      // Same fill-only-when-missing fallback as getWeeklyStrongBacktestStacked.
+      sector: sql<string | null>`coalesce(${weeklyStrongBacktestMembers.sector}, ${instruments.sector})`,
+      industry: sql<string | null>`coalesce(${weeklyStrongBacktestMembers.industry}, ${instruments.industry})`,
     })
     .from(weeklyStrongBacktestMembers)
+    .innerJoin(instruments, eq(instruments.id, weeklyStrongBacktestMembers.instrumentId))
     .where(eq(weeklyStrongBacktestMembers.runId, run.id))
     .orderBy(asc(weeklyStrongBacktestMembers.symbol));
 
