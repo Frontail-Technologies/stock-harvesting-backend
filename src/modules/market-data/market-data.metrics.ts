@@ -9,7 +9,6 @@ import {
 import { getDateDaysAgo, getDateYearsAgo } from "./market-data.dates";
 import { getWeekEndingFriday, isConsecutiveIsoWeek } from "./trading-calendar";
 import {
-  evaluateWeeklyStrongLatest,
   evaluateWeeklyStrongSeries,
   excludeIncompleteTradingWeek,
   findCurrentStreakEntryIndex,
@@ -294,11 +293,21 @@ export async function computeWeeklyStrongStocks(
     // A near-empty window has its own "high" roughly equal to its own close, which trivially passes a "near the high" check - that's a data gap, not a real breakout, so skip symbols without a reasonably substantial sample.
     if (!hasSufficientWeeklyStrongHistory(dailyRows.length, weeklyRows.length)) continue;
 
-    const decision = evaluateWeeklyStrongLatest(
-      dailyRows.map((row) => row.close),
-      weeklyRows.map((row) => row.close)
-    );
-    if (!decision.passes) continue;
+    // Harvest Results is a COMPLETED-WEEK dashboard: whether a stock appears
+    // here, its In Since, and its Return all come from ONE authoritative
+    // series - the latest COMPLETED week's own entry in evaluateWeeklyStrongSeries
+    // (weeklyRows above is already trimmed past the current, still-forming
+    // week via excludeIncompleteTradingWeek). This used to be decided by a
+    // separate evaluateWeeklyStrongLatest call against today's freshest
+    // daily close, which could disagree with the series (today's still-open
+    // daily movement passing while the latest COMPLETED week itself did
+    // not) - producing a row that appeared "qualified" yet had no valid
+    // entry point (inSince: null). Deciding from the same series the entry
+    // point comes from makes that combination structurally impossible: any
+    // row that reaches the push below always has a real entryIndex.
+    const series = evaluateWeeklyStrongSeries(dailyRows, weeklyRows);
+    const latestSeriesEntry = series[series.length - 1];
+    if (!latestSeriesEntry || !latestSeriesEntry.passes) continue;
 
     const previousDaily = dailyRows[dailyRows.length - 2];
     const changePct =
@@ -306,8 +315,7 @@ export async function computeWeeklyStrongStocks(
         ? ((latestDaily.close - previousDaily.close) * 100) / previousDaily.close
         : 0;
 
-    // Return: entry close (start of the still-open qualifying streak) through today's latest close. Reuses the same series evaluator the decision above already ran a "latest" version of - no new reference point invented, no extra candle fetch.
-    const series = evaluateWeeklyStrongSeries(dailyRows, weeklyRows);
+    // Return: entry close (start of the still-open qualifying streak) through today's latest close.
     const entryIndex = findCurrentStreakEntryIndexGapAware(series);
     let returnPct: number | null = null;
     let inSince: string | null = null;
