@@ -58,6 +58,15 @@ export async function readCandleHistoryRange(input: {
 
 export type CandleCoverageInstrumentInput = { instrumentId: string; symbol: string };
 
+// Bounded to time <= requiredFromDate rather than an unbounded min(time)
+// GROUP BY over full history: a symbol's earliest candle is at/before
+// requiredFromDate if and only if at least one row exists in that bounded
+// range, so this is logically equivalent to the old "earliest >
+// requiredFromDate" check while only touching hypertable chunks at/before
+// the cutoff instead of every chunk up to the present. The unbounded scan
+// across 200+ symbols was hitting both the 30s DB statement timeout and
+// Postgres "out of shared memory" (53200 - too many chunk locks in one
+// query) in production.
 export async function findSymbolsNeedingHistoryBackfill(input: {
   instruments: CandleCoverageInstrumentInput[];
   requiredFromDate: string;
@@ -66,15 +75,12 @@ export async function findSymbolsNeedingHistoryBackfill(input: {
   if (input.instruments.length === 0) return [];
 
   const timeframe = input.timeframe ?? CANDLE_TIMEFRAME.day;
-  const earliestByInstrumentId = new Map<string, string>();
+  const coveredInstrumentIds = new Set<string>();
 
   for (let start = 0; start < input.instruments.length; start += CANDLE_COVERAGE_SYMBOL_BATCH_SIZE) {
     const batch = input.instruments.slice(start, start + CANDLE_COVERAGE_SYMBOL_BATCH_SIZE);
     const rows = await db
-      .select({
-        instrumentId: candles.instrumentId,
-        earliest: sql<string>`min(${candles.time})`,
-      })
+      .selectDistinct({ instrumentId: candles.instrumentId })
       .from(candles)
       .where(
         and(
@@ -82,19 +88,16 @@ export async function findSymbolsNeedingHistoryBackfill(input: {
             candles.instrumentId,
             batch.map((instrument) => instrument.instrumentId)
           ),
-          eq(candles.timeframe, timeframe)
+          eq(candles.timeframe, timeframe),
+          lte(candles.time, input.requiredFromDate)
         )
-      )
-      .groupBy(candles.instrumentId);
+      );
 
-    for (const row of rows) earliestByInstrumentId.set(row.instrumentId, row.earliest);
+    for (const row of rows) coveredInstrumentIds.add(row.instrumentId);
   }
 
   return input.instruments
-    .filter((instrument) => {
-      const earliest = earliestByInstrumentId.get(instrument.instrumentId);
-      return !earliest || earliest > input.requiredFromDate;
-    })
+    .filter((instrument) => !coveredInstrumentIds.has(instrument.instrumentId))
     .map((instrument) => instrument.symbol);
 }
 

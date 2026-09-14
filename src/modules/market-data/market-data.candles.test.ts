@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../db/client", () => ({ db: { select: vi.fn() } }));
+vi.mock("../../db/client", () => ({ db: { select: vi.fn(), selectDistinct: vi.fn() } }));
 
 import * as dbClientModule from "../../db/client";
 import {
@@ -106,16 +106,12 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
       requiredFromDate: "2016-09-01",
     });
     expect(result).toEqual([]);
-    expect(db.select).not.toHaveBeenCalled();
+    expect(db.selectDistinct).not.toHaveBeenCalled();
   });
 
   it("excludes a symbol whose earliest stored candle already reaches the required date", async () => {
-    db.select.mockReturnValueOnce(
-      selectResult([
-        { instrumentId: "RELIANCE", earliest: "2010-01-04" },
-        { instrumentId: "NEWCO", earliest: "2025-06-01" },
-      ])
-    );
+    // Bounded query only returns instruments with a row at/before requiredFromDate.
+    db.selectDistinct.mockReturnValueOnce(selectResult([{ instrumentId: "RELIANCE" }]));
 
     const result = await findSymbolsNeedingHistoryBackfill({
       instruments: toInstruments(["RELIANCE", "NEWCO"]),
@@ -126,7 +122,7 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
   });
 
   it("includes a symbol with no stored candles at all", async () => {
-    db.select.mockReturnValueOnce(selectResult([{ instrumentId: "RELIANCE", earliest: "2010-01-04" }]));
+    db.selectDistinct.mockReturnValueOnce(selectResult([{ instrumentId: "RELIANCE" }]));
 
     const result = await findSymbolsNeedingHistoryBackfill({
       instruments: toInstruments(["RELIANCE", "NOHISTORY"]),
@@ -136,9 +132,9 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
     expect(result).toEqual(["NOHISTORY"]);
   });
 
-  it("checks candle coverage by instrument_id, not exchange/symbol", async () => {
+  it("checks candle coverage by instrument_id, not exchange/symbol, bounded to time <= requiredFromDate", async () => {
     let captured: unknown;
-    db.select.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
+    db.selectDistinct.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
 
     await findSymbolsNeedingHistoryBackfill({
       instruments: toInstruments(["RELIANCE"]),
@@ -148,37 +144,32 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
     const text = whereClauseText(captured);
     expect(text).toContain("instrument_id");
     expect(text).not.toContain("exchange");
+    expect(whereClauseParamValues(captured)).toContain("2016-09-01");
   });
 
   it("splits a large instrument list into multiple sequential batch queries", async () => {
     const symbols = makeSymbols(130); // > 40 (CANDLE_COVERAGE_SYMBOL_BATCH_SIZE) -> ceil(130/40) = 4 batches
     // Every symbol already covered, so nothing is returned.
-    db.select.mockImplementation(() =>
-      selectResult(symbols.map((symbol) => ({ instrumentId: symbol, earliest: "2000-01-01" })))
-    );
+    db.selectDistinct.mockImplementation(() => selectResult(symbols.map((symbol) => ({ instrumentId: symbol }))));
 
     const result = await findSymbolsNeedingHistoryBackfill({
       instruments: toInstruments(symbols),
       requiredFromDate: "2016-09-01",
     });
 
-    expect(db.select).toHaveBeenCalledTimes(4);
+    expect(db.selectDistinct).toHaveBeenCalledTimes(4);
     expect(result).toEqual([]);
   });
 
   it("merges per-batch results and returns the deduplicated set needing backfill, in input order", async () => {
     const symbols = makeSymbols(90); // 3 batches of 40/40/10
     // Odd-indexed symbols have deep history; even-indexed ones are missing entirely.
-    db.select.mockImplementation((() => {
+    db.selectDistinct.mockImplementation((() => {
       let call = 0;
       return () => {
         const batch = symbols.slice(call * 40, call * 40 + 40);
         call += 1;
-        return selectResult(
-          batch
-            .filter((_, i) => i % 2 === 1)
-            .map((symbol) => ({ instrumentId: symbol, earliest: "2001-01-01" }))
-        );
+        return selectResult(batch.filter((_, i) => i % 2 === 1).map((symbol) => ({ instrumentId: symbol })));
       };
     })() as never);
 
@@ -197,10 +188,8 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
     // Batch 1 succeeds, batch 2 rejects - the loop aborts before batch 3, so
     // only queue exactly what gets consumed (a dangling mockReturnValueOnce
     // would leak into the next test).
-    db.select
-      .mockReturnValueOnce(
-        selectResult(symbols.slice(0, 40).map((symbol) => ({ instrumentId: symbol, earliest: "2000-01-01" })))
-      )
+    db.selectDistinct
+      .mockReturnValueOnce(selectResult(symbols.slice(0, 40).map((symbol) => ({ instrumentId: symbol }))))
       .mockReturnValueOnce(selectRejection(new Error("canceling statement due to statement timeout")));
 
     await expect(
