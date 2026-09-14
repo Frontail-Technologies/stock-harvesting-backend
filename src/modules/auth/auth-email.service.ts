@@ -2,7 +2,8 @@ import { createTransport, type Transporter } from "nodemailer";
 
 import { HTTP_STATUS } from "../../shared/constants";
 import { env } from "../../shared/env";
-import { AppError, ERROR_CODES } from "../../shared/errors";
+import { AppError, ERROR_CODES, getErrorMessage } from "../../shared/errors";
+import { logger } from "../../shared/logger";
 
 let transporter: Transporter | null = null;
 
@@ -40,6 +41,10 @@ async function sendEmail(input: { to: string; subject: string; text: string }) {
       text: input.text,
     });
   } catch (error) {
+    logger.error(
+      { to: input.to, message: getErrorMessage(error, "Unknown SMTP error") },
+      "SMTP email delivery failed"
+    );
     throw new AppError(
       HTTP_STATUS.internalServerError,
       ERROR_CODES.internalError,

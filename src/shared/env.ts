@@ -1,6 +1,9 @@
 import "dotenv/config";
 import { z } from "zod";
 
+const booleanEnv = (defaultValue: boolean) =>
+  z.preprocess((value) => (typeof value === "string" ? value === "true" : value), z.boolean()).default(defaultValue);
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -38,7 +41,7 @@ const envSchema = z.object({
   TURNSTILE_SECRET_KEY: z.string().optional(),
   SMTP_HOST: z.string().trim().min(1).default("smtp.gmail.com"),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
-  SMTP_SECURE: z.coerce.boolean().default(false),
+  SMTP_SECURE: booleanEnv(false),
   SMTP_USER: z.string().trim().min(1).optional(),
   SMTP_PASSWORD: z.string().min(1).optional(),
   SMTP_FROM: z.string().trim().min(1).optional(),
