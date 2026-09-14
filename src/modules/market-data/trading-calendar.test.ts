@@ -5,6 +5,7 @@ import {
   getLatestExpectedTradingDay,
   getWeekEndingFriday,
   isCompletedTradingWeek,
+  isConsecutiveIsoWeek,
   resolveCompletedWeekEndingFromTradingDay,
   resolveLatestCompletedWeekEnding,
 } from "./trading-calendar";
@@ -164,5 +165,23 @@ describe("resolveCompletedWeekEndingFromTradingDay", () => {
 
     // Simulates reading back a persisted asOfDate value at a much later time and re-deriving the SAME week the original computation used, rather than whatever "latest" week is current at read time.
     expect(resolveCompletedWeekEndingFromTradingDay(freshTradingDay)).toBe(freshResult);
+  });
+});
+
+describe("isConsecutiveIsoWeek", () => {
+  it("is true for two back-to-back ISO weeks, Monday values", () => {
+    expect(isConsecutiveIsoWeek("2026-09-14", "2026-09-07")).toBe(true);
+  });
+
+  it("is true regardless of which day within each week is passed, as long as the weeks are adjacent", () => {
+    expect(isConsecutiveIsoWeek("2026-09-18", "2026-09-08")).toBe(true); // later=Friday, earlier=Tuesday
+  });
+
+  it("is false when a week is skipped in between", () => {
+    expect(isConsecutiveIsoWeek("2026-09-21", "2026-09-07")).toBe(false); // two weeks apart
+  });
+
+  it("is false for the same week", () => {
+    expect(isConsecutiveIsoWeek("2026-09-10", "2026-09-07")).toBe(false);
   });
 });

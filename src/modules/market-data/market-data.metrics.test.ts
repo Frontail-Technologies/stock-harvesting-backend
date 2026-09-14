@@ -411,6 +411,48 @@ describe("computeWeeklyStrongStocks orchestration", () => {
 
     expect(result[0].inSince).toBe("2026-08-14");
   });
+
+  it("F: a structurally missing week (not an explicit fail) breaks streak continuity - inSince never bridges the gap", async () => {
+    const dailyRows = buildDailyRows("GAPSYM", 400);
+    readMetricCandles.mockResolvedValueOnce(dailyRows);
+    evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
+    // 2026-08-14 (Fri) then a two-week jump straight to 2026-08-28 (Fri) -
+    // 2026-08-21's week is entirely absent from the series (e.g. a gap in
+    // that symbol's candle history), not marked false. A naive pass/fail
+    // walk would treat 08-14 and 08-28 as one unbroken streak; the real
+    // current streak only starts at 08-28.
+    evaluateWeeklyStrongSeries.mockReturnValue([
+      { time: "2026-08-14", passes: true, passesDaily: true, passesWeekly: true },
+      { time: "2026-08-28", passes: true, passesDaily: true, passesWeekly: true },
+      { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+    ]);
+
+    const result = await computeWeeklyStrongStocks(
+      [{ instrumentId: "GAPSYM", symbol: "GAPSYM", name: "Gap Co", exchange: "NSE" }],
+      "NSE"
+    );
+
+    expect(result[0].inSince).toBe("2026-08-28");
+  });
+
+  it("G: the latest completed week is included in the streak walk (not off-by-one excluded)", async () => {
+    const dailyRows = buildDailyRows("LATESTWK", 400);
+    readMetricCandles.mockResolvedValueOnce(dailyRows);
+    evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
+    evaluateWeeklyStrongSeries.mockReturnValue([
+      { time: "2026-08-28", passes: false, passesDaily: false, passesWeekly: false },
+      { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+    ]);
+
+    const result = await computeWeeklyStrongStocks(
+      [{ instrumentId: "LATESTWK", symbol: "LATESTWK", name: "Latest Week Co", exchange: "NSE" }],
+      "NSE"
+    );
+
+    // The series' own last entry (the latest completed week) is the entry
+    // week itself here, not excluded from consideration.
+    expect(result[0].inSince).toBe("2026-09-04");
+  });
 });
 
 describe("computeWeeklyStrongBacktestMembers: cross-instrument week grouping", () => {

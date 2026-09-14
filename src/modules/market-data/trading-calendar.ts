@@ -49,7 +49,7 @@ function getExchangeLocalParts(exchange: string, at: Date) {
   };
 }
 
-function shiftDateString(date: string, days: number) {
+export function shiftDateString(date: string, days: number) {
   const [year, month, day] = date.split("-").map(Number);
   const utcDate = new Date(Date.UTC(year, month - 1, day));
   utcDate.setUTCDate(utcDate.getUTCDate() + days);
@@ -115,4 +115,11 @@ export function resolveCompletedWeekEndingFromTradingDay(latestExpectedTradingDa
 
 export function resolveLatestCompletedWeekEnding(exchange: string, at: Date = new Date()): string {
   return resolveCompletedWeekEndingFromTradingDay(getLatestExpectedTradingDay(exchange, at));
+}
+
+// True when `earlierTime` and `laterTime` fall in back-to-back ISO weeks (earlier's Monday is exactly 7 days before later's Monday) - used to detect a week structurally MISSING from a weekly candle series (e.g. a symbol with a gap in its candle history) when walking a trailing streak backward, so a gap is never silently bridged as if the streak were unbroken.
+export function isConsecutiveIsoWeek(laterTime: string, earlierTime: string): boolean {
+  const laterMonday = getIsoWeekRange(laterTime).start;
+  const earlierMonday = getIsoWeekRange(earlierTime).start;
+  return earlierMonday === shiftDateString(laterMonday, -7);
 }

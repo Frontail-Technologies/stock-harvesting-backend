@@ -22,6 +22,7 @@ import { isProviderEnabled } from "../data-provider/data-provider-settings.servi
 import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 import type { ProviderDailyCandle, ProviderExchange } from "../data-provider/data-provider.types";
 import { aggregateMonthlyCandles, aggregateWeeklyCandles } from "./candle-aggregation";
+import { getWeekEndingFriday } from "./trading-calendar";
 import {
   readCandleHistoryRange,
   readChartCandles,
@@ -161,8 +162,8 @@ export async function getChartCandles(input: {
     : [];
 
   if (dailyRows.length > 0) {
-    return deriveChartCandlesFromDailyRows(dailyRows, input.timeframe).map(
-      toChartCandleResponse
+    return deriveChartCandlesFromDailyRows(dailyRows, input.timeframe).map((row) =>
+      toChartCandleResponse(row, input.timeframe)
     );
   }
 
@@ -173,7 +174,9 @@ export async function getChartCandles(input: {
       from: input.from,
       to: input.to,
     });
-    if (legacyRows.length > 0) return legacyRows.map(toChartCandleResponse);
+    if (legacyRows.length > 0) {
+      return legacyRows.map((row) => toChartCandleResponse(row, input.timeframe));
+    }
   }
 
   return [];
@@ -202,16 +205,26 @@ function deriveChartCandlesFromDailyRows(
   return aggregateChartCandlesForTimeframe(dailyRows, timeframe);
 }
 
-function toChartCandleResponse(row: {
-  time: string;
-  open: string | number;
-  high: string | number;
-  low: string | number;
-  close: string | number;
-  volume: string | number;
-}) {
+// The 1W chart's user-facing timestamp is the canonical week-ending Friday
+// (see trading-calendar.ts's getWeekEndingFriday), never the internal Monday
+// bucket identity used for grouping/aggregation - applied uniformly to both
+// getChartCandles paths (1D-derived and the legacy stored-1W fallback) so
+// neither one can show a different day than the other. OHLC/volume values
+// are untouched; only the label on an already-computed weekly bar changes.
+// 1D timestamps stay actual trading dates; 1M semantics are untouched.
+function toChartCandleResponse(
+  row: {
+    time: string;
+    open: string | number;
+    high: string | number;
+    low: string | number;
+    close: string | number;
+    volume: string | number;
+  },
+  timeframe: CandleTimeframe
+) {
   return {
-    time: row.time,
+    time: timeframe === CANDLE_TIMEFRAME.week ? getWeekEndingFriday(row.time) : row.time,
     open: Number(row.open),
     high: Number(row.high),
     low: Number(row.low),

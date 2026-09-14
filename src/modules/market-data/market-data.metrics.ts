@@ -7,16 +7,40 @@ import {
   type MetricCandle,
 } from "./market-data.candles";
 import { getDateDaysAgo, getDateYearsAgo } from "./market-data.dates";
-import { getWeekEndingFriday } from "./trading-calendar";
+import { getWeekEndingFriday, isConsecutiveIsoWeek } from "./trading-calendar";
 import {
   evaluateWeeklyStrongLatest,
   evaluateWeeklyStrongSeries,
   excludeIncompleteTradingWeek,
   findCurrentStreakEntryIndex,
   hasSufficientWeeklyStrongHistory,
+  type WeeklyStrongSeriesPoint,
 } from "./weekly-strong-evaluator";
 
 // Analytical data preparation/orchestration for Relative Strength and Weekly Strong: fetches/prepares candle series, then composes them with the canonical decision logic in weekly-strong-evaluator.ts - never duplicates or inlines evaluator rules here, only calls them.
+
+// findCurrentStreakEntryIndex only knows pass/fail per series entry, not real
+// calendar adjacency - if a week is structurally MISSING from the series
+// (e.g. a symbol whose candle history has a gap from an earlier backfill
+// failure), the evaluator's own series compacts right over it rather than
+// recording an explicit false, so a pure pass/fail walk would silently
+// bridge the gap and report an entry week far earlier than the stock's
+// actual current uninterrupted streak. This wraps that walk with a real
+// week-adjacency check (isConsecutiveIsoWeek) and stops at the first
+// genuine gap - it never changes which weeks pass/fail (that stays entirely
+// weekly-strong-evaluator.ts's), only how far back "continuous" is allowed
+// to reach.
+function findCurrentStreakEntryIndexGapAware(series: WeeklyStrongSeriesPoint[]): number | null {
+  const rawIndex = findCurrentStreakEntryIndex(series);
+  if (rawIndex === null) return null;
+
+  let index = series.length - 1;
+  while (index > rawIndex) {
+    if (!isConsecutiveIsoWeek(series[index].time, series[index - 1].time)) break;
+    index--;
+  }
+  return index;
+}
 
 export type { MetricCandle };
 
@@ -284,7 +308,7 @@ export async function computeWeeklyStrongStocks(
 
     // Return: entry close (start of the still-open qualifying streak) through today's latest close. Reuses the same series evaluator the decision above already ran a "latest" version of - no new reference point invented, no extra candle fetch.
     const series = evaluateWeeklyStrongSeries(dailyRows, weeklyRows);
-    const entryIndex = findCurrentStreakEntryIndex(series);
+    const entryIndex = findCurrentStreakEntryIndexGapAware(series);
     let returnPct: number | null = null;
     let inSince: string | null = null;
     if (entryIndex !== null) {
