@@ -1,7 +1,5 @@
 // Exchange-aware trading-day/week completion helpers - timezone, market close, and weekends are handled; holidays are not modeled.
 
-import { getWeekKey } from "./candle-aggregation";
-
 const INDIA_EXCHANGE_PREFIXES = ["NSE", "BSE"];
 
 function isIndiaExchange(exchange: string) {
@@ -81,17 +79,14 @@ export function getLatestExpectedTradingDay(exchange: string, at: Date = new Dat
   return candidateDate;
 }
 
-// A week is complete once it's earlier than the ISO week containing the exchange's latest expected completed trading day. Shared by the whole Weekly Strong pipeline via weekly-strong-evaluator.ts's excludeIncompleteTradingWeek.
+// A week is complete once its own Friday is on or before the exchange's latest expected completed trading day - i.e. once Friday's daily candle is itself expected to exist. Shared by the whole Weekly Strong pipeline (weekly-strong-evaluator.ts's excludeIncompleteTradingWeek) and Scanner's weekly candle series (scanner.candles.ts).
 export function isCompletedTradingWeek(
   weekCandleTime: string,
   exchange: string,
   at: Date = new Date()
 ): boolean {
   const latestCompletedDay = getLatestExpectedTradingDay(exchange, at);
-  return (
-    getWeekKey(new Date(`${weekCandleTime}T00:00:00.000Z`)) !==
-    getWeekKey(new Date(`${latestCompletedDay}T00:00:00.000Z`))
-  );
+  return latestCompletedDay >= getWeekEndingFriday(weekCandleTime);
 }
 
 // The Monday-Sunday (UTC) ISO week range containing `dateStr`, as a date pair rather than getWeekKey's "YYYY-Www" string - lets a stored date be matched by range instead of predicting its exact value, since a weekly candle's stored `time` can legitimately fall anywhere in this range, not always on the Monday.
@@ -111,9 +106,10 @@ export function getWeekEndingFriday(dateStr: string): string {
   return shiftDateString(start, 4);
 }
 
-// The week-ending Friday of the latest COMPLETED week, given a "latest expected trading day" value - the Friday of the ISO week immediately before the one containing that trading day, reusing isCompletedTradingWeek's exact rule so the latest completed week is always exactly one calendar week behind, same cadence as the (unmodified) Weekly Strong evaluator and Backtest incremental sync. Pure and stateless - depends only on the trading day passed in, so it reproduces the exact week the original computation used even when reapplied to an already-persisted value at read time.
+// The week-ending Friday of the latest COMPLETED week, given a "latest expected trading day" value - reuses isCompletedTradingWeek's exact rule (a week is complete once its own Friday is on or before that trading day) so this always agrees with the Weekly Strong evaluator and Backtest incremental sync. Pure and stateless - depends only on the trading day passed in, so it reproduces the exact week the original computation used even when reapplied to an already-persisted value at read time.
 export function resolveCompletedWeekEndingFromTradingDay(latestExpectedTradingDay: string): string {
   const currentWeekFriday = getWeekEndingFriday(latestExpectedTradingDay);
+  if (latestExpectedTradingDay >= currentWeekFriday) return currentWeekFriday;
   return shiftDateString(currentWeekFriday, -7);
 }
 

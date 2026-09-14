@@ -65,4 +65,14 @@ describe("KiteMarketStreamProvider.subscribe", () => {
 
     expect(resolveInstrumentsForSymbols).not.toHaveBeenCalled();
   });
+
+  it("does not throw when instrument resolution rejects (e.g. a DB/network error) - it logs and returns instead of crashing the caller", async () => {
+    resolveInstrumentsForSymbols.mockRejectedValue(new Error("getaddrinfo ENOTFOUND"));
+
+    const provider = new KiteMarketStreamProvider();
+
+    await expect(
+      provider.subscribe([{ exchange: "NSE", symbol: "RELIANCE" }])
+    ).resolves.toBeUndefined();
+  });
 });

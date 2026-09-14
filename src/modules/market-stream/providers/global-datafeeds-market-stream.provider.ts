@@ -79,7 +79,21 @@ export class GlobalDatafeedsMarketStreamProvider {
     );
     if (requestedSymbols.length === 0) return;
 
-    const resolved = await this.resolveSubscriptions(requestedSymbols);
+    let resolved: GlobalDatafeedsSubscription[];
+    try {
+      resolved = await this.resolveSubscriptions(requestedSymbols);
+    } catch (error) {
+      logger.warn(
+        {
+          provider: DATA_PROVIDER_KEY.globalDatafeeds,
+          requested: requestedSymbols.length,
+          message: getErrorMessage(error, "Unknown instrument resolution error"),
+        },
+        "Global Datafeeds stream subscribe failed to resolve instruments"
+      );
+      return;
+    }
+
     const capacity = Math.max(0, env.GLOBAL_DATAFEEDS_SYMBOL_LIMIT - this.subscriptions.size);
     const added: GlobalDatafeedsSubscription[] = [];
 

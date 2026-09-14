@@ -270,7 +270,7 @@ describe("backfillDailyCandles", () => {
       exchange: "NSE",
     });
 
-    expect(result).toEqual({ insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 });
+    expect(result).toEqual({ insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0, dailyCandles: [] });
     expect(getOrCreateInstrument).not.toHaveBeenCalled();
   });
 });

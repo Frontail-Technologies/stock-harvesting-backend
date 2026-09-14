@@ -48,3 +48,17 @@ export const registrationResendBodySchema = z
     verificationId: z.string().uuid(),
   })
   .strict();
+
+export const passwordResetRequestBodySchema = z
+  .object({
+    email: emailSchema,
+    turnstileToken: turnstileTokenSchema,
+  })
+  .strict();
+
+export const passwordResetConfirmBodySchema = z
+  .object({
+    token: z.string().min(1).max(512),
+    password: registrationPasswordSchema,
+  })
+  .strict();

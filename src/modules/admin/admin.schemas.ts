@@ -81,6 +81,12 @@ export const backfillCandlesBodySchema = z
   })
   .strict();
 
+export const refreshDailyCandlesBodySchema = z
+  .object({
+    symbol: z.string().trim().min(1).max(64),
+  })
+  .strict();
+
 export const brandingBodySchema = z
   .object({
     brandName: z.string().trim().min(1).max(120),

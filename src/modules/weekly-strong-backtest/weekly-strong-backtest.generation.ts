@@ -149,6 +149,7 @@ async function runWeeklyStrongBacktestHistoricalRebuildImpl(input: {
     if (!membership || membership.members.length === 0) continue;
 
     const memberRows = membership.members.map((member) => ({
+      instrumentId: member.instrumentId,
       symbol: member.symbol,
       name: member.name,
       exchange: member.exchange,
@@ -286,6 +287,7 @@ async function syncWeeklyStrongBacktestIncrementalImpl(
     if (existingHistoricalRun) continue;
 
     const versionMemberRows = membership.members.map((member) => ({
+      instrumentId: member.instrumentId,
       symbol: member.symbol,
       name: member.name,
       exchange: member.exchange,

@@ -148,12 +148,40 @@ describe("searchChartEligibleBseStocks query shape", () => {
     const params = paramValues(capturedCondition);
     expect(params).toContain("BSE");
     expect(text.toLowerCase()).toContain("exists");
-    // The EXISTS subquery must match on exchange + symbol + the '1D' timeframe
+    // The EXISTS subquery must match on instrument_id + the '1D' timeframe
     // specifically - a candle-less instrument (no matching row at all) or an
     // instrument with only weekly/monthly derived candles must not satisfy it.
     expect(params).toContain("1D");
-    expect(params.filter((v) => v === "exchange").length).toBeGreaterThanOrEqual(2);
-    expect(params.filter((v) => v === "symbol").length).toBeGreaterThanOrEqual(2);
+    // Candle identity is instrument_id = instruments.id, never
+    // candles.exchange/candles.symbol - those columns don't appear as join
+    // predicates for the EXISTS check at all.
+    expect(params).toContain("instrument_id");
+    expect(params).toContain("id");
+  });
+
+  it("joins the candle-existence check by instrument_id, not candles.exchange/candles.symbol", async () => {
+    let capturedCondition: unknown;
+    const fakeDb = {
+      select: () => ({
+        from: () => ({
+          where: (condition: unknown) => {
+            capturedCondition = condition;
+            return { orderBy: () => ({ limit: async () => [] }) };
+          },
+        }),
+      }),
+    };
+
+    await searchChartEligibleBseStocks({ q: "REL", limit: 25 }, fakeDb as unknown as DbOrTx);
+
+    const params = paramValues(capturedCondition);
+    // "exchange" appears once, for the BSE-only instrument filter; "symbol"
+    // appears twice, both from the q-search ILIKE filter (symbol OR name) -
+    // neither is used again as the EXISTS join predicate, which instead
+    // references "instrument_id" (candles) and "id" (instruments).
+    expect(params.filter((v) => v === "exchange").length).toBe(1);
+    expect(params.filter((v) => v === "symbol").length).toBe(2);
+    expect(params.filter((v) => v === "instrument_id").length).toBe(1);
   });
 
   it("passes the requested limit straight through with no default override", async () => {

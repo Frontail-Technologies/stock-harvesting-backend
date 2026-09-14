@@ -1,8 +1,4 @@
 import { CANDLE_TIMEFRAME } from "../../shared/constants";
-import { getErrorMessage } from "../../shared/errors";
-import { logger } from "../../shared/logger";
-import { normalizeSymbol } from "../../shared/normalize";
-import { backfillDailyCandles, safeProviderAction } from "./market-data.candle-sync";
 import {
   deriveWeeklyMetricCandlesFromDaily,
   filterMetricCandlesFrom,
@@ -10,48 +6,45 @@ import {
   readMetricCandles,
   type MetricCandle,
 } from "./market-data.candles";
-import { getDateDaysAgo, getDateYearsAgo, getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
+import { getDateDaysAgo, getDateYearsAgo } from "./market-data.dates";
 import { getWeekEndingFriday } from "./trading-calendar";
 import {
-  deriveScannerLookbackBars,
   evaluateWeeklyStrongLatest,
   evaluateWeeklyStrongSeries,
   excludeIncompleteTradingWeek,
   findCurrentStreakEntryIndex,
   hasSufficientWeeklyStrongHistory,
-  WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS,
 } from "./weekly-strong-evaluator";
 
 // Analytical data preparation/orchestration for Relative Strength and Weekly Strong: fetches/prepares candle series, then composes them with the canonical decision logic in weekly-strong-evaluator.ts - never duplicates or inlines evaluator rules here, only calls them.
 
 export type { MetricCandle };
 
-const RELATIVE_STRENGTH_SEED_BACKFILL_LIMIT = 20;
+// DB-only read (RULES.md #16) - a symbol pool with no stored candles yet is
+// covered by the routine daily candle sync job, never fetched here on read.
+export type MetricInstrumentIdentity = { instrumentId: string; symbol: string };
 
-// Fetches daily+weekly candles for a symbol pool, and if a collection has never been viewed before triggers a best-effort one-time seed backfill for the first N symbols so the page isn't permanently empty - the same fallback pattern relative-strength metrics rely on.
 export async function readDailyAndWeeklyMetricCandles(input: {
   exchange: string;
-  symbols: string[];
+  instruments: MetricInstrumentIdentity[];
   dailyFrom: string;
   weeklyFrom: string;
 }) {
   const dailySourceFrom = input.dailyFrom < input.weeklyFrom ? input.dailyFrom : input.weeklyFrom;
-  let sourceDailyCandles = await readMetricCandles({
-    exchange: input.exchange,
-    symbols: input.symbols,
+  const sourceDailyCandles = await readMetricCandles({
+    instruments: input.instruments,
     timeframe: CANDLE_TIMEFRAME.day,
     from: dailySourceFrom,
   });
-  let dailyCandles = filterMetricCandlesFrom(sourceDailyCandles, input.dailyFrom);
-  let weeklyCandles = deriveWeeklyMetricCandlesFromDaily(
+  const dailyCandles = filterMetricCandlesFrom(sourceDailyCandles, input.dailyFrom);
+  const weeklyCandles = deriveWeeklyMetricCandlesFromDaily(
     sourceDailyCandles,
     input.weeklyFrom
   );
 
   if (sourceDailyCandles.length === 0) {
     const legacyWeeklyCandles = await readMetricCandles({
-      exchange: input.exchange,
-      symbols: input.symbols,
+      instruments: input.instruments,
       timeframe: CANDLE_TIMEFRAME.week,
       from: input.weeklyFrom,
     });
@@ -59,44 +52,6 @@ export async function readDailyAndWeeklyMetricCandles(input: {
     if (legacyWeeklyCandles.length > 0) {
       return { dailyCandles, weeklyCandles: legacyWeeklyCandles };
     }
-
-    const seedSymbols = input.symbols.slice(0, RELATIVE_STRENGTH_SEED_BACKFILL_LIMIT);
-    await safeProviderAction("market-data.relative-strength-seed-backfill", async () => {
-      let seeded = 0;
-      for (const symbol of seedSymbols) {
-        try {
-          await backfillDailyCandles({
-            symbol,
-            exchange: input.exchange,
-            from: getDateYearsAgo(5),
-            to: getTodayDate(),
-          });
-          seeded++;
-        } catch (error) {
-          logger.warn(
-            {
-              exchange: input.exchange,
-              symbol,
-              message: getErrorMessage(error, "Seed backfill failed"),
-            },
-            "Relative strength seed backfill failed for symbol"
-          );
-        }
-      }
-      return { symbols: seeded };
-    });
-
-    sourceDailyCandles = await readMetricCandles({
-      exchange: input.exchange,
-      symbols: input.symbols,
-      timeframe: CANDLE_TIMEFRAME.day,
-      from: dailySourceFrom,
-    });
-    dailyCandles = filterMetricCandlesFrom(sourceDailyCandles, input.dailyFrom);
-    weeklyCandles = deriveWeeklyMetricCandlesFromDaily(
-      sourceDailyCandles,
-      input.weeklyFrom
-    );
   }
 
   return { dailyCandles, weeklyCandles };
@@ -126,6 +81,7 @@ export type RelativeStrengthMetricRow = {
 };
 
 export type RelativeStrengthInstrumentInput = {
+  instrumentId: string;
   symbol: string;
   name: string;
   exchange: string;
@@ -138,14 +94,13 @@ export async function computeAllRelativeStrengthMetrics(
   instrumentRows: RelativeStrengthInstrumentInput[],
   exchange: string
 ): Promise<RelativeStrengthMetricRow[]> {
-  const symbols = instrumentRows.map((row) => row.symbol);
-  if (symbols.length === 0) return [];
+  if (instrumentRows.length === 0) return [];
 
   // Only daily candles are needed for a 55-session change - no weekly fetch (weeklyFrom === dailyFrom collapses readDailyAndWeeklyMetricCandles's fetch window to the last 140 days instead of 5 years).
   const dailyFrom = getDateDaysAgo(140);
   const { dailyCandles } = await readDailyAndWeeklyMetricCandles({
     exchange,
-    symbols,
+    instruments: instrumentRows.map((row) => ({ instrumentId: row.instrumentId, symbol: row.symbol })),
     dailyFrom,
     weeklyFrom: dailyFrom,
   });
@@ -279,6 +234,7 @@ export type WeeklyStrongStockRow = {
 
 export async function computeWeeklyStrongStocks(
   instrumentRows: Array<{
+    instrumentId: string;
     symbol: string;
     name: string;
     exchange: string;
@@ -287,12 +243,11 @@ export async function computeWeeklyStrongStocks(
   }>,
   exchange: string
 ): Promise<WeeklyStrongStockRow[]> {
-  const symbols = instrumentRows.map((row) => row.symbol);
-  if (symbols.length === 0) return [];
+  if (instrumentRows.length === 0) return [];
 
   const { dailyCandles, weeklyCandles } = await readDailyAndWeeklyMetricCandles({
     exchange,
-    symbols,
+    instruments: instrumentRows.map((row) => ({ instrumentId: row.instrumentId, symbol: row.symbol })),
     dailyFrom: getDateYearsAgo(5),
     weeklyFrom: getDateYearsAgo(5),
   });
@@ -379,6 +334,7 @@ export type WeeklyStrongBacktestWeekMembers = {
 // Fetches each pool member's full history once, then runs the evaluator's full-series pass per instrument, instead of fetching per week evaluated; the backfill job persists this output, nothing recomputes it on read.
 export async function computeWeeklyStrongBacktestMembers(
   instrumentRows: Array<{
+    instrumentId: string;
     symbol: string;
     name: string;
     exchange: string;
@@ -388,12 +344,11 @@ export async function computeWeeklyStrongBacktestMembers(
   exchange: string,
   weeks: number = WEEKLY_STRONG_BACKTEST_DEFAULT_WEEKS
 ): Promise<WeeklyStrongBacktestWeekMembers[]> {
-  const symbols = instrumentRows.map((row) => row.symbol);
-  if (symbols.length === 0) return [];
+  if (instrumentRows.length === 0) return [];
 
   const { dailyCandles, weeklyCandles } = await readDailyAndWeeklyMetricCandles({
     exchange,
-    symbols,
+    instruments: instrumentRows.map((row) => ({ instrumentId: row.instrumentId, symbol: row.symbol })),
     dailyFrom: getDateYearsAgo(WEEKLY_STRONG_BACKTEST_FETCH_YEARS),
     weeklyFrom: getDateYearsAgo(WEEKLY_STRONG_BACKTEST_FETCH_YEARS),
   });
@@ -440,131 +395,3 @@ export async function computeWeeklyStrongBacktestMembers(
     .map((time) => ({ time, passing: membersByDate.get(time) ?? [] }));
 }
 
-export type SymbolBreakoutBacktestStats = {
-  hitRatePct: number;
-  totalReturnPct: number;
-  maxDrawdownPct: number;
-  profitFactor: number | null;
-  signalsGenerated: number;
-  avgHoldingDays: number;
-  largestWinnerPct: number;
-  largestLoserPct: number;
-};
-
-type BreakoutTrade = { entryIndex: number; exitIndex: number; returnPct: number };
-
-export type SymbolWeeklyStrongSeriesInput = {
-  dailyRows: MetricCandle[];
-  weeklyRows: MetricCandle[];
-};
-
-// Shared fetch+gate step for any per-symbol Weekly Strong evaluation - the Scanner's live scan and this file's own backtest both need the same daily+weekly series, completed-week trim, and minimum-history gate, so they can't silently diverge.
-export async function getSymbolWeeklyStrongSeriesInput(
-  symbol: string,
-  exchange: string
-): Promise<SymbolWeeklyStrongSeriesInput | null> {
-  const normalizedSymbol = normalizeSymbol(symbol);
-  const { dailyCandles, weeklyCandles } = await readDailyAndWeeklyMetricCandles({
-    exchange,
-    symbols: [normalizedSymbol],
-    dailyFrom: getDefaultChartHistoryFromDate(),
-    weeklyFrom: getDefaultChartHistoryFromDate(),
-  });
-
-  const dailyRows = groupMetricCandlesBySymbol(dailyCandles).get(normalizedSymbol) ?? [];
-  // Same completed-week trim used everywhere else in the Weekly Strong pipeline - the series must stop at the latest COMPLETED week, never today's still-forming week, live or historical.
-  const weeklyRows = excludeIncompleteTradingWeek(
-    groupMetricCandlesBySymbol(weeklyCandles).get(normalizedSymbol) ?? [],
-    exchange
-  );
-
-  if (!hasSufficientWeeklyStrongHistory(dailyRows.length, weeklyRows.length)) {
-    return null;
-  }
-
-  return { dailyRows, weeklyRows };
-}
-
-// Trade-by-trade backtest of the same two-condition breakout rule as computeWeeklyStrongStocks, for one symbol over its full available history - powers the Scanner's backtest stats overlay.
-export async function computeSymbolBreakoutBacktest(
-  symbol: string,
-  exchange: string,
-  lookbackWeeks = WEEKLY_STRONG_WEEKLY_LOOKBACK_BARS
-): Promise<SymbolBreakoutBacktestStats | null> {
-  const seriesInput = await getSymbolWeeklyStrongSeriesInput(symbol, exchange);
-  if (!seriesInput) return null;
-  const { dailyRows, weeklyRows } = seriesInput;
-
-  // lookbackWeeks is caller-chosen (Scanner's lookback multiplier), kept separate from the fixed-window Weekly Strong screen elsewhere.
-  const { dailyLookbackBars, weeklyLookbackBars } = deriveScannerLookbackBars(lookbackWeeks);
-  const seriesPoints = evaluateWeeklyStrongSeries(dailyRows, weeklyRows, {
-    dailyLookbackBars,
-    weeklyLookbackBars,
-  });
-  // Re-aligned to weeklyRows by time - the evaluator can skip a leading stretch of weeks with no daily data yet; those default to `false`.
-  const passesByTime = new Map(seriesPoints.map((point) => [point.time, point.passes]));
-  const matched: boolean[] = weeklyRows.map((row) => passesByTime.get(row.time) ?? false);
-
-  const trades: BreakoutTrade[] = [];
-  let entryIndex: number | null = null;
-
-  for (let index = 0; index < weeklyRows.length; index++) {
-    const isMatched = matched[index];
-    const wasMatched = index > 0 && matched[index - 1];
-
-    if (isMatched && !wasMatched) {
-      entryIndex = index;
-    } else if (!isMatched && wasMatched && entryIndex !== null) {
-      trades.push(buildBreakoutTrade(entryIndex, index, weeklyRows));
-      entryIndex = null;
-    }
-  }
-
-  if (entryIndex !== null) {
-    trades.push(buildBreakoutTrade(entryIndex, weeklyRows.length - 1, weeklyRows));
-  }
-
-  const signalsGenerated = trades.length;
-  if (trades.length === 0) return null;
-
-  const winners = trades.filter((trade) => trade.returnPct > 0);
-  const losers = trades.filter((trade) => trade.returnPct <= 0);
-
-  let equity = 100;
-  let peak = 100;
-  let maxDrawdownPct = 0;
-  for (const trade of trades) {
-    equity *= 1 + trade.returnPct / 100;
-    peak = Math.max(peak, equity);
-    maxDrawdownPct = Math.max(maxDrawdownPct, ((peak - equity) / peak) * 100);
-  }
-
-  const grossProfit = winners.reduce((sum, trade) => sum + trade.returnPct, 0);
-  const grossLoss = Math.abs(losers.reduce((sum, trade) => sum + trade.returnPct, 0));
-
-  return {
-    hitRatePct: (winners.length / trades.length) * 100,
-    totalReturnPct: equity - 100,
-    maxDrawdownPct,
-    profitFactor: grossLoss === 0 ? null : grossProfit / grossLoss,
-    signalsGenerated,
-    avgHoldingDays:
-      trades.reduce((sum, trade) => sum + (trade.exitIndex - trade.entryIndex) * 7, 0) / trades.length,
-    largestWinnerPct: Math.max(...trades.map((trade) => trade.returnPct)),
-    largestLoserPct: Math.min(...trades.map((trade) => trade.returnPct)),
-  };
-}
-
-function buildBreakoutTrade(
-  entryIndex: number,
-  exitIndex: number,
-  rows: MetricCandle[]
-): BreakoutTrade {
-  const entryClose = rows[entryIndex].close;
-  const exitClose = rows[exitIndex].close;
-  return {
-    entryIndex,
-    exitIndex,
-    returnPct: ((exitClose - entryClose) / entryClose) * 100,
-  };
-}

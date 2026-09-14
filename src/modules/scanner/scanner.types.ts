@@ -5,11 +5,11 @@ export type ScannerCandle = {
 };
 
 export type Near250WeekHighScanMatch = {
-  matched: boolean;
+  matched?: boolean;
   startTime: string;
   endTime: string;
   highlightTimes: string[];
   metrics: {
-    lookbackWeeks: number;
+    lookbackWeeks: number | null;
   };
 };

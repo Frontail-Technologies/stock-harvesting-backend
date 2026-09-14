@@ -36,8 +36,12 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   TURNSTILE_SECRET_KEY: z.string().optional(),
-  AUTH_OTP_EMAIL_WEBHOOK_URL: z.string().url().optional(),
-  AUTH_OTP_EMAIL_WEBHOOK_TOKEN: z.string().optional(),
+  SMTP_HOST: z.string().trim().min(1).default("smtp.gmail.com"),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_SECURE: z.coerce.boolean().default(false),
+  SMTP_USER: z.string().trim().min(1).optional(),
+  SMTP_PASSWORD: z.string().min(1).optional(),
+  SMTP_FROM: z.string().trim().min(1).optional(),
   DATA_PROVIDER: z
     .enum(["eodhd", "zerodha", "global-datafeeds"])
     .default("eodhd"),

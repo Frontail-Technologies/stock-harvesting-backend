@@ -1,4 +1,4 @@
-// The canonical "Weekly Strong" / near-multi-year-high breakout evaluator - the single source of truth for this decision; every caller (live list, backtest, Scanner overlay) goes through the functions below rather than reimplementing the check. computeSymbolBreakoutBacktest uses caller-chosen window sizes instead of the fixed defaults; computeAllRelativeStrengthMetrics uses only the weekly half (via passesNearHigh) as an unrelated pre-filter, not the full two-condition screen.
+// The canonical "Weekly Strong" / near-multi-year-high breakout evaluator - the single source of truth for this decision; every caller (live list, backtest) goes through the functions below rather than reimplementing the check. Scanner has its own independent qualification rule (see modules/scanner/rules/scanner-weekly-rule.ts) and does not use this evaluator. computeAllRelativeStrengthMetrics uses only the weekly half (via passesNearHigh) as an unrelated pre-filter, not the full two-condition screen.
 
 import { isCompletedTradingWeek } from "./trading-calendar";
 
@@ -98,17 +98,6 @@ export function evaluateWeeklyStrongLatest(
   return { passes: passesDaily && passesWeekly, passesDaily, passesWeekly };
 }
 
-// Window-size derivation for the Scanner's caller-chosen lookback (its lookback-multiplier control), separate from the fixed-window Weekly Strong screen; both the live scan and computeSymbolBreakoutBacktest call this so they can't drift apart on window size.
-export function deriveScannerLookbackBars(lookbackWeeks: number): {
-  dailyLookbackBars: number;
-  weeklyLookbackBars: number;
-} {
-  return {
-    weeklyLookbackBars: Math.max(1, Math.round(lookbackWeeks)),
-    dailyLookbackBars: Math.max(1, Math.round(lookbackWeeks * 5)),
-  };
-}
-
 export type WeeklyStrongSeriesPoint = {
   time: string;
   passes: boolean;
@@ -164,7 +153,7 @@ export function evaluateWeeklyStrongSeries(
   return points;
 }
 
-// Where the CURRENT (trailing) unbroken run of passing weeks began - the same "entry" concept computeSymbolBreakoutBacktest uses to open a trade, here for a still-open qualifying streak. Returns null if the series is empty or doesn't currently end in a passing state (defensive even though callers only ask this for a symbol known to pass now); never invents a reference point, just walks the pass/fail series evaluateWeeklyStrongSeries already produces.
+// Where the CURRENT (trailing) unbroken run of passing weeks began - the same "entry" concept the Scanner backtest uses to open a trade, here for a still-open qualifying streak. Returns null if the series is empty or doesn't currently end in a passing state (defensive even though callers only ask this for a symbol known to pass now); never invents a reference point, just walks the pass/fail series evaluateWeeklyStrongSeries already produces.
 export function findCurrentStreakEntryIndex(series: WeeklyStrongSeriesPoint[]): number | null {
   if (series.length === 0 || !series[series.length - 1].passes) return null;
 

@@ -8,11 +8,9 @@ import {
   type CandleTimeframe,
 } from "../../shared/constants";
 import { normalizeSymbol } from "../../shared/normalize";
-import {
-  computeSymbolBreakoutBacktest,
-  getSymbolWeeklyStrongSeriesInput,
-} from "../market-data/market-data.service";
 import { calculateNear250WeekHighScan } from "./rules/near-250-week-high";
+import { computeSymbolBreakoutBacktest } from "./scanner.backtest";
+import { getScannerWeeklySeriesInput } from "./scanner.candles";
 import {
   DEFAULT_SCANNER_LOOKBACK,
   SCANNER_LOOKBACK_WEEKS,
@@ -91,22 +89,19 @@ async function calculateCurrentNear250WeekHighResult(input: {
   if (input.rule && input.rule !== SCANNER_RULE_KEY.near250WeekHigh) return null;
 
   const symbol = normalizeSymbol(input.symbol);
-  // Same fetch+gate (daily+weekly series, completed-week trim, minimum-
-  // history check) the backtest overlay uses for this same symbol - see
-  // getSymbolWeeklyStrongSeriesInput's own comment for why this must be
-  // shared rather than each path querying independently.
-  const seriesInput = await getSymbolWeeklyStrongSeriesInput(symbol, input.exchange);
+  const seriesInput = await getScannerWeeklySeriesInput(symbol, input.exchange);
   if (!seriesInput) return null;
 
   const lookback = input.lookback ?? DEFAULT_SCANNER_LOOKBACK;
   const lookbackWeeks = SCANNER_LOOKBACK_WEEKS[lookback];
   const scan = calculateNear250WeekHighScan(
-    seriesInput.dailyRows,
-    seriesInput.weeklyRows,
+    seriesInput.segments,
+    seriesInput.latestSegment,
+    seriesInput.isLatestWeekFresh,
     lookbackWeeks
   );
 
-  if (!scan || scan.highlightTimes.length === 0) return null;
+  if (!scan) return null;
 
   return {
     id: `${SCANNER_RULE_KEY.near250WeekHigh}:${input.exchange}:${symbol}:${lookback}:${scan.endTime}`,

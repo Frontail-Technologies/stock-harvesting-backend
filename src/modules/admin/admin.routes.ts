@@ -43,6 +43,7 @@ import {
   replaceCollectionVersionBodySchema,
   providerConnectBodySchema,
   providerSyncBodySchema,
+  refreshDailyCandlesBodySchema,
   updateAiSettingsBodySchema,
   updateAiKeyBodySchema,
   updateCollectionBodySchema,
@@ -66,6 +67,7 @@ import {
   listAdminUsers,
   listJobs,
   triggerCandleBackfill,
+  triggerDailyCandleRefresh,
   triggerIndexCandleBackfill,
   triggerInstrumentSync,
   triggerPriceRefresh,
@@ -296,6 +298,19 @@ adminRouter.post(
     const result = await triggerCandleBackfill({
       actorUserId: getAuthUserId(req),
       ...body,
+    });
+    sendAccepted(res, result);
+  })
+);
+
+adminRouter.post(
+  "/market-data/refresh-daily-candles",
+  validate({ body: refreshDailyCandlesBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { symbol: string };
+    const result = await triggerDailyCandleRefresh({
+      actorUserId: getAuthUserId(req),
+      symbol: body.symbol,
     });
     sendAccepted(res, result);
   })

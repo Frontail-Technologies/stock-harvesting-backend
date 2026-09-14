@@ -9,6 +9,7 @@ export * from "./market-collection-versions";
 export * from "./market-collections";
 export * from "./market-data";
 export * from "./monetization";
+export * from "./password-reset-tokens";
 export * from "./price-alerts";
 export * from "./registration-verifications";
 export * from "./scanner";

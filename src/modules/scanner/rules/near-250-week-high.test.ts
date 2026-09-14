@@ -1,158 +1,131 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  deriveScannerLookbackBars,
-  evaluateWeeklyStrongSeries,
-} from "../../market-data/weekly-strong-evaluator";
 import { calculateNear250WeekHighScan } from "./near-250-week-high";
+import { evaluateScannerWeeklySeries, type ScannerWeeklyCandle } from "./scanner-weekly-rule";
 
-// Daily bars run 1:5 against weekly bars (deriveScannerLookbackBars), so a
-// weekly series of `weeks` entries needs `weeks * 5` daily entries covering
-// the same span for the two-condition evaluator to have a full window.
-function buildSeries(weeks: number, weeklyClose: (index: number) => number) {
-  const weeklyCandles = Array.from({ length: weeks }, (_, index) => ({
-    time: `w-${String(index).padStart(4, "0")}`,
+function buildWeeklySeries(weeks: number, weeklyClose: (index: number) => number, offset = 0): ScannerWeeklyCandle[] {
+  return Array.from({ length: weeks }, (_, index) => ({
+    time: `w-${String(index + offset).padStart(5, "0")}`,
     close: weeklyClose(index),
   }));
-  const dailyCandles = Array.from({ length: weeks * 5 }, (_, index) => ({
-    time: `d-${String(index).padStart(5, "0")}`,
-    close: weeklyClose(Math.floor(index / 5)),
-  }));
-  return { dailyCandles, weeklyCandles };
 }
 
-describe("near-250-week-high scan (Scanner live path)", () => {
-  it("matches when both the daily and weekly close are within 15% of their rolling highs", () => {
-    // Every bar (daily and weekly alike) closes at 900 except one early
-    // spike to 1000 - so the rolling high is 1000, and 900/1000 = 90% >=
-    // the 85% threshold on both legs.
-    const { dailyCandles, weeklyCandles } = buildSeries(250, (index) =>
-      index === 10 ? 1000 : 900
-    );
+describe("near-250-week-high scan (Scanner live path) - single continuous segment", () => {
+  it("matches when the weekly close is within 15% of its rolling weekly-close high", () => {
+    const weeklyCandles = buildWeeklySeries(250, (index) => (index === 10 ? 1000 : 900));
 
-    const result = calculateNear250WeekHighScan(dailyCandles, weeklyCandles, 250);
+    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result?.matched).toBe(true);
     expect(result?.highlightTimes).toContain(weeklyCandles[weeklyCandles.length - 1].time);
   });
 
-  it("does not match when the weekly leg alone would pass but the daily leg fails - proving the daily confirmation condition is actually enforced", () => {
-    const weeks = 250;
-    const weeklyCandles = Array.from({ length: weeks }, (_, index) => ({
-      time: `w-${String(index).padStart(4, "0")}`,
-      // Weekly: spikes to 1000 once, otherwise closes at 900 (90% of high - passes weekly alone).
-      close: index === 10 ? 1000 : 900,
-    }));
-    // Daily: spikes to 1000 once, otherwise closes at 500 (50% of high - fails daily alone).
-    const dailyCandles = Array.from({ length: weeks * 5 }, (_, index) => ({
-      time: `d-${String(index).padStart(5, "0")}`,
-      close: index === 50 ? 1000 : 500,
-    }));
+  it("does not depend on daily candles at all - the qualification rule takes only weekly closes", () => {
+    const weeklyCandles = buildWeeklySeries(250, (index) => (index === 10 ? 1000 : 900));
 
-    const result = calculateNear250WeekHighScan(dailyCandles, weeklyCandles, weeks);
+    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
 
-    // A weekly-only rule (the previous implementation) would have called
-    // this a match. The two-condition evaluator must not.
-    expect(result?.matched).toBe(false);
+    expect(result?.matched).toBe(true);
   });
 
-  it("does not match when both legs close well below their rolling highs", () => {
-    const { dailyCandles, weeklyCandles } = buildSeries(250, (index) =>
-      index === 10 ? 1000 : 500
-    );
+  it("does not match when the weekly close is well below its rolling weekly-close high", () => {
+    const weeklyCandles = buildWeeklySeries(250, (index) => (index === 10 ? 1000 : 500));
 
-    const result = calculateNear250WeekHighScan(dailyCandles, weeklyCandles, 250);
+    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result?.matched).toBe(false);
   });
 
   it("returns null when there isn't even a 1x (50-week) lookback tier of weekly history available", () => {
-    const { dailyCandles, weeklyCandles } = buildSeries(49, () => 900);
+    const weeklyCandles = buildWeeklySeries(49, () => 900);
 
-    const result = calculateNear250WeekHighScan(dailyCandles, weeklyCandles, 250);
+    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result).toBeNull();
   });
 
-  it("falls back to a smaller lookback tier when the full requested window isn't available, matching the previously-existing UX", () => {
-    const { dailyCandles, weeklyCandles } = buildSeries(150, (index) =>
-      index === 10 ? 1000 : 900
-    );
+  it("falls back to a smaller lookback tier for the CURRENT verdict when the full requested window isn't available", () => {
+    const weeklyCandles = buildWeeklySeries(150, (index) => (index === 10 ? 1000 : 900));
 
-    const result = calculateNear250WeekHighScan(dailyCandles, weeklyCandles, 250);
+    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result?.metrics.lookbackWeeks).toBe(150);
     expect(result?.matched).toBe(true);
   });
 
-  it("highlights every historical week that passed both conditions, not just the latest", () => {
+  it("highlights multiple historical weeks, never before a full lookbackWeeks window exists", () => {
     const weeks = 60;
-    const weeklyCandles = Array.from({ length: weeks }, (_, index) => ({
-      time: `w-${String(index).padStart(4, "0")}`,
-      close: index === 5 ? 1000 : index % 2 === 0 ? 900 : 500,
-    }));
-    const dailyCandles = Array.from({ length: weeks * 5 }, (_, index) => ({
-      time: `d-${String(index).padStart(5, "0")}`,
-      close: index === 25 ? 1000 : 900,
-    }));
+    // Rising close, so every index at or after the 50-week warm-up point is
+    // trivially its own trailing high.
+    const weeklyCandles = buildWeeklySeries(weeks, (index) => 500 + index);
 
-    const result = calculateNear250WeekHighScan(dailyCandles, weeklyCandles, 50);
+    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 50);
 
-    expect(result?.highlightTimes).toContain(weeklyCandles[0].time);
-    expect(result?.highlightTimes).not.toContain(weeklyCandles[1].time);
-    expect(result?.highlightTimes).toContain(weeklyCandles[weeklyCandles.length - 2].time);
-    expect(result?.highlightTimes).not.toContain(weeklyCandles[weeklyCandles.length - 1].time);
+    expect(result?.highlightTimes).not.toContain(weeklyCandles[0].time);
+    expect(result?.highlightTimes).not.toContain(weeklyCandles[48].time);
+    expect(result?.highlightTimes).toContain(weeklyCandles[49].time);
+    expect(result?.highlightTimes).toContain(weeklyCandles[59].time);
+    expect(result?.highlightTimes?.length).toBe(11); // indices 49..59
   });
-});
 
-// Consistency regression: this Scanner rule and computeSymbolBreakoutBacktest
-// (market-data.service.ts) now both delegate to evaluateWeeklyStrongSeries
-// with the SAME deriveScannerLookbackBars window sizing - this proves the
-// live-scan wrapper produces exactly the evaluator's own answer rather than
-// any local reimplementation, which is the actual bug this closes (see
-// docs/KNOWN_ISSUES.md). completed-week trimming itself is applied upstream
-// by both consumers via the shared getSymbolWeeklyStrongSeriesInput ->
-// excludeIncompleteTradingWeek (covered directly in
-// weekly-strong-evaluator.test.ts), so it isn't re-tested here.
-describe("live scan vs. canonical evaluator consistency", () => {
-  it("agrees with a direct evaluateWeeklyStrongSeries call, bar for bar, for a representative passing series", () => {
-    const { dailyCandles, weeklyCandles } = buildSeries(250, (index) =>
-      index % 20 === 0 ? 1000 : 800
-    );
+  it("agrees with a direct evaluateScannerWeeklySeries call, bar for bar", () => {
+    const weeklyCandles = buildWeeklySeries(250, (index) => (index % 20 === 0 ? 1000 : 800));
     const lookbackWeeks = 250;
 
-    const scan = calculateNear250WeekHighScan(dailyCandles, weeklyCandles, lookbackWeeks);
-    const { dailyLookbackBars, weeklyLookbackBars } = deriveScannerLookbackBars(lookbackWeeks);
-    const direct = evaluateWeeklyStrongSeries(dailyCandles, weeklyCandles, {
-      dailyLookbackBars,
-      weeklyLookbackBars,
-    });
+    const scan = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, lookbackWeeks);
+    const direct = evaluateScannerWeeklySeries(weeklyCandles, lookbackWeeks);
 
     const expectedHighlightTimes = direct.filter((point) => point.passes).map((point) => point.time);
     expect(scan?.highlightTimes).toEqual(expectedHighlightTimes);
     expect(scan?.matched).toBe(direct[direct.length - 1].passes);
   });
+});
 
-  it("agrees with a direct evaluateWeeklyStrongSeries call for a representative failing series (daily leg fails)", () => {
-    const weeks = 250;
-    const weeklyCandles = Array.from({ length: weeks }, (_, index) => ({
-      time: `w-${String(index).padStart(4, "0")}`,
-      close: index === 100 ? 1000 : 900,
-    }));
-    const dailyCandles = Array.from({ length: weeks * 5 }, (_, index) => ({
-      time: `d-${String(index).padStart(5, "0")}`,
-      close: index === 500 ? 1000 : 400,
-    }));
-    const lookbackWeeks = 250;
+describe("current qualification unavailable does not erase historical highlightTimes", () => {
+  it("returns historical matches even when isLatestWeekFresh is false", () => {
+    const historical = buildWeeklySeries(60, (index) => 500 + index);
 
-    const scan = calculateNear250WeekHighScan(dailyCandles, weeklyCandles, lookbackWeeks);
-    const { dailyLookbackBars, weeklyLookbackBars } = deriveScannerLookbackBars(lookbackWeeks);
-    const direct = evaluateWeeklyStrongSeries(dailyCandles, weeklyCandles, {
-      dailyLookbackBars,
-      weeklyLookbackBars,
-    });
+    const result = calculateNear250WeekHighScan([historical], historical, false, 50);
 
-    expect(scan?.matched).toBe(false);
-    expect(scan?.matched).toBe(direct[direct.length - 1].passes);
+    expect(result).not.toBeNull();
+    expect(result?.matched).toBeUndefined();
+    expect(result?.highlightTimes.length).toBeGreaterThan(0);
+  });
+
+  it("leaves the current verdict undefined (not a false match) when the latest segment is too short for any effective tier", () => {
+    const historical = buildWeeklySeries(60, (index) => 500 + index);
+    const shortLatest = buildWeeklySeries(10, () => 100, 1000);
+
+    const result = calculateNear250WeekHighScan([historical, shortLatest], shortLatest, true, 50);
+
+    expect(result?.matched).toBeUndefined();
+    expect(result?.highlightTimes.length).toBeGreaterThan(0);
+  });
+});
+
+describe("REQUIRED REGRESSION - TCS/LALPATHLAB class (historical bands survive a trailing gap)", () => {
+  it("200+ valid weeks with known historical matches, gap, <50 valid weeks after, latest invalid: historical remains, current unavailable", () => {
+    const olderSegment = buildWeeklySeries(220, (index) => 500 + index); // monotonically rising -> passes from index 49 onward
+    const recentShortSegment = buildWeeklySeries(20, () => 100, 1000); // far short of the 50-week floor
+
+    const result = calculateNear250WeekHighScan(
+      [olderSegment, recentShortSegment],
+      recentShortSegment,
+      false, // latest completed week is invalid/partial - not fresh
+      50
+    );
+
+    expect(result).not.toBeNull();
+    // Historical matches before the gap remain present.
+    expect(result?.highlightTimes.length).toBe(220 - 49); // indices 49..219 of olderSegment
+    expect(result?.highlightTimes).toContain(olderSegment[219].time);
+    // No highlight originates from the short recent segment - it never
+    // reaches a full 50-week window.
+    for (const row of recentShortSegment) {
+      expect(result?.highlightTimes).not.toContain(row.time);
+    }
+    // Current/latest qualification is unavailable, not a fabricated match.
+    expect(result?.matched).toBeUndefined();
+    expect(result?.metrics.lookbackWeeks).toBeNull();
   });
 });

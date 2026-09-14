@@ -11,13 +11,14 @@ import * as marketCollectionsModule from "../market-collections/market-collectio
 import {
   computeMembershipChanges,
   getWeeklyStrongBacktestMembershipChanges,
+  type WeeklyStrongBacktestMembershipChangeMember,
 } from "./weekly-strong-backtest.queries";
 
 const db = vi.mocked(dbClientModule.db);
 const requireCollectionByCode = vi.mocked(marketCollectionsModule.requireCollectionByCode);
 
-function member(symbol: string, exchange = "NSE") {
-  return { symbol, name: symbol, exchange };
+function member(symbol: string, exchange = "NSE", instrumentId = `${exchange}:${symbol}`) {
+  return { instrumentId, symbol, name: symbol, exchange };
 }
 
 // Mimics drizzle's chainable, awaitable query builder just enough for this
@@ -35,6 +36,25 @@ function selectResult(rows: unknown[]) {
   return chain as never;
 }
 
+function assertInOutInvariants(
+  current: WeeklyStrongBacktestMembershipChangeMember[],
+  previous: WeeklyStrongBacktestMembershipChangeMember[],
+  entered: WeeklyStrongBacktestMembershipChangeMember[],
+  exited: WeeklyStrongBacktestMembershipChangeMember[],
+) {
+  const currentIds = new Set(current.map((m) => m.instrumentId));
+  const previousIds = new Set(previous.map((m) => m.instrumentId));
+
+  for (const stock of entered) {
+    expect(currentIds.has(stock.instrumentId)).toBe(true);
+    expect(previousIds.has(stock.instrumentId)).toBe(false);
+  }
+  for (const stock of exited) {
+    expect(previousIds.has(stock.instrumentId)).toBe(true);
+    expect(currentIds.has(stock.instrumentId)).toBe(false);
+  }
+}
+
 describe("computeMembershipChanges", () => {
   it("A: identical membership -> no entries, no exits", () => {
     const previous = [member("A"), member("B"), member("C")];
@@ -44,6 +64,7 @@ describe("computeMembershipChanges", () => {
 
     expect(enteredStocks).toEqual([]);
     expect(exitedStocks).toEqual([]);
+    assertInOutInvariants(current, previous, enteredStocks, exitedStocks);
   });
 
   it("B: a new stock qualifies -> entered only", () => {
@@ -66,14 +87,18 @@ describe("computeMembershipChanges", () => {
     expect(exitedStocks).toEqual([member("C")]);
   });
 
-  it("D: one enters and one exits in the same week", () => {
-    const previous = [member("A"), member("B")];
-    const current = [member("B"), member("C")];
+  it("D: the task's canonical example - previous [A,B,C], current [B,C,D] -> IN [D], OUT [A], B/C unchanged", () => {
+    const previous = [member("A"), member("B"), member("C")];
+    const current = [member("B"), member("C"), member("D")];
 
     const { enteredStocks, exitedStocks } = computeMembershipChanges(current, previous);
 
-    expect(enteredStocks).toEqual([member("C")]);
+    expect(enteredStocks).toEqual([member("D")]);
     expect(exitedStocks).toEqual([member("A")]);
+    const changedIds = new Set([...enteredStocks, ...exitedStocks].map((m) => m.instrumentId));
+    expect(changedIds.has(member("B").instrumentId)).toBe(false);
+    expect(changedIds.has(member("C").instrumentId)).toBe(false);
+    assertInOutInvariants(current, previous, enteredStocks, exitedStocks);
   });
 
   it("E: the same symbol on a different exchange is a distinct identity", () => {
@@ -103,6 +128,56 @@ describe("computeMembershipChanges", () => {
     expect(enteredStocks).toEqual([member("A")]);
     expect(exitedStocks).toEqual([]);
   });
+
+  it("identical snapshots produce zero IN and zero OUT even with a larger overlapping set", () => {
+    const stocks = [member("A"), member("B"), member("C"), member("D"), member("E")];
+
+    const { enteredStocks, exitedStocks } = computeMembershipChanges(stocks, stocks);
+
+    expect(enteredStocks).toHaveLength(0);
+    expect(exitedStocks).toHaveLength(0);
+  });
+
+  it("duplicate rows for the same instrumentId do not create duplicate IN/OUT rows", () => {
+    const previous = [member("A"), member("A"), member("B")];
+    const current = [member("B"), member("C"), member("C"), member("C")];
+
+    const { enteredStocks, exitedStocks } = computeMembershipChanges(current, previous);
+
+    expect(enteredStocks).toEqual([member("C")]);
+    expect(exitedStocks).toEqual([member("A")]);
+  });
+
+  it("canonical instrumentId drives identity, not symbol text: a real rename (same instrumentId, new symbol) is unchanged", () => {
+    const previous = [member("OLDNAME", "BSE", "instrument-1")];
+    const current = [member("NEWNAME", "BSE", "instrument-1")];
+
+    const { enteredStocks, exitedStocks } = computeMembershipChanges(current, previous);
+
+    expect(enteredStocks).toEqual([]);
+    expect(exitedStocks).toEqual([]);
+  });
+
+  it("canonical instrumentId drives identity, not symbol text: two different instruments sharing a symbol are both entered and exited", () => {
+    const previous = [member("TCS", "BSE", "instrument-old")];
+    const current = [member("TCS", "BSE", "instrument-new")];
+
+    const { enteredStocks, exitedStocks } = computeMembershipChanges(current, previous);
+
+    expect(enteredStocks).toEqual([member("TCS", "BSE", "instrument-new")]);
+    expect(exitedStocks).toEqual([member("TCS", "BSE", "instrument-old")]);
+  });
+
+  it("invariants hold across a larger mixed fixture", () => {
+    const previous = [member("A"), member("B"), member("C"), member("D"), member("E")];
+    const current = [member("C"), member("D"), member("E"), member("F"), member("G")];
+
+    const { enteredStocks, exitedStocks } = computeMembershipChanges(current, previous);
+
+    expect(enteredStocks.map((m) => m.symbol).sort()).toEqual(["F", "G"]);
+    expect(exitedStocks.map((m) => m.symbol).sort()).toEqual(["A", "B"]);
+    assertInOutInvariants(current, previous, enteredStocks, exitedStocks);
+  });
 });
 
 describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested week", () => {
@@ -123,9 +198,9 @@ describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested w
       .mockReturnValueOnce(selectResult([{ id: "run-1", weekEnding: "2026-08-25", totalPassing: 1 }])) // findPreviousRun (raw stored value)
       .mockReturnValueOnce(
         selectResult([
-          { runId: "run-1", symbol: "A", name: "Alpha", exchange: "NSE" },
-          { runId: "run-2", symbol: "A", name: "Alpha", exchange: "NSE" },
-          { runId: "run-2", symbol: "B", name: "Beta", exchange: "NSE" },
+          { runId: "run-1", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" },
+          { runId: "run-2", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" },
+          { runId: "run-2", instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" },
         ])
       );
 
@@ -141,7 +216,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested w
     // previous week ending 28 Aug 2026.
     expect(result.weekEnding).toBe("2026-09-04");
     expect(result.previousWeekEnding).toBe("2026-08-28");
-    expect(result.enteredStocks).toEqual([{ symbol: "B", name: "Beta", exchange: "NSE" }]);
+    expect(result.enteredStocks).toEqual([{ instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" }]);
     expect(result.exitedStocks).toEqual([]);
   });
 
@@ -150,7 +225,9 @@ describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested w
       .mockReturnValueOnce(selectResult([]))
       .mockReturnValueOnce(selectResult([{ id: "run-old", weekEnding: "2026-08-18", totalPassing: 1 }]))
       .mockReturnValueOnce(selectResult([]))
-      .mockReturnValueOnce(selectResult([{ runId: "run-old", symbol: "A", name: "Alpha", exchange: "NSE" }]));
+      .mockReturnValueOnce(
+        selectResult([{ runId: "run-old", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }])
+      );
 
     const result = await getWeeklyStrongBacktestMembershipChanges({
       code: "SEG1",
@@ -183,12 +260,14 @@ describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested w
     expect(db.select).toHaveBeenCalledTimes(2);
   });
 
-  it("D: the previous week is resolved as the closest persisted run strictly before the requested week", async () => {
+  it("D: the previous week is resolved as the closest persisted run strictly before the requested week, never a later one", async () => {
     db.select
       .mockReturnValueOnce(selectResult([]))
       .mockReturnValueOnce(selectResult([{ id: "run-3", weekEnding: "2026-09-08", totalPassing: 1 }]))
       .mockReturnValueOnce(selectResult([{ id: "run-2", weekEnding: "2026-09-01", totalPassing: 2 }]))
-      .mockReturnValueOnce(selectResult([{ runId: "run-3", symbol: "A", name: "Alpha", exchange: "NSE" }]));
+      .mockReturnValueOnce(
+        selectResult([{ runId: "run-3", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }])
+      );
 
     const result = await getWeeklyStrongBacktestMembershipChanges({
       code: "SEG1",
@@ -199,6 +278,25 @@ describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested w
     expect(result.previousWeekEnding).toBe(getWeekEndingFriday("2026-09-01"));
     expect(result.weekEnding).toBe("2026-09-11");
     expect(result.previousWeekEnding).toBe("2026-09-04");
+    // Current must always be strictly newer than previous - never equal, never reversed.
+    expect(new Date(result.weekEnding as string).getTime()).toBeGreaterThan(
+      new Date(result.previousWeekEnding as string).getTime()
+    );
+  });
+
+  it("E: findPreviousRun is called with the current run's own weekEnding, not a hardcoded/reversed direction - the query filter proves the ordering cannot silently invert", async () => {
+    const whereSpy = vi.fn().mockReturnValue({
+      orderBy: () => ({ limit: () => Promise.resolve([{ id: "run-1", weekEnding: "2026-08-25", totalPassing: 1 }]) }),
+    });
+    db.select
+      .mockReturnValueOnce(selectResult([]))
+      .mockReturnValueOnce(selectResult([{ id: "run-2", weekEnding: "2026-09-01", totalPassing: 2 }]))
+      .mockReturnValueOnce({ from: () => ({ where: whereSpy }) } as never)
+      .mockReturnValueOnce(selectResult([]));
+
+    await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-04" });
+
+    expect(whereSpy).toHaveBeenCalledTimes(1);
   });
 
   it("no earlier run exists at all -> previousWeekEnding is null and every current member counts as entered", async () => {
@@ -206,7 +304,9 @@ describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested w
       .mockReturnValueOnce(selectResult([]))
       .mockReturnValueOnce(selectResult([{ id: "run-1", weekEnding: "2026-08-25", totalPassing: 1 }]))
       .mockReturnValueOnce(selectResult([])) // findPreviousRun: nothing before it
-      .mockReturnValueOnce(selectResult([{ runId: "run-1", symbol: "A", name: "Alpha", exchange: "NSE" }]));
+      .mockReturnValueOnce(
+        selectResult([{ runId: "run-1", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }])
+      );
 
     const result = await getWeeklyStrongBacktestMembershipChanges({
       code: "SEG1",
@@ -214,7 +314,30 @@ describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested w
     });
 
     expect(result.previousWeekEnding).toBeNull();
-    expect(result.enteredStocks).toEqual([{ symbol: "A", name: "Alpha", exchange: "NSE" }]);
+    expect(result.enteredStocks).toEqual([{ instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }]);
     expect(result.exitedStocks).toEqual([]);
+  });
+
+  it("duplicate member rows for the same instrumentId within one run do not duplicate entered/exited results", async () => {
+    db.select
+      .mockReturnValueOnce(selectResult([]))
+      .mockReturnValueOnce(selectResult([{ id: "run-2", weekEnding: "2026-09-01", totalPassing: 1 }]))
+      .mockReturnValueOnce(selectResult([{ id: "run-1", weekEnding: "2026-08-25", totalPassing: 1 }]))
+      .mockReturnValueOnce(
+        selectResult([
+          { runId: "run-1", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" },
+          { runId: "run-1", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" },
+          { runId: "run-2", instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" },
+          { runId: "run-2", instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" },
+        ])
+      );
+
+    const result = await getWeeklyStrongBacktestMembershipChanges({
+      code: "SEG1",
+      weekEnding: "2026-09-04",
+    });
+
+    expect(result.enteredStocks).toEqual([{ instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" }]);
+    expect(result.exitedStocks).toEqual([{ instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }]);
   });
 });

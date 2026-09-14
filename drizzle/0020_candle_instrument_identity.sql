@@ -1,0 +1,2 @@
+ALTER TABLE "candles" DROP CONSTRAINT "candles_exchange_symbol_timeframe_time_unique";--> statement-breakpoint
+ALTER TABLE "candles" ADD CONSTRAINT "candles_instrument_id_timeframe_time_unique" UNIQUE("instrument_id","timeframe","time");

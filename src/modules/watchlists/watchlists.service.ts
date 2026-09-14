@@ -146,6 +146,7 @@ export async function getWatchlistRelativeStrength(input: {
   for (const [exchange, symbols] of bySymbolsPerExchange) {
     const instrumentRows: RelativeStrengthInstrumentInput[] = await db
       .select({
+        instrumentId: instruments.id,
         symbol: instruments.symbol,
         name: instruments.name,
         exchange: instruments.exchange,

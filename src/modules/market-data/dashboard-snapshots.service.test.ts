@@ -61,7 +61,7 @@ const writeDashboardSnapshot = vi.mocked(
   snapshotStoreModule.writeDashboardSnapshot,
 );
 
-const MEMBER_ROWS = [{ symbol: "AAA", name: "Alpha Co", exchange: "NSE" }];
+const MEMBER_ROWS = [{ instrumentId: "aaa-id", symbol: "AAA", name: "Alpha Co", exchange: "NSE" }];
 
 function buildRow(
   overrides: Partial<WeeklyStrongStockRow> = {},
@@ -167,6 +167,7 @@ describe("getOrComputeWeeklyStrongSnapshot - cache freshness", () => {
 
   it("D: recomputation calls computeWeeklyStrongStocks exactly once for the whole member pool, never once per stock", async () => {
     const manyMembers = Array.from({ length: 25 }, (_, i) => ({
+      instrumentId: `sym${i}-id`,
       symbol: `SYM${i}`,
       name: `Company ${i}`,
       exchange: "NSE",
@@ -233,10 +234,10 @@ describe("getOrComputeCollectionRelativeStrengthBase - stale frozen taxonomy", (
 
   // Current instruments: classification sync has since populated 3 of 4.
   const MEMBER_ROWS_WITH_TAXONOMY = [
-    { symbol: "ADANIPORTS", name: "Adani Ports", exchange: "BSE", sector: "Services", industry: "Transport Infrastructure" },
-    { symbol: "AXISBANK", name: "Axis Bank", exchange: "BSE", sector: "Financial Services", industry: "Banks" },
-    { symbol: "COFORGE", name: "Coforge", exchange: "BSE", sector: "Information Technology", industry: "IT - Software" },
-    { symbol: "UNCLASSIFIED", name: "Newly Listed", exchange: "BSE", sector: null, industry: null },
+    { instrumentId: "adaniports-id", symbol: "ADANIPORTS", name: "Adani Ports", exchange: "BSE", sector: "Services", industry: "Transport Infrastructure" },
+    { instrumentId: "axisbank-id", symbol: "AXISBANK", name: "Axis Bank", exchange: "BSE", sector: "Financial Services", industry: "Banks" },
+    { instrumentId: "coforge-id", symbol: "COFORGE", name: "Coforge", exchange: "BSE", sector: "Information Technology", industry: "IT - Software" },
+    { instrumentId: "unclassified-id", symbol: "UNCLASSIFIED", name: "Newly Listed", exchange: "BSE", sector: null, industry: null },
   ];
 
   beforeEach(() => {

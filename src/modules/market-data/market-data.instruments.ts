@@ -10,11 +10,9 @@ import {
   getEligibleProviderAdapter,
 } from "../data-provider/data-provider.service";
 
-// Instrument-table DB operations that don't need provider-search/backfill orchestration; getOrCreateInstrument lives in market-data.instrument-sync.ts instead, since it falls back to provider-orchestration on a miss.
-
 const INSTRUMENT_UPSERT_CHUNK_SIZE = 500;
-// 6 params/row x 500 = 3,000 params/statement - comfortably under Postgres's 65,535-parameter protocol limit.
 const INSTRUMENT_STATS_UPDATE_CHUNK_SIZE = 500;
+const POSTGRES_UNIQUE_VIOLATION = "23505";
 
 export async function getInstrumentsBySymbol(symbols: string[], exchange: string = DEFAULT_EXCHANGE) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
@@ -28,15 +26,6 @@ export async function getInstrumentsBySymbol(symbols: string[], exchange: string
   return new Map(rows.map((row) => [row.symbol, row]));
 }
 
-// Existence-only check ("does this exchange have any usable data at all"),
-// deliberately not routed through buildStockFilters/countStockRows - those
-// apply search-listing shaping (price>0 unless includeUnpriced, move
-// filters, etc.) that would under-report availability for a freshly-synced
-// instrument that hasn't been priced yet. `provider` narrows this to the
-// exact provider a caller's own filter would require (e.g. NSE only ever
-// matches `provider = zerodha` rows, same as buildStockFilters) - passing
-// it keeps this check accurate to what a real search on that exchange
-// would actually find, not just "any row exists at all".
 export async function hasActiveInstruments(
   exchange: string,
   provider?: string,
@@ -92,7 +81,6 @@ export async function resolveInstrumentsForSymbols(identities: InstrumentIdentit
 
 export async function createFallbackInstrument(symbol: string, exchange: string = DEFAULT_EXCHANGE) {
   const normalizedSymbol = normalizeSymbol(symbol);
-  // The provider tag (token format) can use the static registry even when that provider is disabled; the token itself always comes from an eligible adapter.
   const staticAdapter = getDataProviderAdapterForExchange(exchange);
   const eligibleAdapter = await getEligibleProviderAdapter({
     exchange,
@@ -143,7 +131,6 @@ export type InstrumentUpsertInput = {
   segment?: string;
 };
 
-// `instruments` enforces two unique constraints (exchange+symbol, provider+instrument_token), but onConflictDoUpdate can only target one, so a batch colliding on *either* key fails the whole INSERT. Both dedup passes run first, last-write-wins, symbol-level then token-level, so a vendor anomaly only drops a row, not the whole batch.
 export function dedupeInstrumentUpsertInputs(inputs: InstrumentUpsertInput[]) {
   const bySymbolKey = new Map<string, InstrumentUpsertInput>();
   for (const row of inputs) {
@@ -167,17 +154,30 @@ export function dedupeInstrumentUpsertInputs(inputs: InstrumentUpsertInput[]) {
   return deduped;
 }
 
-// dedupeInstrumentUpsertInputs only catches collisions within this batch. A row can still collide with a different (exchange, symbol) already in the DB (e.g. a provider reusing a token across segments), uncovered by the ON CONFLICT target - drop those here rather than aborting the whole sync.
-async function dropCrossBatchTokenCollisions(
-  inputs: InstrumentUpsertInput[],
-  provider: string,
-  dbClient: DbOrTx
-) {
-  if (inputs.length === 0) return inputs;
+type InstrumentIdentityRow = { id: string; exchange: string; symbol: string };
 
-  const tokens = inputs.map((row) => row.instrumentToken);
-  const existingRows = await dbClient
+type InstrumentRenameApplication = InstrumentUpsertInput & { instrumentId: string; fromSymbol: string };
+
+type InstrumentRenameConflict = {
+  provider: string;
+  instrumentToken: string;
+  exchange: string;
+  instrumentId: string;
+  fromSymbol: string;
+  toSymbol: string;
+  conflictingInstrumentId: string;
+};
+
+async function findInstrumentsByProviderToken(
+  provider: string,
+  tokens: string[],
+  dbClient: DbOrTx
+): Promise<Map<string, InstrumentIdentityRow>> {
+  if (tokens.length === 0) return new Map();
+
+  const rows = await dbClient
     .select({
+      id: instruments.id,
       exchange: instruments.exchange,
       symbol: instruments.symbol,
       instrumentToken: instruments.instrumentToken,
@@ -185,40 +185,170 @@ async function dropCrossBatchTokenCollisions(
     .from(instruments)
     .where(and(eq(instruments.provider, provider), inArray(instruments.instrumentToken, tokens)));
 
-  const existingByToken = new Map(existingRows.map((row) => [row.instrumentToken, row]));
-  const kept: InstrumentUpsertInput[] = [];
-  let droppedCount = 0;
-
-  for (const row of inputs) {
-    const existing = existingByToken.get(row.instrumentToken);
-    const isSameIdentity =
-      existing && existing.exchange === row.exchange && existing.symbol === normalizeSymbol(row.symbol);
-    if (existing && !isSameIdentity) {
-      droppedCount++;
-      continue;
-    }
-    kept.push(row);
-  }
-
-  if (droppedCount > 0) {
-    logger.warn(
-      { provider, droppedCount },
-      "Dropped instrument rows whose token already belongs to a different symbol in the DB"
-    );
-  }
-
-  return kept;
+  return new Map(rows.map((row) => [row.instrumentToken, row] as const));
 }
 
-export async function upsertInstruments(input: InstrumentUpsertInput[], provider: string, dbClient: DbOrTx = db) {
-  const dedupedInput = await dropCrossBatchTokenCollisions(
-    dedupeInstrumentUpsertInputs(input),
+async function findInstrumentsByExchangeSymbol(
+  identities: InstrumentIdentity[],
+  dbClient: DbOrTx
+): Promise<Map<string, InstrumentIdentityRow>> {
+  const symbolsByExchange = new Map<string, Set<string>>();
+  for (const identity of identities) {
+    const set = symbolsByExchange.get(identity.exchange) ?? new Set<string>();
+    set.add(identity.symbol);
+    symbolsByExchange.set(identity.exchange, set);
+  }
+
+  const resolved = new Map<string, InstrumentIdentityRow>();
+  for (const [exchange, symbols] of symbolsByExchange) {
+    const rows = await dbClient
+      .select({ id: instruments.id, exchange: instruments.exchange, symbol: instruments.symbol })
+      .from(instruments)
+      .where(and(eq(instruments.exchange, exchange), inArray(instruments.symbol, [...symbols])));
+
+    for (const row of rows) resolved.set(`${row.exchange}:${row.symbol}`, row);
+  }
+
+  return resolved;
+}
+
+async function partitionInstrumentUpserts(
+  inputs: InstrumentUpsertInput[],
+  provider: string,
+  dbClient: DbOrTx
+): Promise<{
+  renames: InstrumentRenameApplication[];
+  conflicts: InstrumentRenameConflict[];
+  passthrough: InstrumentUpsertInput[];
+}> {
+  const byToken = await findInstrumentsByProviderToken(
     provider,
+    inputs.map((row) => row.instrumentToken),
     dbClient
   );
 
-  for (let index = 0; index < dedupedInput.length; index += INSTRUMENT_UPSERT_CHUNK_SIZE) {
-    const chunk = dedupedInput.slice(index, index + INSTRUMENT_UPSERT_CHUNK_SIZE);
+  const passthrough: InstrumentUpsertInput[] = [];
+  const renameCandidates: Array<{ input: InstrumentUpsertInput; symbol: string; existing: InstrumentIdentityRow }> = [];
+
+  for (const row of inputs) {
+    const symbol = normalizeSymbol(row.symbol);
+    const existing = byToken.get(row.instrumentToken);
+
+    if (!existing || existing.exchange !== row.exchange || existing.symbol === symbol) {
+      passthrough.push(row);
+      continue;
+    }
+
+    renameCandidates.push({ input: row, symbol, existing });
+  }
+
+  if (renameCandidates.length === 0) {
+    return { renames: [], conflicts: [], passthrough };
+  }
+
+  const byNewIdentity = await findInstrumentsByExchangeSymbol(
+    renameCandidates.map((candidate) => ({ exchange: candidate.input.exchange, symbol: candidate.symbol })),
+    dbClient
+  );
+
+  const renames: InstrumentRenameApplication[] = [];
+  const conflicts: InstrumentRenameConflict[] = [];
+
+  for (const candidate of renameCandidates) {
+    const conflictingOwner = byNewIdentity.get(`${candidate.input.exchange}:${candidate.symbol}`);
+
+    if (conflictingOwner && conflictingOwner.id !== candidate.existing.id) {
+      conflicts.push({
+        provider,
+        instrumentToken: candidate.input.instrumentToken,
+        exchange: candidate.input.exchange,
+        instrumentId: candidate.existing.id,
+        fromSymbol: candidate.existing.symbol,
+        toSymbol: candidate.symbol,
+        conflictingInstrumentId: conflictingOwner.id,
+      });
+      continue;
+    }
+
+    renames.push({ ...candidate.input, instrumentId: candidate.existing.id, fromSymbol: candidate.existing.symbol });
+  }
+
+  return { renames, conflicts, passthrough };
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === POSTGRES_UNIQUE_VIOLATION);
+}
+
+async function findConflictingInstrumentId(
+  exchange: string,
+  symbol: string,
+  excludingInstrumentId: string,
+  dbClient: DbOrTx
+): Promise<string | null> {
+  const [row] = await dbClient
+    .select({ id: instruments.id })
+    .from(instruments)
+    .where(and(eq(instruments.exchange, exchange), eq(instruments.symbol, symbol)))
+    .limit(1);
+
+  if (!row || row.id === excludingInstrumentId) return null;
+  return row.id;
+}
+
+async function applyInstrumentRenames(
+  renames: InstrumentRenameApplication[],
+  provider: string,
+  dbClient: DbOrTx
+): Promise<InstrumentRenameConflict[]> {
+  const conflicts: InstrumentRenameConflict[] = [];
+
+  for (const rename of renames) {
+    const toSymbol = normalizeSymbol(rename.symbol);
+
+    try {
+      await dbClient
+        .update(instruments)
+        .set({
+          provider,
+          symbol: toSymbol,
+          name: rename.name,
+          instrumentToken: rename.instrumentToken,
+          segment: rename.segment,
+          active: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(instruments.id, rename.instrumentId));
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const conflictingInstrumentId = await findConflictingInstrumentId(
+        rename.exchange,
+        toSymbol,
+        rename.instrumentId,
+        dbClient
+      );
+      conflicts.push({
+        provider,
+        instrumentToken: rename.instrumentToken,
+        exchange: rename.exchange,
+        instrumentId: rename.instrumentId,
+        fromSymbol: rename.fromSymbol,
+        toSymbol,
+        conflictingInstrumentId: conflictingInstrumentId ?? "unknown",
+      });
+    }
+  }
+
+  return conflicts;
+}
+
+async function upsertInstrumentsByExchangeSymbol(
+  inputs: InstrumentUpsertInput[],
+  provider: string,
+  dbClient: DbOrTx
+) {
+  for (let index = 0; index < inputs.length; index += INSTRUMENT_UPSERT_CHUNK_SIZE) {
+    const chunk = inputs.slice(index, index + INSTRUMENT_UPSERT_CHUNK_SIZE);
     if (chunk.length === 0) continue;
 
     await dbClient
@@ -248,6 +378,23 @@ export async function upsertInstruments(input: InstrumentUpsertInput[], provider
   }
 }
 
+export async function upsertInstruments(input: InstrumentUpsertInput[], provider: string, dbClient: DbOrTx = db) {
+  const dedupedInput = dedupeInstrumentUpsertInputs(input);
+  const { renames, conflicts, passthrough } = await partitionInstrumentUpserts(dedupedInput, provider, dbClient);
+
+  const renameConflicts = await applyInstrumentRenames(renames, provider, dbClient);
+  const allConflicts = [...conflicts, ...renameConflicts];
+
+  if (allConflicts.length > 0) {
+    logger.warn(
+      { provider, conflicts: allConflicts },
+      "Instrument rename skipped: target exchange+symbol already belongs to another instrument"
+    );
+  }
+
+  await upsertInstrumentsByExchangeSymbol(passthrough, provider, dbClient);
+}
+
 type LatestStockStatsRow = {
   symbol: string;
   open: string;
@@ -256,7 +403,6 @@ type LatestStockStatsRow = {
   time: string;
 };
 
-// Uses a row_number() window function (filtered in an outer query since row_number() can't be filtered directly in WHERE) to fetch exactly the latest 2 rows per symbol, instead of an unbounded ORDER BY returning each symbol's entire history.
 async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT_EXCHANGE, dbClient: DbOrTx = db) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   const stats = new Map<
@@ -318,7 +464,6 @@ async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT
   return stats;
 }
 
-// Persists computed stats onto `instruments` so the stocks list can read/sort/filter prices directly instead of recomputing a candles lookback per symbol; batched as UPDATE ... FROM (VALUES ...) rather than one UPDATE per symbol.
 export async function refreshLatestInstrumentStats(exchange: string, symbols: string[], dbClient: DbOrTx = db) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   if (uniqueSymbols.length === 0) return;
@@ -335,7 +480,6 @@ export type LatestInstrumentStat = {
   time: string;
 };
 
-// Split out from refreshLatestInstrumentStats so the bulk write is directly testable against a fake dbClient (see market-data.instrument-stats-bulk-update.test.ts) independent of getLatestStockStats's own query.
 export async function applyLatestInstrumentStats(
   exchange: string,
   stats: Map<string, LatestInstrumentStat>,
@@ -347,7 +491,6 @@ export async function applyLatestInstrumentStats(
   for (let index = 0; index < statRows.length; index += INSTRUMENT_STATS_UPDATE_CHUNK_SIZE) {
     const chunk = statRows.slice(index, index + INSTRUMENT_STATS_UPDATE_CHUNK_SIZE);
 
-    // Explicit ::numeric casts so Postgres can't fail to infer changePct's type on a chunk where it happens to be NULL for every row.
     const values = sql.join(
       chunk.map(
         ([symbol, stat]) =>

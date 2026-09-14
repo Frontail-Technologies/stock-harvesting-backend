@@ -1,4 +1,4 @@
-import { Queue } from "bullmq";
+import { Queue, QueueEvents } from "bullmq";
 
 import {
   JOB_NAMES,
@@ -25,7 +25,9 @@ registerBullmqJobsCollector(async (gauge) => {
 const REPEATABLE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
 
 let marketDataQueue: Queue | null = null;
+let marketDataQueueEvents: QueueEvents | null = null;
 let loggedConnectionError = false;
+let loggedQueueEventsConnectionError = false;
 
 export function getRedisConnectionOptions() {
   if (!env.REDIS_URL) return null;
@@ -74,6 +76,26 @@ export function getMarketDataQueue() {
     });
   }
   return marketDataQueue;
+}
+
+export function getMarketDataQueueEvents() {
+  const connection = getRedisConnectionOptions();
+  if (!connection) return null;
+  if (!marketDataQueueEvents) {
+    marketDataQueueEvents = new QueueEvents(QUEUE_NAMES.marketData, { connection });
+
+    marketDataQueueEvents.on("error", (error) => {
+      if (loggedQueueEventsConnectionError) return;
+      loggedQueueEventsConnectionError = true;
+      logger.warn(
+        {
+          message: getErrorMessage(error, "Unknown queue events error"),
+        },
+        "Market data queue events Redis connection failed; ensure-fresh bounded wait degraded",
+      );
+    });
+  }
+  return marketDataQueueEvents;
 }
 
 const ENQUEUE_TIMEOUT_MS = 5_000;
@@ -128,6 +150,47 @@ export async function scheduleRepeatableMarketDataSync() {
   }
 }
 
+// No existing scheduled job covers a once-daily, post-close candle sync -
+// instrumentSync's 30-min cadence exists for the live latest-price ticker
+// (refreshAllLatestInstrumentPrices), not for last-stored-date incremental +
+// recent-repair candle sync. Two fires a day, same queue/worker mechanism:
+// the main run once BSE settles, a retry in case the main run hit a
+// transient provider failure.
+const DAILY_CANDLE_SYNC_TZ = "Asia/Kolkata";
+const DAILY_CANDLE_SYNC_CRON = "45 15 * * 1-5";
+const DAILY_CANDLE_SYNC_RETRY_CRON = "0 17 * * 1-5";
+
+export async function scheduleRepeatableDailyCandleSync() {
+  const queue = getMarketDataQueue();
+  if (!queue) return;
+
+  for (const exchange of SUPPORTED_EXCHANGE_CODES) {
+    for (const [suffix, pattern] of [
+      ["main", DAILY_CANDLE_SYNC_CRON],
+      ["retry", DAILY_CANDLE_SYNC_RETRY_CRON],
+    ] as const) {
+      try {
+        await queue.add(
+          JOB_NAMES.dailyCandleSync,
+          { exchange },
+          {
+            jobId: `repeatable-daily-candle-sync-${exchange}-${suffix}`,
+            repeat: { pattern, tz: DAILY_CANDLE_SYNC_TZ },
+          },
+        );
+      } catch (error) {
+        logger.warn(
+          {
+            exchange,
+            message: getErrorMessage(error, "Unknown error"),
+          },
+          "Failed to schedule repeatable daily candle sync",
+        );
+      }
+    }
+  }
+}
+
 // Best-effort cleanup - the real safety net against a stale job acting on a deleted collection is prepareCollectionData's own no-op check, not this removal.
 export async function removeQueuedCollectionPrepareJobs(collectionIds: string[]) {
   const queue = getMarketDataQueue();
@@ -153,4 +216,5 @@ export async function removeQueuedCollectionPrepareJobs(collectionIds: string[])
 
 export async function closeQueues() {
   await marketDataQueue?.close();
+  await marketDataQueueEvents?.close();
 }

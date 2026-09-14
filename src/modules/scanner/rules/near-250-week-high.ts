@@ -1,43 +1,39 @@
-import {
-  deriveScannerLookbackBars,
-  evaluateWeeklyStrongSeries,
-  type WeeklyStrongCandle,
-} from "../../market-data/weekly-strong-evaluator";
 import { getEffectiveScannerLookbackWeeks } from "../scanner.constants";
 import type { Near250WeekHighScanMatch } from "../scanner.types";
+import { evaluateScannerWeeklySeries, type ScannerWeeklyCandle } from "./scanner-weekly-rule";
 
-// The Scanner's live near-high scan. This is now the SAME two-condition
-// Weekly Strong evaluator computeSymbolBreakoutBacktest (market-data.service.ts)
-// uses for the backtest overlay on the same page - previously this function
-// ran its own weekly-only simplification (a single close-vs-rolling-high
-// check), which could disagree with the backtest's two-condition answer for
-// the same symbol at the same moment. See docs/KNOWN_ISSUES.md.
 export function calculateNear250WeekHighScan(
-  dailyCandles: WeeklyStrongCandle[],
-  weeklyCandles: WeeklyStrongCandle[],
+  segments: ScannerWeeklyCandle[][],
+  latestSegment: ScannerWeeklyCandle[],
+  isLatestWeekFresh: boolean,
   requestedLookbackWeeks: number
 ): Near250WeekHighScanMatch | null {
-  const lookbackWeeks = getEffectiveScannerLookbackWeeks(
-    requestedLookbackWeeks,
-    weeklyCandles.length
-  );
-  if (!lookbackWeeks) return null;
+  const highlightTimes: string[] = [];
+  for (const segment of segments) {
+    for (const point of evaluateScannerWeeklySeries(segment, requestedLookbackWeeks)) {
+      if (point.passes) highlightTimes.push(point.time);
+    }
+  }
 
-  const { dailyLookbackBars, weeklyLookbackBars } = deriveScannerLookbackBars(lookbackWeeks);
-  const seriesPoints = evaluateWeeklyStrongSeries(dailyCandles, weeklyCandles, {
-    dailyLookbackBars,
-    weeklyLookbackBars,
-  });
-  if (seriesPoints.length === 0) return null;
+  let matched: boolean | undefined;
+  let currentLookbackWeeks: number | null = null;
+  if (isLatestWeekFresh) {
+    currentLookbackWeeks = getEffectiveScannerLookbackWeeks(requestedLookbackWeeks, latestSegment.length);
+    if (currentLookbackWeeks) {
+      const currentPoints = evaluateScannerWeeklySeries(latestSegment, currentLookbackWeeks);
+      matched = currentPoints[currentPoints.length - 1]?.passes;
+    }
+  }
 
-  const highlightTimes = seriesPoints.filter((point) => point.passes).map((point) => point.time);
-  const latest = seriesPoints[seriesPoints.length - 1];
+  if (highlightTimes.length === 0 && matched === undefined) return null;
+
+  const latestTime = latestSegment[latestSegment.length - 1]?.time ?? highlightTimes[highlightTimes.length - 1];
 
   return {
-    matched: latest.passes,
-    startTime: highlightTimes[0] ?? latest.time,
-    endTime: latest.time,
+    matched,
+    startTime: highlightTimes[0] ?? latestTime,
+    endTime: latestTime,
     highlightTimes,
-    metrics: { lookbackWeeks },
+    metrics: { lookbackWeeks: currentLookbackWeeks },
   };
 }

@@ -2,7 +2,11 @@ import { createServer } from "http";
 
 import { createApp } from "./app";
 import { pool } from "./db/client";
-import { closeQueues, scheduleRepeatableMarketDataSync } from "./modules/jobs/queues";
+import {
+  closeQueues,
+  scheduleRepeatableDailyCandleSync,
+  scheduleRepeatableMarketDataSync,
+} from "./modules/jobs/queues";
 import {
   attachMarketStreamGateway,
   closeMarketStreamProviders,
@@ -17,6 +21,7 @@ const marketStreamGateway = attachMarketStreamGateway(server);
 server.listen(env.PORT, () => {
   logger.info({ port: env.PORT }, "Backend listening");
   void scheduleRepeatableMarketDataSync();
+  void scheduleRepeatableDailyCandleSync();
 });
 
 async function shutdown(signal: string) {

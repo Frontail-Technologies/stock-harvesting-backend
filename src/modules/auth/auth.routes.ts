@@ -31,6 +31,8 @@ import {
   googleAuthUrlQuerySchema,
   googleCallbackQuerySchema,
   passwordLoginBodySchema,
+  passwordResetConfirmBodySchema,
+  passwordResetRequestBodySchema,
   registrationRequestBodySchema,
   registrationResendBodySchema,
   registrationVerifyBodySchema,
@@ -42,6 +44,7 @@ import {
   resolveOauthDestination,
 } from "./google-auth.service";
 import { loginWithPassword } from "./password-auth.service";
+import { requestPasswordReset, resetPassword } from "./password-reset.service";
 import {
   requestUserRegistration,
   resendUserRegistrationOtp,
@@ -112,9 +115,13 @@ authRouter.get(
       if (!result.ok) {
         logger.info(
           { portal: authPortal, reason: result.reason },
-          "Google login rejected by portal access check",
+          "Google login rejected",
         );
-        return redirectToLogin("invalid-credentials");
+        return redirectToLogin(
+          result.reason === "account-exists-with-password"
+            ? "account-exists-password"
+            : "invalid-credentials",
+        );
       }
 
       setRefreshCookie(res, authPortal, result.refreshToken);
@@ -189,6 +196,29 @@ authRouter.post(
       accessToken: session.accessToken,
       user: session.user,
     });
+  }),
+);
+
+authRouter.post(
+  AUTH_ROUTES.passwordResetRequest,
+  validate({ body: passwordResetRequestBodySchema }),
+  rateLimit({ keyPrefix: "auth:password-reset-request", windowMs: 15 * 60 * 1000, max: 5 }),
+  requireTurnstile("user-password-reset-request"),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { email: string };
+    const result = await requestPasswordReset(body);
+    sendData(res, result);
+  }),
+);
+
+authRouter.post(
+  AUTH_ROUTES.passwordResetConfirm,
+  validate({ body: passwordResetConfirmBodySchema }),
+  rateLimit({ keyPrefix: "auth:password-reset-confirm", windowMs: 15 * 60 * 1000, max: 10 }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { token: string; password: string };
+    const result = await resetPassword(body);
+    sendData(res, result);
   }),
 );
 

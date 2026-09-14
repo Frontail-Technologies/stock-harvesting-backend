@@ -2,12 +2,7 @@ import { and, asc, count, desc, eq, gt, gte, ilike, inArray, lt, lte, not, or, s
 
 import { db } from "../../db/client";
 import { candles, instruments } from "../../db/schema";
-import {
-  HISTORY_GAP_BACKFILL_RETRY_COOLDOWN_MS,
-  MAX_EXPECTED_TRADING_GAP_DAYS,
-  SUPPORTED_EXCHANGES_CACHE_TTL_MS,
-} from "./market-data.constants";
-import { getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
+import { SUPPORTED_EXCHANGES_CACHE_TTL_MS } from "./market-data.constants";
 import { getOrSetCache } from "../../shared/cache";
 import { logger } from "../../shared/logger";
 import { getErrorMessage } from "../../shared/errors";
@@ -20,16 +15,10 @@ import {
 } from "../../shared/constants";
 import { normalizeSymbol } from "../../shared/normalize";
 import {
-  getActiveProviderAccessToken,
-  getEligibleProviderAdapter,
   getEodhdDataProviderAdapter,
   getProviderStatus,
 } from "../data-provider/data-provider.service";
-import {
-  isProviderEnabled,
-  recordProviderFailure,
-  recordProviderSuccess,
-} from "../data-provider/data-provider-settings.service";
+import { isProviderEnabled } from "../data-provider/data-provider-settings.service";
 import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 import type { ProviderDailyCandle, ProviderExchange } from "../data-provider/data-provider.types";
 import { aggregateMonthlyCandles, aggregateWeeklyCandles } from "./candle-aggregation";
@@ -43,6 +32,7 @@ import {
 import {
   applyLatestInstrumentStats,
   dedupeInstrumentUpsertInputs,
+  getInstrumentsBySymbol,
   hasActiveInstruments,
   type InstrumentUpsertInput,
   type LatestInstrumentStat,
@@ -52,10 +42,10 @@ import {
   backfillDailyCandles,
   backfillIndexCandles,
   refreshAllLatestInstrumentPrices,
-  runChartBackfillOnce,
-  runLatestCandleRefreshOnce,
-  safeProviderAction,
+  refreshDailyCandles,
+  syncDailyCandlesForActiveInstruments,
 } from "./market-data.candle-sync";
+import { ensureFreshDailyCandles } from "./market-data.chart-ensure-fresh";
 import {
   listStocks,
   NSE_NORMAL_EQUITY_SYMBOL_PATTERN,
@@ -67,11 +57,9 @@ import {
   computeAllRelativeStrengthMetrics,
   computeGroupRelativeStrength,
   computeRelativeStrengthMetrics,
-  computeSymbolBreakoutBacktest,
   computeWeeklyStrongBacktestMembers,
   computeWeeklyStrongStocks,
   deriveSectorIndustryTaxonomy,
-  getSymbolWeeklyStrongSeriesInput,
   groupRelativeStrengthMetrics,
   pickTopRelativeStrengthRows,
   WEEKLY_STRONG_BACKTEST_DEFAULT_WEEKS,
@@ -79,8 +67,6 @@ import {
   type RelativeStrengthInstrumentInput,
   type RelativeStrengthMetricRow,
   type SectorIndustryTaxonomyRow,
-  type SymbolBreakoutBacktestStats,
-  type SymbolWeeklyStrongSeriesInput,
   type WeeklyStrongBacktestMemberRow,
   type WeeklyStrongBacktestWeekMembers,
   type WeeklyStrongStockRow,
@@ -91,7 +77,6 @@ import {
   RELATIVE_STRENGTH_SNAPSHOT_VERSION,
   writeDashboardSnapshot,
 } from "./dashboard-snapshot-store";
-import { getLatestExpectedTradingDay } from "./trading-calendar";
 import type { MoveFilter } from "./market-data.schemas";
 
 // Implementations now live in market-data.stocks.ts; re-exported here so existing imports (e.g. market-collections.service.ts, ai.service.ts, market-data.routes.ts) keep working.
@@ -112,11 +97,9 @@ export {
   computeAllRelativeStrengthMetrics,
   computeGroupRelativeStrength,
   computeRelativeStrengthMetrics,
-  computeSymbolBreakoutBacktest,
   computeWeeklyStrongBacktestMembers,
   computeWeeklyStrongStocks,
   deriveSectorIndustryTaxonomy,
-  getSymbolWeeklyStrongSeriesInput,
   groupRelativeStrengthMetrics,
   pickTopRelativeStrengthRows,
   WEEKLY_STRONG_BACKTEST_DEFAULT_WEEKS,
@@ -124,8 +107,6 @@ export {
   type RelativeStrengthInstrumentInput,
   type RelativeStrengthMetricRow,
   type SectorIndustryTaxonomyRow,
-  type SymbolBreakoutBacktestStats,
-  type SymbolWeeklyStrongSeriesInput,
   type WeeklyStrongBacktestMemberRow,
   type WeeklyStrongBacktestWeekMembers,
   type WeeklyStrongStockRow,
@@ -138,11 +119,13 @@ export async function getChartHistoryRange(input: {
 }) {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
-  const range = await readCandleHistoryRange({
-    symbol,
-    exchange,
-    timeframe: CANDLE_TIMEFRAME.day,
-  });
+  const instrument = (await getInstrumentsBySymbol([symbol], exchange)).get(symbol);
+  const range = instrument
+    ? await readCandleHistoryRange({
+        instrumentId: instrument.id,
+        timeframe: CANDLE_TIMEFRAME.day,
+      })
+    : null;
 
   return {
     symbol,
@@ -153,6 +136,10 @@ export async function getChartHistoryRange(input: {
   };
 }
 
+// DB-only read path (RULES.md #16): opening a chart never triggers a provider
+// call. Candle freshness/gap repair is the daily sync job's job
+// (syncDailyCandlesForActiveInstruments / refreshDailyCandles in
+// market-data.candle-sync.ts), not this read.
 export async function getChartCandles(input: {
   symbol: string;
   timeframe: CandleTimeframe;
@@ -162,70 +149,16 @@ export async function getChartCandles(input: {
 }) {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
-  const from = input.from ?? getDefaultChartHistoryFromDate();
-  const to = input.to ?? getTodayDate();
 
-  let dailyRows = await readChartCandles({
-    symbol,
-    timeframe: CANDLE_TIMEFRAME.day,
-    from: input.from,
-    to: input.to,
-    exchange,
-  });
-
-  const freshnessAction = decideChartCandleFreshnessAction(dailyRows, from, input.from, exchange);
-
-  // A gap can be the *only* reason a backfill was triggered - that's specifically the case a provider may be structurally unable to fill, so it's the one case gated by the retry cooldown below; empty history and a split-ratio jump are both expected to resolve in a single backfill, so they keep retrying unconditionally.
-  const isGapOnlyBackfillTrigger =
-    freshnessAction === "backfill" &&
-    dailyRows.length > 0 &&
-    !hasLikelySplitDiscontinuity(dailyRows) &&
-    !shouldBackfillRequestedHistory(dailyRows, from, input.from) &&
-    hasSuspiciousHistoryGap(dailyRows);
-
-  if (
-    freshnessAction === "backfill" &&
-    (!isGapOnlyBackfillTrigger || shouldRetryHistoryGapBackfill(exchange, symbol))
-  ) {
-    // Missing/discontinuous/insufficient history is the rare, serious case -
-    // stays synchronous (the caller waits for real data rather than getting
-    // a broken/empty chart) and keeps its existing cooldown-gated self-heal
-    // behavior exactly as before. See the freshnessAction === "incremental-refresh"
-    // branch below for the common, low-severity staleness case, which is NOT
-    // synchronous for exactly this reason.
-    await safeProviderAction("market-data.chart-candle-backfill", () =>
-      runChartBackfillOnce({
-        symbol,
-        from,
-        to,
-        exchange,
+  const instrument = (await getInstrumentsBySymbol([symbol], exchange)).get(symbol);
+  const dailyRows = instrument
+    ? await readChartCandles({
+        instrumentId: instrument.id,
+        timeframe: CANDLE_TIMEFRAME.day,
+        from: input.from,
+        to: input.to,
       })
-    );
-    dailyRows = await readChartCandles({
-      symbol,
-      timeframe: CANDLE_TIMEFRAME.day,
-      from: input.from,
-      to: input.to,
-      exchange,
-    });
-    // Recorded regardless of whether the gap actually closed - if it did, hasSuspiciousHistoryGap won't fire again and this mark is irrelevant; if it didn't, this is what stops every subsequent chart open from paying for another full-history fetch.
-    if (isGapOnlyBackfillTrigger) {
-      markHistoryGapBackfillAttempted(exchange, symbol);
-    }
-  } else if (freshnessAction === "incremental-refresh") {
-    // Only the latest row is out of date (self-healing still runs - this is
-    // NOT removed), but persisted history is otherwise complete and
-    // authoritative, so the request must not block on a provider round-trip
-    // for a single day's candle. Fire-and-forget: runLatestCandleRefreshOnce
-    // already dedupes concurrent calls for the same symbol via its own
-    // in-flight-promise map, and safeProviderAction already swallows/logs
-    // any failure internally, so this can't produce an unhandled rejection.
-    // The next request for this symbol (this one included, moments later)
-    // picks up the refreshed row once it lands - see docs/MARKET_DATA.md.
-    void safeProviderAction("market-data.chart-candle-freshness-refresh", () =>
-      runLatestCandleRefreshOnce({ symbol, exchange })
-    );
-  }
+    : [];
 
   if (dailyRows.length > 0) {
     return deriveChartCandlesFromDailyRows(dailyRows, input.timeframe).map(
@@ -233,27 +166,15 @@ export async function getChartCandles(input: {
     );
   }
 
-  if (input.timeframe !== CANDLE_TIMEFRAME.day) {
+  if (input.timeframe !== CANDLE_TIMEFRAME.day && instrument) {
     const legacyRows = await readChartCandles({
-      symbol,
+      instrumentId: instrument.id,
       timeframe: input.timeframe,
       from: input.from,
       to: input.to,
-      exchange,
     });
     if (legacyRows.length > 0) return legacyRows.map(toChartCandleResponse);
   }
-
-  const runtimeRows = await safeProviderAction("market-data.chart-candle-runtime-fetch", () =>
-    fetchRuntimeChartCandles({
-      symbol,
-      timeframe: input.timeframe,
-      from,
-      to,
-      exchange,
-    })
-  );
-  if (runtimeRows?.length) return runtimeRows;
 
   return [];
 }
@@ -278,7 +199,7 @@ function deriveChartCandlesFromDailyRows(
     volume: Number(row.volume),
   }));
 
-  return aggregateRuntimeChartCandles(dailyRows, timeframe);
+  return aggregateChartCandlesForTimeframe(dailyRows, timeframe);
 }
 
 function toChartCandleResponse(row: {
@@ -299,59 +220,7 @@ function toChartCandleResponse(row: {
   };
 }
 
-async function fetchRuntimeChartCandles(input: {
-  symbol: string;
-  timeframe: CandleTimeframe;
-  from: string;
-  to: string;
-  exchange: string;
-}) {
-  const adapter = await getEligibleProviderAdapter({
-    exchange: input.exchange,
-    capability: "historical_daily_candles",
-  });
-  if (!adapter) return [];
-
-  const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
-  const [instrument] = await db
-    .select({
-      instrumentToken: instruments.instrumentToken,
-    })
-    .from(instruments)
-    .where(
-      and(
-        eq(instruments.exchange, input.exchange),
-        eq(instruments.symbol, input.symbol)
-      )
-    )
-    .limit(1);
-  const instrumentToken =
-    instrument?.instrumentToken ??
-    (adapter.getInstrumentToken
-      ? await adapter.getInstrumentToken(input.symbol, input.exchange)
-      : input.symbol);
-
-  let daily: ProviderDailyCandle[];
-  try {
-    daily = await adapter.fetchDailyCandles({
-      accessToken,
-      instrumentToken,
-      symbol: input.symbol,
-      from: input.from,
-      to: input.to,
-      exchangeCode: input.exchange,
-    });
-    void recordProviderSuccess(adapter.providerKey);
-  } catch (error) {
-    void recordProviderFailure(adapter.providerKey, error);
-    throw error;
-  }
-
-  const chartRows = aggregateRuntimeChartCandles(daily, input.timeframe);
-  return chartRows.map(toChartCandleResponse);
-}
-
-function aggregateRuntimeChartCandles(
+function aggregateChartCandlesForTimeframe(
   daily: ProviderDailyCandle[],
   timeframe: CandleTimeframe
 ) {
@@ -362,125 +231,23 @@ function aggregateRuntimeChartCandles(
   return daily;
 }
 
-function hasLikelySplitDiscontinuity(
-  rows: Array<{ close: string | number }>
-) {
-  for (let index = 1; index < rows.length; index++) {
-    const previousClose = Number(rows[index - 1]?.close);
-    const close = Number(rows[index]?.close);
-    if (!Number.isFinite(previousClose) || !Number.isFinite(close)) continue;
-    if (previousClose <= 0 || close <= 0) continue;
-
-    const ratio = Math.max(previousClose, close) / Math.min(previousClose, close);
-    if (ratio >= 4) return true;
-  }
-
-  return false;
-}
-
-function daysBetween(earlier: string, later: string): number {
-  const msPerDay = 86_400_000;
-  return Math.round(
-    (new Date(`${later}T00:00:00Z`).getTime() - new Date(`${earlier}T00:00:00Z`).getTime()) /
-      msPerDay
-  );
-}
-
-function hasSuspiciousHistoryGap(rows: Array<{ time: string }>): boolean {
-  for (let index = 1; index < rows.length; index++) {
-    const previous = rows[index - 1]?.time;
-    const current = rows[index]?.time;
-    if (!previous || !current) continue;
-    if (daysBetween(previous, current) > MAX_EXPECTED_TRADING_GAP_DAYS) return true;
-  }
-
-  return false;
-}
-
-const historyGapBackfillAttemptedAtByKey = new Map<string, number>();
-
-export function shouldRetryHistoryGapBackfill(
-  exchange: string,
-  symbol: string,
-  at: number = Date.now()
-): boolean {
-  const attemptedAt = historyGapBackfillAttemptedAtByKey.get(`${exchange}:${symbol}`);
-  return attemptedAt === undefined || at - attemptedAt >= HISTORY_GAP_BACKFILL_RETRY_COOLDOWN_MS;
-}
-
-export function markHistoryGapBackfillAttempted(
-  exchange: string,
-  symbol: string,
-  at: number = Date.now()
-): void {
-  historyGapBackfillAttemptedAtByKey.set(`${exchange}:${symbol}`, at);
-}
-
-// Only meaningful when the caller explicitly requested more history than is currently stored (explicitFrom set) - a normal, unbounded default request has no such question to ask and must fall through to the cheap isLatestDailyCandleStale check instead of triggering a full multi-year backfill on every open.
-function shouldBackfillRequestedHistory(
-  rows: Array<{ time: string }>,
-  requestedFrom: string,
-  explicitFrom?: string
-) {
-  if (!explicitFrom || rows.length === 0) return false;
-
-  const oldest = rows[0]?.time;
-  if (!oldest) return false;
-
-  return oldest > requestedFrom;
-}
-
-export function isLatestDailyCandleStale(
-  rows: Array<{ time: string }>,
-  exchange: string,
-  at: Date = new Date()
-) {
-  const latest = rows[rows.length - 1]?.time;
-  if (!latest) return false;
-  return latest < getLatestExpectedTradingDay(exchange, at);
-}
-
-export type ChartCandleFreshnessAction = "backfill" | "incremental-refresh" | "none";
-
-// getChartCandles' freshness decision, pure and directly testable (see market-data.freshness.test.ts). Order matters: missing/discontinuous/incomplete-history conditions take priority over mere staleness, since a symbol with no usable history needs a full re-fetch, not just the latest few days.
-export function decideChartCandleFreshnessAction(
-  dailyRows: Array<{ time: string; close: string | number }>,
-  from: string,
-  requestedFrom: string | undefined,
-  exchange: string
-): ChartCandleFreshnessAction {
-  if (
-    dailyRows.length === 0 ||
-    hasLikelySplitDiscontinuity(dailyRows) ||
-    hasSuspiciousHistoryGap(dailyRows) ||
-    shouldBackfillRequestedHistory(dailyRows, from, requestedFrom)
-  ) {
-    return "backfill";
-  }
-  if (isLatestDailyCandleStale(dailyRows, exchange)) {
-    return "incremental-refresh";
-  }
-  return "none";
-}
-
 async function deriveStoredCandlesForTimeframe(input: {
+  instrumentId: string;
+  exchange: string;
   symbol: string;
   timeframe: CandleTimeframe;
   from: string;
   to: string;
-  exchange: string;
 }) {
   const dailyRows = await readChartCandles({
-    symbol: input.symbol,
+    instrumentId: input.instrumentId,
     timeframe: CANDLE_TIMEFRAME.day,
     from: input.from,
     to: input.to,
-    exchange: input.exchange,
   });
 
-  const firstDailyRow = dailyRows[0];
-  if (!firstDailyRow?.instrumentId) return { inserted: 0 };
-  const instrumentId = firstDailyRow.instrumentId;
+  if (dailyRows.length === 0) return { inserted: 0 };
+  const instrumentId = input.instrumentId;
 
   const sourceRows = dailyRows.map((row) => ({
     time: row.time,
@@ -518,7 +285,13 @@ export { syncProviderInstruments };
 export { replaceCandlesAtomically };
 
 // backfillDailyCandles/backfillIndexCandles implementations live in market-data.candle-sync.ts; re-exported here so existing imports (admin.service.ts) keep working.
-export { backfillDailyCandles, backfillIndexCandles };
+export {
+  backfillDailyCandles,
+  backfillIndexCandles,
+  ensureFreshDailyCandles,
+  refreshDailyCandles,
+  syncDailyCandlesForActiveInstruments,
+};
 
 // Global (not collection-scoped) ranking of one index exchange's indices against each other - reuses computeAllRelativeStrengthMetrics, each index as its own row. Defaults to NSE_IDX; pass BSE_IDX for the BSE index box. Reads a persisted snapshot (scope "index_exchange", keyed by exchange code since indices aren't members of any market_collection) and derives the limited/sorted view from it; on a miss it computes once and persists.
 export async function getIndexRelativeStrength(
@@ -536,6 +309,7 @@ export async function getIndexRelativeStrength(
 
   const indexInstruments = await db
     .select({
+      instrumentId: instruments.id,
       symbol: instruments.symbol,
       name: instruments.name,
       exchange: instruments.exchange,

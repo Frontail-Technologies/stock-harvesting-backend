@@ -60,15 +60,14 @@ describe("isCompletedTradingWeek", () => {
     expect(isCompletedTradingWeek("2026-01-05", "NSE", at)).toBe(false);
   });
 
-  it("is not complete on the week's own last trading day, even after close", () => {
+  it("is complete on the week's own last trading day, once market close has passed", () => {
     const at = new Date("2026-01-09T10:05:00Z"); // Friday, after NSE close
-    expect(isCompletedTradingWeek("2026-01-05", "NSE", at)).toBe(false);
+    expect(isCompletedTradingWeek("2026-01-05", "NSE", at)).toBe(true);
   });
 
-  it("is not complete over the trailing weekend of the same week", () => {
-    // Deliberate design choice: a week only becomes "complete" once evaluation moves into the FOLLOWING ISO week, not merely once its last trading day's close has passed - a delayed/corrective EOD sync over the weekend could still touch Friday's candle.
+  it("stays complete over the trailing weekend of the same week", () => {
     const at = new Date("2026-01-11T03:00:00Z"); // Sunday
-    expect(isCompletedTradingWeek("2026-01-05", "NSE", at)).toBe(false);
+    expect(isCompletedTradingWeek("2026-01-05", "NSE", at)).toBe(true);
   });
 
   it("is complete once evaluated from the following week", () => {
@@ -127,7 +126,7 @@ describe("getWeekEndingFriday", () => {
   });
 });
 
-// A. normal Mon-Fri week -> weekEnding = Friday. B. Saturday/Sunday -> latest completed week = previous Friday (per isCompletedTradingWeek above). C. Monday-Thursday before the current weekly candle completes -> previous completed Friday. D. covered by isCompletedTradingWeek's holiday-blind-but-consistent behavior - no separate holiday model exists to test against.
+// A. normal Mon-Fri week -> weekEnding = last week's Friday, since this week's own Friday hasn't closed yet. B. Saturday/Sunday -> the Friday that just closed (per isCompletedTradingWeek above). C. Monday of the following week -> same Friday, still complete. D. covered by isCompletedTradingWeek's holiday-blind-but-consistent behavior - no separate holiday model exists to test against.
 describe("resolveLatestCompletedWeekEnding", () => {
   it("A: a normal Tuesday mid-week -> the completed week is last week's Friday", () => {
     // 2026-01-06 is a Tuesday in the week of Jan 5-9.
@@ -135,15 +134,15 @@ describe("resolveLatestCompletedWeekEnding", () => {
     expect(resolveLatestCompletedWeekEnding("NSE", at)).toBe("2026-01-02");
   });
 
-  it("B: Saturday -> still last week's Friday, not the Friday that just closed", () => {
-    // 2026-01-10 is the Saturday right after the week-of-Jan-5's own Friday (Jan 9) closed - isCompletedTradingWeek doesn't consider that week done yet, so the completed week remains the one before it.
+  it("B: Saturday -> the Friday that just closed is already complete", () => {
+    // 2026-01-10 is the Saturday right after the week-of-Jan-5's own Friday (Jan 9) closed.
     const at = new Date("2026-01-10T12:00:00Z");
-    expect(resolveLatestCompletedWeekEnding("NSE", at)).toBe("2026-01-02");
+    expect(resolveLatestCompletedWeekEnding("NSE", at)).toBe("2026-01-09");
   });
 
   it("B: Sunday -> same as Saturday", () => {
     const at = new Date("2026-01-11T03:00:00Z");
-    expect(resolveLatestCompletedWeekEnding("NSE", at)).toBe("2026-01-02");
+    expect(resolveLatestCompletedWeekEnding("NSE", at)).toBe("2026-01-09");
   });
 
   it("C: Monday of the following week -> the week that just ended is now complete", () => {

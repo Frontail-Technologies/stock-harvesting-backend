@@ -85,4 +85,15 @@ describe("GlobalDatafeedsMarketStreamProvider.subscribe", () => {
       expect.objectContaining({ Exchange: "BSE_IDX", InstrumentIdentifier: "1" })
     );
   });
+
+  it("does not throw when instrument resolution rejects (e.g. a DB/network error) - it logs and returns instead of crashing the caller", async () => {
+    resolveInstrumentsForSymbols.mockRejectedValue(new Error("getaddrinfo ENOTFOUND"));
+
+    const provider = new GlobalDatafeedsMarketStreamProvider();
+
+    await expect(
+      provider.subscribe([{ exchange: "BSE", symbol: "KOTAKBANK" }])
+    ).resolves.toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+  });
 });

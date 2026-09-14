@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import { authAccounts, users } from "../../db/schema";
@@ -156,11 +156,28 @@ async function readGoogleError(response: Response) {
   }
 }
 
-async function findOrCreateUser(profile: GoogleProfile): Promise<AuthUser> {
+type FindOrCreateUserResult =
+  | { ok: true; user: AuthUser }
+  | { ok: false; reason: "account-exists-with-password" };
+
+async function findOrCreateUser(profile: GoogleProfile): Promise<FindOrCreateUserResult> {
   const email = normalizeEmail(profile.email);
   const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1);
 
   if (existing) {
+    if (existing.passwordHash) {
+      const [linkedGoogleAccount] = await db
+        .select({ id: authAccounts.id })
+        .from(authAccounts)
+        .where(
+          and(eq(authAccounts.userId, existing.id), eq(authAccounts.provider, AUTH_PROVIDER.google)),
+        )
+        .limit(1);
+      if (!linkedGoogleAccount) {
+        return { ok: false, reason: "account-exists-with-password" };
+      }
+    }
+
     await db
       .update(users)
       .set({
@@ -179,11 +196,14 @@ async function findOrCreateUser(profile: GoogleProfile): Promise<AuthUser> {
       })
       .onConflictDoNothing();
 
-    return toAuthUser({
-      ...existing,
-      name: profile.name || existing.name,
-      avatarUrl: profile.picture ?? existing.avatarUrl,
-    });
+    return {
+      ok: true,
+      user: toAuthUser({
+        ...existing,
+        name: profile.name || existing.name,
+        avatarUrl: profile.picture ?? existing.avatarUrl,
+      }),
+    };
   }
 
   const [created] = await db
@@ -203,14 +223,17 @@ async function findOrCreateUser(profile: GoogleProfile): Promise<AuthUser> {
     providerAccountId: profile.sub,
   });
 
-  return toAuthUser(created);
+  return { ok: true, user: toAuthUser(created) };
 }
 
 export type CompleteGoogleLoginResult =
   | { ok: true; user: AuthUser; accessToken: string; refreshToken: string }
   | {
       ok: false;
-      reason: "admin-account-on-user-portal" | "not-admin-on-admin-portal";
+      reason:
+        | "admin-account-on-user-portal"
+        | "not-admin-on-admin-portal"
+        | "account-exists-with-password";
     };
 
 export async function completeGoogleLogin(
@@ -219,13 +242,16 @@ export async function completeGoogleLogin(
 ): Promise<CompleteGoogleLoginResult> {
   const googleAccessToken = await exchangeGoogleCode(code);
   const profile = await fetchGoogleProfile(googleAccessToken);
-  const user = await findOrCreateUser(profile);
+  const result = await findOrCreateUser(profile);
+  if (!result.ok) {
+    return result;
+  }
 
-  const access = evaluatePortalAccess(user.role, portal);
+  const access = evaluatePortalAccess(result.user.role, portal);
   if (!access.allowed) {
     return { ok: false, reason: access.reason };
   }
 
-  const session = await createSession(user, portal);
-  return { ok: true, user, ...session };
+  const session = await createSession(result.user, portal);
+  return { ok: true, user: result.user, ...session };
 }

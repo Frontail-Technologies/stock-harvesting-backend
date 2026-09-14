@@ -7,6 +7,7 @@ import {
   candleParamsSchema,
   candleQuerySchema,
   chartEligibleStockSearchQuerySchema,
+  ensureFreshCandlesBodySchema,
   historyRangeQuerySchema,
   indexRelativeStrengthQuerySchema,
   publicCandleQuerySchema,
@@ -14,6 +15,7 @@ import {
   type MoveFilter,
 } from "./market-data.schemas";
 import {
+  ensureFreshDailyCandles,
   getChartCandles,
   getChartHistoryRange,
   getIndexRelativeStrength,
@@ -136,6 +138,15 @@ marketDataRouter.get(
     };
 
     sendData(res, await getChartHistoryRange(query));
+  })
+);
+
+marketDataRouter.post(
+  "/candles/ensure-fresh",
+  validate({ body: ensureFreshCandlesBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { symbol: string; exchange: string };
+    sendData(res, await ensureFreshDailyCandles(body));
   })
 );
 

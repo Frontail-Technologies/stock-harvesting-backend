@@ -30,7 +30,21 @@ export class KiteMarketStreamProvider {
     const nseSymbols = symbols.filter((symbol) => symbol.exchange === "NSE");
     if (nseSymbols.length === 0) return;
 
-    const resolved = await this.resolveSubscriptions(nseSymbols);
+    let resolved: KiteSubscription[];
+    try {
+      resolved = await this.resolveSubscriptions(nseSymbols);
+    } catch (error) {
+      logger.warn(
+        {
+          provider: DATA_PROVIDER_KEY.zerodha,
+          requested: nseSymbols.length,
+          message: getErrorMessage(error, "Unknown instrument resolution error"),
+        },
+        "Kite stream subscribe failed to resolve instruments"
+      );
+      return;
+    }
+
     for (const item of resolved) {
       this.subscriptions.set(item.symbol, item);
       this.tokenToSymbol.set(item.instrumentToken, item);

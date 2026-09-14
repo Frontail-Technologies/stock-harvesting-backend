@@ -21,6 +21,7 @@ import {
   backfillDailyCandles,
   backfillIndexCandles,
   refreshAllLatestInstrumentPrices,
+  refreshDailyCandles,
   syncProviderInstruments,
 } from "../market-data/market-data.service";
 import { syncSectorClassifications } from "../market-data/sector-classification.service";
@@ -614,6 +615,18 @@ export async function triggerCandleBackfill(input: {
     targetType: "instrument",
     targetId: input.symbol,
     metadata: { from: input.from, to: input.to, result },
+  });
+  return result;
+}
+
+export async function triggerDailyCandleRefresh(input: { actorUserId: string; symbol: string }) {
+  const result = await refreshDailyCandles({ symbol: input.symbol });
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "market_data.daily_candles_refreshed",
+    targetType: "instrument",
+    targetId: input.symbol,
+    metadata: { result },
   });
   return result;
 }

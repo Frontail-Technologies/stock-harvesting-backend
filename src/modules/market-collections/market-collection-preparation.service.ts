@@ -147,6 +147,7 @@ export async function prepareCollectionData(
   }
   const members = await getActiveMemberInstrumentRows(collectionId);
   const symbols = members.map((member) => member.symbol);
+  const memberIdentities = members.map((member) => ({ instrumentId: member.instrumentId, symbol: member.symbol }));
 
   let stage: PreparationStage = "coverage_detection";
 
@@ -162,8 +163,7 @@ export async function prepareCollectionData(
     // lookup failure here throws and lands in the catch below, it is never
     // silently treated as "every symbol needs backfill".
     const symbolsNeedingBackfill = await findSymbolsNeedingHistoryBackfill({
-      exchange: collection.exchange,
-      symbols,
+      instruments: memberIdentities,
       requiredFromDate,
     });
 
@@ -215,7 +215,7 @@ export async function prepareCollectionData(
     stage = "availability";
     const { membersWithRequiredHistory, membersUnavailable } = await computeAvailabilityCounts(
       collection.exchange,
-      symbols
+      memberIdentities
     );
 
     if (await isCurrentMembershipVersionStale(collectionId, membershipVersionId)) {
@@ -331,13 +331,16 @@ function recordPreparationOutcome(outcome: "ready" | "partial" | "failed" | "sta
   }
 }
 
-async function computeAvailabilityCounts(exchange: string, symbols: string[]) {
-  if (symbols.length === 0) return { membersWithRequiredHistory: 0, membersUnavailable: 0 };
+async function computeAvailabilityCounts(
+  exchange: string,
+  instrumentIdentities: Array<{ instrumentId: string; symbol: string }>
+) {
+  if (instrumentIdentities.length === 0) return { membersWithRequiredHistory: 0, membersUnavailable: 0 };
 
   const dailyFrom = getDateYearsAgo(WEEKLY_STRONG_BACKTEST_FETCH_YEARS);
   const { dailyCandles, weeklyCandles } = await readDailyAndWeeklyMetricCandles({
     exchange,
-    symbols,
+    instruments: instrumentIdentities,
     dailyFrom,
     weeklyFrom: dailyFrom,
   });
@@ -346,9 +349,9 @@ async function computeAvailabilityCounts(exchange: string, symbols: string[]) {
 
   let membersWithRequiredHistory = 0;
   let membersUnavailable = 0;
-  for (const symbol of symbols) {
-    const dailyCount = dailyBySymbol.get(symbol)?.length ?? 0;
-    const weeklyCount = weeklyBySymbol.get(symbol)?.length ?? 0;
+  for (const instrument of instrumentIdentities) {
+    const dailyCount = dailyBySymbol.get(instrument.symbol)?.length ?? 0;
+    const weeklyCount = weeklyBySymbol.get(instrument.symbol)?.length ?? 0;
     if (hasSufficientWeeklyStrongHistory(dailyCount, weeklyCount)) {
       membersWithRequiredHistory += 1;
     } else {

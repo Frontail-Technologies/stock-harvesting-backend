@@ -230,6 +230,7 @@ export async function getWeeklyStrongBacktestWeekDetail(input: { code: string; w
 }
 
 export type WeeklyStrongBacktestMembershipChangeMember = {
+  instrumentId: string;
   symbol: string;
   name: string;
   exchange: string;
@@ -245,8 +246,15 @@ export type WeeklyStrongBacktestMembershipChanges = {
   exitedStocks: WeeklyStrongBacktestMembershipChangeMember[];
 };
 
-function membershipKey(member: { exchange: string; symbol: string }) {
-  return `${member.exchange}:${member.symbol}`;
+function dedupeByInstrumentId<T extends { instrumentId: string }>(members: T[]): T[] {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const member of members) {
+    if (seen.has(member.instrumentId)) continue;
+    seen.add(member.instrumentId);
+    deduped.push(member);
+  }
+  return deduped;
 }
 
 async function resolveMembershipMode(collectionId: string): Promise<WeeklyStrongBacktestMembershipMode> {
@@ -318,19 +326,22 @@ async function findPreviousRun(
 }
 
 export function computeMembershipChanges<T extends WeeklyStrongBacktestMembershipChangeMember>(
-  currentMembers: T[],
-  previousMembers: T[] | null,
+  currentMembersInput: T[],
+  previousMembersInput: T[] | null,
 ): { enteredStocks: T[]; exitedStocks: T[] } {
-  if (!previousMembers) {
+  const currentMembers = dedupeByInstrumentId(currentMembersInput);
+
+  if (!previousMembersInput) {
     return { enteredStocks: currentMembers, exitedStocks: [] };
   }
 
-  const previousKeys = new Set(previousMembers.map(membershipKey));
-  const currentKeys = new Set(currentMembers.map(membershipKey));
+  const previousMembers = dedupeByInstrumentId(previousMembersInput);
+  const previousIds = new Set(previousMembers.map((member) => member.instrumentId));
+  const currentIds = new Set(currentMembers.map((member) => member.instrumentId));
 
   return {
-    enteredStocks: currentMembers.filter((member) => !previousKeys.has(membershipKey(member))),
-    exitedStocks: previousMembers.filter((member) => !currentKeys.has(membershipKey(member))),
+    enteredStocks: currentMembers.filter((member) => !previousIds.has(member.instrumentId)),
+    exitedStocks: previousMembers.filter((member) => !currentIds.has(member.instrumentId)),
   };
 }
 
@@ -365,6 +376,7 @@ export async function getWeeklyStrongBacktestMembershipChanges(input: {
   const memberRows = await db
     .select({
       runId: weeklyStrongBacktestMembers.runId,
+      instrumentId: weeklyStrongBacktestMembers.instrumentId,
       symbol: weeklyStrongBacktestMembers.symbol,
       name: weeklyStrongBacktestMembers.name,
       exchange: weeklyStrongBacktestMembers.exchange,
@@ -377,6 +389,7 @@ export async function getWeeklyStrongBacktestMembershipChanges(input: {
   const previousMembers = previousRun ? memberRows.filter((row) => row.runId === previousRun.id) : null;
 
   const toChangeMember = (row: (typeof memberRows)[number]): WeeklyStrongBacktestMembershipChangeMember => ({
+    instrumentId: row.instrumentId,
     symbol: row.symbol,
     name: row.name,
     exchange: row.exchange,

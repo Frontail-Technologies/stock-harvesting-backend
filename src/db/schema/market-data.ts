@@ -93,8 +93,7 @@ export const candles = pgTable(
   (table) => ({
     pk: primaryKey({ columns: [table.id, table.time] }),
     candleUnique: unique().on(
-      table.exchange,
-      table.symbol,
+      table.instrumentId,
       table.timeframe,
       table.time,
     ),

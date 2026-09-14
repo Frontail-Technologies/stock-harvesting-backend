@@ -24,6 +24,8 @@ export const AUTH_ROUTES = {
   register: "/register",
   registerResend: "/register/resend",
   registerVerify: "/register/verify",
+  passwordResetRequest: "/password-reset/request",
+  passwordResetConfirm: "/password-reset/confirm",
   refresh: "/refresh",
   me: "/me",
   logout: "/logout",

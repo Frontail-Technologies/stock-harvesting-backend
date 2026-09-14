@@ -5,6 +5,8 @@ export const QUEUE_NAMES = {
 export const JOB_NAMES = {
   instrumentSync: "instrument-sync",
   priceRefresh: "price-refresh",
+  dailyCandleSync: "daily-candle-sync",
+  chartCandleEnsureFresh: "chart-candle-ensure-fresh",
   weeklyStrongBacktestBackfill: "weekly-strong-backtest-backfill",
   weeklyStrongBacktestHistoricalRebuild: "weekly-strong-backtest-historical-rebuild",
   collectionPrepare: "collection-prepare",

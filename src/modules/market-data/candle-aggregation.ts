@@ -1,3 +1,5 @@
+import { getIsoWeekRange } from "./trading-calendar";
+
 export type CandleInput = {
   time: string;
   open: number;
@@ -49,7 +51,10 @@ function aggregate(candles: CandleInput[], keyForDate: (date: Date) => string) {
 }
 
 export function aggregateWeeklyCandles(candles: CandleInput[]) {
-  return aggregate(candles, getWeekKey);
+  return aggregate(candles, getWeekKey).map((candle) => ({
+    ...candle,
+    time: getIsoWeekRange(candle.time).start,
+  }));
 }
 
 export function aggregateMonthlyCandles(candles: CandleInput[]) {

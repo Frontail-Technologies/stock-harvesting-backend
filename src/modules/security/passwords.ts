@@ -34,3 +34,11 @@ export function createOtpCode() {
 export function hashOtpCode(code: string) {
   return createHmac("sha256", env.REFRESH_TOKEN_SECRET).update(code).digest("base64url");
 }
+
+export function createPasswordResetToken() {
+  return randomBytes(32).toString("base64url");
+}
+
+export function hashPasswordResetToken(token: string) {
+  return createHmac("sha256", env.REFRESH_TOKEN_SECRET).update(token).digest("base64url");
+}

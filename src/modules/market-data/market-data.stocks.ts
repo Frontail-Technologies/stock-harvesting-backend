@@ -137,9 +137,9 @@ export async function readStockRows(
 // query rather than a mode of listStocks(): no provider hydration, no
 // cache, no multi-exchange branching - just an indexed read, so typing
 // in this picker never triggers a provider call. The EXISTS subquery
-// reuses the existing (exchange, symbol, timeframe, time) unique index
-// on candles (its leading three columns already cover this lookup) - no
-// new index needed.
+// reuses the existing (instrument_id, timeframe, time) unique index on
+// candles (its leading two columns already cover this lookup) - no new
+// index needed.
 export async function searchChartEligibleBseStocks(
   input: { q: string; limit: number },
   dbClient: DbOrTx = db
@@ -166,8 +166,7 @@ export async function searchChartEligibleBseStocks(
         ),
         sql`EXISTS (
           SELECT 1 FROM ${candles}
-          WHERE ${candles.exchange} = ${instruments.exchange}
-            AND ${candles.symbol} = ${instruments.symbol}
+          WHERE ${candles.instrumentId} = ${instruments.id}
             AND ${candles.timeframe} = ${CANDLE_TIMEFRAME.day}
         )`
       )

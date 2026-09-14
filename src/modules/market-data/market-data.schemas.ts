@@ -61,6 +61,13 @@ export const publicCandleQuerySchema = z
   })
   .strict();
 
+export const ensureFreshCandlesBodySchema = z
+  .object({
+    symbol: z.string().trim().min(1).max(64),
+    exchange: exchangeSchema,
+  })
+  .strict();
+
 export const historyRangeQuerySchema = z
   .object({
     symbol: z.string().trim().min(1).max(64),

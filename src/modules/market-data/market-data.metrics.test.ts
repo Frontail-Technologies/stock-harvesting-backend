@@ -31,6 +31,10 @@ vi.mock("./market-data.candle-sync", () => ({
   backfillDailyCandles: vi.fn(),
 }));
 
+vi.mock("./market-data.instruments", () => ({
+  getInstrumentsBySymbol: vi.fn(),
+}));
+
 vi.mock("./weekly-strong-evaluator", async () => {
   const actual = await vi.importActual<typeof import("./weekly-strong-evaluator")>("./weekly-strong-evaluator");
   return { ...actual, evaluateWeeklyStrongLatest: vi.fn(), evaluateWeeklyStrongSeries: vi.fn() };
@@ -39,6 +43,7 @@ vi.mock("./weekly-strong-evaluator", async () => {
 import * as candlesModule from "./market-data.candles";
 import { deriveWeeklyMetricCandlesFromDaily } from "./market-data.candles";
 import * as candleSyncModule from "./market-data.candle-sync";
+import * as instrumentsModule from "./market-data.instruments";
 import { getWeekEndingFriday } from "./trading-calendar";
 import * as evaluatorModule from "./weekly-strong-evaluator";
 import {
@@ -46,7 +51,6 @@ import {
   computeWeeklyStrongBacktestMembers,
   computeWeeklyStrongStocks,
   deriveSectorIndustryTaxonomy,
-  getSymbolWeeklyStrongSeriesInput,
   readDailyAndWeeklyMetricCandles,
   type RelativeStrengthInstrumentInput,
   type RelativeStrengthMetricRow,
@@ -55,6 +59,7 @@ import {
 const readMetricCandles = vi.mocked(candlesModule.readMetricCandles);
 const safeProviderAction = vi.mocked(candleSyncModule.safeProviderAction);
 const backfillDailyCandles = vi.mocked(candleSyncModule.backfillDailyCandles);
+const getInstrumentsBySymbol = vi.mocked(instrumentsModule.getInstrumentsBySymbol);
 const evaluateWeeklyStrongLatest = vi.mocked(evaluatorModule.evaluateWeeklyStrongLatest);
 const evaluateWeeklyStrongSeries = vi.mocked(evaluatorModule.evaluateWeeklyStrongSeries);
 
@@ -91,29 +96,26 @@ beforeEach(() => {
   backfillDailyCandles.mockResolvedValue({ insertedDaily: 1, insertedWeekly: 1, insertedMonthly: 1 } as never);
   // Safe default for tests that don't care about Return specifically - an empty series means findCurrentStreakEntryIndex returns null, so returnPct comes out null rather than crashing on an unconfigured mock.
   evaluateWeeklyStrongSeries.mockReturnValue([]);
+  getInstrumentsBySymbol.mockImplementation(async (symbols) =>
+    new Map(symbols.map((symbol) => [symbol, { id: `id-${symbol}` } as never]))
+  );
 });
 
 describe("readDailyAndWeeklyMetricCandles", () => {
-  it("empty candle input with no legacy weekly candles triggers the seed-backfill fallback", async () => {
+  it("empty candle input with no legacy weekly candles returns empty series without any provider call", async () => {
     readMetricCandles
       .mockResolvedValueOnce([]) // initial daily read
-      .mockResolvedValueOnce([]) // legacy weekly read
-      .mockResolvedValueOnce([]); // re-read after seed backfill
+      .mockResolvedValueOnce([]); // legacy weekly read
 
     const result = await readDailyAndWeeklyMetricCandles({
       exchange: "NSE",
-      symbols: ["EMPTYSYM"],
+      instruments: [{ instrumentId: "EMPTYSYM", symbol: "EMPTYSYM" }],
       dailyFrom: "2024-01-01",
       weeklyFrom: "2024-01-01",
     });
 
-    expect(safeProviderAction).toHaveBeenCalledWith(
-      "market-data.relative-strength-seed-backfill",
-      expect.any(Function)
-    );
-    expect(backfillDailyCandles).toHaveBeenCalledWith(
-      expect.objectContaining({ symbol: "EMPTYSYM", exchange: "NSE" })
-    );
+    expect(safeProviderAction).not.toHaveBeenCalled();
+    expect(backfillDailyCandles).not.toHaveBeenCalled();
     expect(result).toEqual({ dailyCandles: [], weeklyCandles: [] });
   });
 
@@ -125,7 +127,7 @@ describe("readDailyAndWeeklyMetricCandles", () => {
 
     const result = await readDailyAndWeeklyMetricCandles({
       exchange: "NSE",
-      symbols: ["LEGACY"],
+      instruments: [{ instrumentId: "LEGACY", symbol: "LEGACY" }],
       dailyFrom: "2024-01-01",
       weeklyFrom: "2024-01-01",
     });
@@ -140,7 +142,10 @@ describe("readDailyAndWeeklyMetricCandles", () => {
 
     const result = await readDailyAndWeeklyMetricCandles({
       exchange: "NSE",
-      symbols: ["AAA", "BBB"],
+      instruments: [
+        { instrumentId: "AAA", symbol: "AAA" },
+        { instrumentId: "BBB", symbol: "BBB" },
+      ],
       dailyFrom: "2020-01-01",
       weeklyFrom: "2020-01-01",
     });
@@ -165,7 +170,7 @@ describe("computeAllRelativeStrengthMetrics orchestration", () => {
     readMetricCandles.mockResolvedValueOnce(rows);
 
     const instruments: RelativeStrengthInstrumentInput[] = [
-      { symbol: "TCS", name: "Tata Consultancy", exchange: "NSE", sector: "IT", industry: "Software" },
+      { instrumentId: "TCS", symbol: "TCS", name: "Tata Consultancy", exchange: "NSE", sector: "IT", industry: "Software" },
     ];
 
     const result = await computeAllRelativeStrengthMetrics(instruments, "NSE");
@@ -186,7 +191,7 @@ describe("computeAllRelativeStrengthMetrics orchestration", () => {
     readMetricCandles.mockResolvedValueOnce(rows);
 
     const instruments: RelativeStrengthInstrumentInput[] = [
-      { symbol: "THINHIST", name: "Thin History Co", exchange: "NSE" },
+      { instrumentId: "THINHIST", symbol: "THINHIST", name: "Thin History Co", exchange: "NSE" },
     ];
 
     const result = await computeAllRelativeStrengthMetrics(instruments, "NSE");
@@ -201,19 +206,21 @@ describe("computeAllRelativeStrengthMetrics orchestration", () => {
 // backfilled (instruments present, but every symbol had <=54 1D candles).
 describe("computeAllRelativeStrengthMetrics - BSE_IDX (Index Harvest read path)", () => {
   const bseIndexPool: RelativeStrengthInstrumentInput[] = [
-    { symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" },
-    { symbol: "BANKEX", name: "BSE BANKEX", exchange: "BSE_IDX" },
+    { instrumentId: "SENSEX", symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" },
+    { instrumentId: "BANKEX", symbol: "BANKEX", name: "BSE BANKEX", exchange: "BSE_IDX" },
   ];
 
-  it("reads candles for exchange BSE_IDX with the exact index symbols", async () => {
+  it("reads candles by instrument_id for the exact index instruments, not exchange/symbol", async () => {
     readMetricCandles.mockResolvedValue([]);
 
     await computeAllRelativeStrengthMetrics(bseIndexPool, "BSE_IDX");
 
     expect(readMetricCandles).toHaveBeenCalledWith(
       expect.objectContaining({
-        exchange: "BSE_IDX",
-        symbols: ["SENSEX", "BANKEX"],
+        instruments: [
+          { instrumentId: "SENSEX", symbol: "SENSEX" },
+          { instrumentId: "BANKEX", symbol: "BANKEX" },
+        ],
         timeframe: "1D",
       })
     );
@@ -235,7 +242,7 @@ describe("computeAllRelativeStrengthMetrics - BSE_IDX (Index Harvest read path)"
     readMetricCandles.mockResolvedValueOnce(buildDailyRows("SENSEX", 40));
 
     const result = await computeAllRelativeStrengthMetrics(
-      [{ symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" }],
+      [{ instrumentId: "SENSEX", symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" }],
       "BSE_IDX"
     );
 
@@ -246,7 +253,7 @@ describe("computeAllRelativeStrengthMetrics - BSE_IDX (Index Harvest read path)"
     readMetricCandles.mockResolvedValueOnce(buildDailyRows("SENSEX", 120));
 
     const result = await computeAllRelativeStrengthMetrics(
-      [{ symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" }],
+      [{ instrumentId: "SENSEX", symbol: "SENSEX", name: "BSE SENSEX", exchange: "BSE_IDX" }],
       "BSE_IDX"
     );
 
@@ -264,7 +271,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     evaluateWeeklyStrongLatest.mockReturnValue({ passes: true } as never);
 
     const result = await computeWeeklyStrongStocks(
-      [{ symbol: "PASSSYM", name: "Pass Co", exchange: "NSE" }],
+      [{ instrumentId: "PASSSYM", symbol: "PASSSYM", name: "Pass Co", exchange: "NSE" }],
       "NSE"
     );
 
@@ -282,7 +289,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     evaluateWeeklyStrongLatest.mockReturnValue({ passes: false } as never);
 
     const result = await computeWeeklyStrongStocks(
-      [{ symbol: "FAILSYM", name: "Fail Co", exchange: "NSE" }],
+      [{ instrumentId: "FAILSYM", symbol: "FAILSYM", name: "Fail Co", exchange: "NSE" }],
       "NSE"
     );
 
@@ -293,7 +300,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     readMetricCandles.mockResolvedValue([]);
 
     const result = await computeWeeklyStrongStocks(
-      [{ symbol: "NODATA", name: "No Data Co", exchange: "NSE" }],
+      [{ instrumentId: "NODATA", symbol: "NODATA", name: "No Data Co", exchange: "NSE" }],
       "NSE"
     );
 
@@ -321,7 +328,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     );
 
     const result = await computeWeeklyStrongStocks(
-      [{ symbol: "RETSYM", name: "Return Co", exchange: "NSE" }],
+      [{ instrumentId: "RETSYM", symbol: "RETSYM", name: "Return Co", exchange: "NSE" }],
       "NSE"
     );
 
@@ -340,7 +347,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     ]);
 
     const result = await computeWeeklyStrongStocks(
-      [{ symbol: "NOENTRY", name: "No Entry Co", exchange: "NSE" }],
+      [{ instrumentId: "NOENTRY", symbol: "NOENTRY", name: "No Entry Co", exchange: "NSE" }],
       "NSE"
     );
 
@@ -361,7 +368,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     ]);
 
     const result = await computeWeeklyStrongStocks(
-      [{ symbol: "STREAK4", name: "Streak Co", exchange: "NSE" }],
+      [{ instrumentId: "STREAK4", symbol: "STREAK4", name: "Streak Co", exchange: "NSE" }],
       "NSE"
     );
 
@@ -380,7 +387,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     ]);
 
     const result = await computeWeeklyStrongStocks(
-      [{ symbol: "REENTRY", name: "Re-entry Co", exchange: "NSE" }],
+      [{ instrumentId: "REENTRY", symbol: "REENTRY", name: "Re-entry Co", exchange: "NSE" }],
       "NSE"
     );
 
@@ -398,7 +405,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     ]);
 
     const result = await computeWeeklyStrongStocks(
-      [{ symbol: "RAWDATE", name: "Raw Date Co", exchange: "NSE" }],
+      [{ instrumentId: "RAWDATE", symbol: "RAWDATE", name: "Raw Date Co", exchange: "NSE" }],
       "NSE"
     );
 
@@ -421,8 +428,8 @@ describe("computeWeeklyStrongBacktestMembers: cross-instrument week grouping", (
 
     const result = await computeWeeklyStrongBacktestMembers(
       [
-        { symbol: "MEMBERA", name: "Member A", exchange: "NSE" },
-        { symbol: "MEMBERB", name: "Member B", exchange: "NSE" },
+        { instrumentId: "MEMBERA", symbol: "MEMBERA", name: "Member A", exchange: "NSE" },
+        { instrumentId: "MEMBERB", symbol: "MEMBERB", name: "Member B", exchange: "NSE" },
       ],
       "NSE",
       10
@@ -444,8 +451,8 @@ describe("computeWeeklyStrongBacktestMembers: cross-instrument week grouping", (
 
     const result = await computeWeeklyStrongBacktestMembers(
       [
-        { symbol: "MEMBERA", name: "Member A", exchange: "NSE" },
-        { symbol: "MEMBERB", name: "Member B", exchange: "NSE" },
+        { instrumentId: "MEMBERA", symbol: "MEMBERA", name: "Member A", exchange: "NSE" },
+        { instrumentId: "MEMBERB", symbol: "MEMBERB", name: "Member B", exchange: "NSE" },
       ],
       "NSE",
       10
@@ -517,26 +524,5 @@ describe("deriveSectorIndustryTaxonomy", () => {
     const taxonomy = deriveSectorIndustryTaxonomy(rows);
 
     expect(taxonomy).toEqual([{ sector: "Sector A", industries: ["Industry A1"] }]);
-  });
-});
-
-describe("getSymbolWeeklyStrongSeriesInput", () => {
-  it("returns null for a symbol with insufficient history", async () => {
-    readMetricCandles.mockResolvedValue([]);
-
-    const result = await getSymbolWeeklyStrongSeriesInput("NODATA", "NSE");
-    expect(result).toBeNull();
-  });
-
-  it("trims an incomplete trailing week from the weekly series before returning it", async () => {
-    // buildDailyRows' last row is always dated today, so the real weekly aggregation (run internally by readDailyAndWeeklyMetricCandles) always produces a last weekly candle for the current, still-forming week - what excludeIncompleteTradingWeek is supposed to trim.
-    const dailyRows = buildDailyRows("TRIMSYM", 400);
-    const untrimmedWeekly = deriveWeeklyMetricCandlesFromDaily(dailyRows, dailyRows[0].time);
-    readMetricCandles.mockResolvedValueOnce(dailyRows);
-
-    const result = await getSymbolWeeklyStrongSeriesInput("TRIMSYM", "NSE");
-
-    expect(result).not.toBeNull();
-    expect(result?.weeklyRows.length).toBe(untrimmedWeekly.length - 1);
   });
 });

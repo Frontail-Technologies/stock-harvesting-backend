@@ -6,6 +6,10 @@ import {
   refreshAllLatestInstrumentPrices,
   syncProviderInstruments,
 } from "./modules/market-data/market-data.service";
+import {
+  refreshDailyCandles,
+  syncDailyCandlesForActiveInstruments,
+} from "./modules/market-data/market-data.candle-sync";
 import { getRedisConnectionOptions } from "./modules/jobs/queues";
 import { prepareCollectionData } from "./modules/market-collections/market-collection-preparation.service";
 import {
@@ -143,6 +147,19 @@ const worker = new Worker(
       return runTrackedJob(job, () =>
         refreshAllLatestInstrumentPrices(exchange),
       );
+    }
+
+    if (job.name === JOB_NAMES.dailyCandleSync) {
+      return runTrackedJob(job, () =>
+        syncDailyCandlesForActiveInstruments(exchange),
+      );
+    }
+
+    if (job.name === JOB_NAMES.chartCandleEnsureFresh) {
+      const symbol =
+        typeof job.data.symbol === "string" ? job.data.symbol : undefined;
+      if (!symbol) throw new Error("chartCandleEnsureFresh job missing symbol");
+      return runTrackedJob(job, () => refreshDailyCandles({ symbol, exchange }));
     }
 
     if (job.name === JOB_NAMES.weeklyStrongBacktestBackfill) {

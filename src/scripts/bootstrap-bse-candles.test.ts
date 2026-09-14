@@ -370,7 +370,7 @@ describe("processQueue", () => {
     ];
     backfillDailyCandles.mockImplementation(async ({ symbol }) => {
       if (symbol === "BAD") throw new Error("provider timeout");
-      return { insertedDaily: 10, insertedWeekly: 2, insertedMonthly: 1 };
+      return { insertedDaily: 10, insertedWeekly: 2, insertedMonthly: 1, dailyCandles: [] };
     });
 
     const results = await processQueue(queue, {
@@ -389,7 +389,7 @@ describe("processQueue", () => {
   });
 
   it("classifies a resolved zero-candle result as partial, not success", async () => {
-    backfillDailyCandles.mockResolvedValue({ insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 });
+    backfillDailyCandles.mockResolvedValue({ insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0, dailyCandles: [] });
 
     const results = await processQueue([{ symbol: "NODATA", needsBackfill: true }], {
       from: "2020-01-01",
@@ -410,7 +410,7 @@ describe("processQueue", () => {
     ];
     backfillDailyCandles.mockImplementation(async ({ symbol }) => {
       if (symbol === "FAIL1") throw new Error("network error");
-      return { insertedDaily: 100, insertedWeekly: 20, insertedMonthly: 5 };
+      return { insertedDaily: 100, insertedWeekly: 20, insertedMonthly: 5, dailyCandles: [] };
     });
 
     const results = await processQueue(queue, {
@@ -434,7 +434,7 @@ describe("processQueue", () => {
       symbol: `SYM${i}`,
       needsBackfill: true,
     }));
-    backfillDailyCandles.mockResolvedValue({ insertedDaily: 1, insertedWeekly: 0, insertedMonthly: 0 });
+    backfillDailyCandles.mockResolvedValue({ insertedDaily: 1, insertedWeekly: 0, insertedMonthly: 0, dailyCandles: [] });
 
     let completedCount = 0;
     const results = await processQueue(queue, {

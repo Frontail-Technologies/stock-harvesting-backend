@@ -16,10 +16,18 @@ import {
   COMPLETED_CHART_BACKFILL_COOLDOWN_MS,
   FAILED_LATEST_CANDLE_SYNC_COOLDOWN_MS,
 } from "./market-data.constants";
-import { replaceCandlesAtomically, upsertCandles, type CandleUpsertInput } from "./market-data.candles";
+import {
+  readCandleDatesInRange,
+  readCandleHistoryRange,
+  replaceCandlesAtomically,
+  upsertCandles,
+  type CandleUpsertInput,
+} from "./market-data.candles";
 import { getInstrumentsBySymbol, refreshLatestInstrumentStats } from "./market-data.instruments";
 import { ensureInstrumentsForSymbols, getOrCreateInstrument } from "./market-data.instrument-sync";
 import { getDateDaysAgo, getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
+import { planDailyCandleSync } from "./market-data.candle-sync-plan";
+import { getLatestExpectedTradingDay } from "./trading-calendar";
 import { deleteDashboardSnapshots } from "./dashboard-snapshot-store";
 import {
   candleBackfillDurationSeconds,
@@ -124,14 +132,14 @@ export async function backfillDailyCandles(
     });
     if (!adapter) {
       recordCandleBackfill(exchange, "success", startedAt);
-      return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 };
+      return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0, dailyCandles: [] };
     }
 
     const instrument = await getOrCreateInstrument(symbol, exchange, dbClient);
 
     if (!instrument) {
       recordCandleBackfill(exchange, "success", startedAt);
-      return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0 };
+      return { insertedDaily: 0, insertedWeekly: 0, insertedMonthly: 0, dailyCandles: [] };
     }
 
     // Everything that can fail (network, vendor, rate limits) happens before existing rows are touched - deleteCandlesForRefresh only runs with validated replacement data in hand.
@@ -180,6 +188,7 @@ export async function backfillDailyCandles(
       insertedDaily: daily.length,
       insertedWeekly: weekly.length,
       insertedMonthly: monthly.length,
+      dailyCandles: daily,
     };
   } catch (error) {
     recordCandleBackfill(exchange, "failed", startedAt);
@@ -469,6 +478,150 @@ function recordLatestCandleRefreshRun(exchange: string, outcome: "success" | "fa
   } catch {
     // Metrics must never break the operation they observe.
   }
+}
+
+export type DailyCandleSyncStatus =
+  | "updated"
+  | "repaired"
+  | "already-current"
+  | "bootstrap-required"
+  | "provider-empty"
+  | "failed";
+
+export type DailyCandleSyncResult = {
+  symbol: string;
+  status: DailyCandleSyncStatus;
+  insertedDaily: number;
+  failedDates: string[];
+};
+
+// The manual-refresh and scheduled-sync entry points share this one function -
+// range planning (planDailyCandleSync) and the write path (backfillDailyCandles)
+// stay identical between both callers, no separate formulas.
+export async function refreshDailyCandles(
+  input: { symbol: string; exchange?: string },
+  dbClient: DbOrTx = db
+): Promise<DailyCandleSyncResult> {
+  const symbol = normalizeSymbol(input.symbol);
+  const exchange = input.exchange ?? DEFAULT_EXCHANGE;
+
+  const instrument = await getOrCreateInstrument(symbol, exchange, dbClient);
+  if (!instrument) {
+    return { symbol, status: "provider-empty", insertedDaily: 0, failedDates: [] };
+  }
+
+  const history = await readCandleHistoryRange({
+    instrumentId: instrument.id,
+    timeframe: CANDLE_TIMEFRAME.day,
+  });
+  const latestStoredDate = history?.to ?? null;
+  const latestExpectedTradingDate = getLatestExpectedTradingDay(exchange);
+  const plan = planDailyCandleSync({ latestStoredDate, latestExpectedTradingDate });
+
+  if (plan.kind === "bootstrap-required") {
+    return { symbol, status: "bootstrap-required", insertedDaily: 0, failedDates: [] };
+  }
+
+  const datesBefore = await readCandleDatesInRange({
+    instrumentId: instrument.id,
+    timeframe: CANDLE_TIMEFRAME.day,
+    from: plan.from,
+    to: plan.to,
+  });
+
+  const result = await backfillDailyCandles({ symbol, exchange, from: plan.from, to: plan.to }, dbClient);
+
+  if (result.dailyCandles.length === 0) {
+    return { symbol, status: "provider-empty", insertedDaily: 0, failedDates: [] };
+  }
+
+  const datesAfter = await readCandleDatesInRange({
+    instrumentId: instrument.id,
+    timeframe: CANDLE_TIMEFRAME.day,
+    from: plan.from,
+    to: plan.to,
+  });
+
+  const failedDates = result.dailyCandles
+    .map((candle) => candle.time)
+    .filter((time) => !datesAfter.has(time));
+
+  if (failedDates.length > 0) {
+    logger.error({ exchange, symbol, failedDates }, "Daily candle sync persistence failure");
+    return { symbol, status: "failed", insertedDaily: result.insertedDaily, failedDates };
+  }
+
+  const wasAlreadyFresh = latestStoredDate !== null && latestStoredDate >= latestExpectedTradingDate;
+  const status: DailyCandleSyncStatus =
+    datesAfter.size > datesBefore.size ? (wasAlreadyFresh ? "repaired" : "updated") : "already-current";
+
+  return { symbol, status, insertedDaily: result.insertedDaily, failedDates: [] };
+}
+
+const DAILY_CANDLE_SYNC_CONCURRENCY = 8;
+
+export type DailyCandleSyncSummary = {
+  processed: number;
+  updated: number;
+  repaired: number;
+  alreadyCurrent: number;
+  bootstrapRequired: number;
+  providerEmpty: number;
+  failed: number;
+  failedSymbols: string[];
+};
+
+// The routine post-market-close sync: every active instrument on the exchange
+// gets the same last-stored-date incremental + bounded recent repair window
+// (planDailyCandleSync) that refreshDailyCandles uses for a single symbol. One
+// symbol failing never aborts the run - failures are isolated and reported.
+export async function syncDailyCandlesForActiveInstruments(
+  exchange: string = DEFAULT_EXCHANGE
+): Promise<DailyCandleSyncSummary> {
+  const rows = await db
+    .select({ symbol: instruments.symbol })
+    .from(instruments)
+    .where(and(eq(instruments.exchange, exchange), eq(instruments.active, true)));
+
+  const summary: DailyCandleSyncSummary = {
+    processed: 0,
+    updated: 0,
+    repaired: 0,
+    alreadyCurrent: 0,
+    bootstrapRequired: 0,
+    providerEmpty: 0,
+    failed: 0,
+    failedSymbols: [],
+  };
+
+  await runWithConcurrency(rows, DAILY_CANDLE_SYNC_CONCURRENCY, async (row) => {
+    summary.processed += 1;
+    try {
+      const result = await refreshDailyCandles({ symbol: row.symbol, exchange });
+      if (result.status === "updated") summary.updated += 1;
+      else if (result.status === "repaired") summary.repaired += 1;
+      else if (result.status === "already-current") summary.alreadyCurrent += 1;
+      else if (result.status === "bootstrap-required") summary.bootstrapRequired += 1;
+      else if (result.status === "provider-empty") summary.providerEmpty += 1;
+      else {
+        summary.failed += 1;
+        summary.failedSymbols.push(row.symbol);
+      }
+    } catch (error) {
+      summary.failed += 1;
+      summary.failedSymbols.push(row.symbol);
+      logger.error(
+        { exchange, symbol: row.symbol, message: getErrorMessage(error, "Unknown error") },
+        "Daily candle sync failed for symbol"
+      );
+    }
+  });
+
+  if (summary.updated + summary.repaired > 0) {
+    await invalidateDashboardSnapshotsForExchange(exchange);
+  }
+
+  return summary;
 }
 
 const chartBackfillPromises = new Map<string, Promise<unknown>>();

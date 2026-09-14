@@ -3,7 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../db/client", () => ({ db: { select: vi.fn() } }));
 
 import * as dbClientModule from "../../db/client";
-import { findSymbolsNeedingHistoryBackfill, readMetricCandles } from "./market-data.candles";
+import {
+  deleteCandlesForRefresh,
+  findSymbolsNeedingHistoryBackfill,
+  readCandleHistoryRange,
+  readChartCandles,
+  readMetricCandles,
+  readScannerDailyCloses,
+  upsertCandles,
+} from "./market-data.candles";
 
 const db = vi.mocked(dbClientModule.db);
 
@@ -44,6 +52,29 @@ function whereClauseText(arg: unknown): string {
   return parts.join(" ");
 }
 
+function whereClauseParamValues(arg: unknown): unknown[] {
+  const values: unknown[] = [];
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+    const chunks = (node as { queryChunks?: unknown[] }).queryChunks;
+    if (!Array.isArray(chunks)) return;
+    for (const chunk of chunks) {
+      if (chunk && typeof chunk === "object" && "queryChunks" in chunk) {
+        walk(chunk);
+      } else if (
+        chunk &&
+        typeof chunk === "object" &&
+        "value" in chunk &&
+        !Array.isArray((chunk as { value: unknown }).value)
+      ) {
+        values.push((chunk as { value: unknown }).value);
+      }
+    }
+  };
+  walk(arg);
+  return values;
+}
+
 function selectRejection(error: unknown) {
   const chain = {
     from: () => chain,
@@ -59,13 +90,19 @@ function makeSymbols(count: number, prefix = "SYM") {
   return Array.from({ length: count }, (_, i) => `${prefix}${String(i).padStart(4, "0")}`);
 }
 
+// instrumentId = symbol for these tests: fixture symbols are already unique
+// per test, so reusing the string keeps fixtures readable without inventing
+// separate ids the assertions never need to distinguish.
+function toInstruments(symbols: string[]) {
+  return symbols.map((symbol) => ({ instrumentId: symbol, symbol }));
+}
+
 describe("findSymbolsNeedingHistoryBackfill", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns [] immediately for an empty symbol list, no query issued", async () => {
+  it("returns [] immediately for an empty instrument list, no query issued", async () => {
     const result = await findSymbolsNeedingHistoryBackfill({
-      exchange: "BSE",
-      symbols: [],
+      instruments: [],
       requiredFromDate: "2016-09-01",
     });
     expect(result).toEqual([]);
@@ -75,14 +112,13 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
   it("excludes a symbol whose earliest stored candle already reaches the required date", async () => {
     db.select.mockReturnValueOnce(
       selectResult([
-        { symbol: "RELIANCE", earliest: "2010-01-04" },
-        { symbol: "NEWCO", earliest: "2025-06-01" },
+        { instrumentId: "RELIANCE", earliest: "2010-01-04" },
+        { instrumentId: "NEWCO", earliest: "2025-06-01" },
       ])
     );
 
     const result = await findSymbolsNeedingHistoryBackfill({
-      exchange: "BSE",
-      symbols: ["RELIANCE", "NEWCO"],
+      instruments: toInstruments(["RELIANCE", "NEWCO"]),
       requiredFromDate: "2016-09-01",
     });
 
@@ -90,27 +126,39 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
   });
 
   it("includes a symbol with no stored candles at all", async () => {
-    db.select.mockReturnValueOnce(selectResult([{ symbol: "RELIANCE", earliest: "2010-01-04" }]));
+    db.select.mockReturnValueOnce(selectResult([{ instrumentId: "RELIANCE", earliest: "2010-01-04" }]));
 
     const result = await findSymbolsNeedingHistoryBackfill({
-      exchange: "BSE",
-      symbols: ["RELIANCE", "NOHISTORY"],
+      instruments: toInstruments(["RELIANCE", "NOHISTORY"]),
       requiredFromDate: "2016-09-01",
     });
 
     expect(result).toEqual(["NOHISTORY"]);
   });
 
-  it("splits a large symbol list into multiple sequential batch queries", async () => {
+  it("checks candle coverage by instrument_id, not exchange/symbol", async () => {
+    let captured: unknown;
+    db.select.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
+
+    await findSymbolsNeedingHistoryBackfill({
+      instruments: toInstruments(["RELIANCE"]),
+      requiredFromDate: "2016-09-01",
+    });
+
+    const text = whereClauseText(captured);
+    expect(text).toContain("instrument_id");
+    expect(text).not.toContain("exchange");
+  });
+
+  it("splits a large instrument list into multiple sequential batch queries", async () => {
     const symbols = makeSymbols(130); // > 40 (CANDLE_COVERAGE_SYMBOL_BATCH_SIZE) -> ceil(130/40) = 4 batches
     // Every symbol already covered, so nothing is returned.
     db.select.mockImplementation(() =>
-      selectResult(symbols.map((symbol) => ({ symbol, earliest: "2000-01-01" })))
+      selectResult(symbols.map((symbol) => ({ instrumentId: symbol, earliest: "2000-01-01" })))
     );
 
     const result = await findSymbolsNeedingHistoryBackfill({
-      exchange: "BSE",
-      symbols,
+      instruments: toInstruments(symbols),
       requiredFromDate: "2016-09-01",
     });
 
@@ -129,14 +177,13 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
         return selectResult(
           batch
             .filter((_, i) => i % 2 === 1)
-            .map((symbol) => ({ symbol, earliest: "2001-01-01" }))
+            .map((symbol) => ({ instrumentId: symbol, earliest: "2001-01-01" }))
         );
       };
     })() as never);
 
     const result = await findSymbolsNeedingHistoryBackfill({
-      exchange: "BSE",
-      symbols,
+      instruments: toInstruments(symbols),
       requiredFromDate: "2016-09-01",
     });
 
@@ -151,11 +198,13 @@ describe("findSymbolsNeedingHistoryBackfill", () => {
     // only queue exactly what gets consumed (a dangling mockReturnValueOnce
     // would leak into the next test).
     db.select
-      .mockReturnValueOnce(selectResult(symbols.slice(0, 40).map((symbol) => ({ symbol, earliest: "2000-01-01" }))))
+      .mockReturnValueOnce(
+        selectResult(symbols.slice(0, 40).map((symbol) => ({ instrumentId: symbol, earliest: "2000-01-01" })))
+      )
       .mockReturnValueOnce(selectRejection(new Error("canceling statement due to statement timeout")));
 
     await expect(
-      findSymbolsNeedingHistoryBackfill({ exchange: "BSE", symbols, requiredFromDate: "2016-09-01" })
+      findSymbolsNeedingHistoryBackfill({ instruments: toInstruments(symbols), requiredFromDate: "2016-09-01" })
     ).rejects.toThrow(/statement timeout/);
   });
 });
@@ -165,10 +214,60 @@ describe("readMetricCandles", () => {
   // earlier describe block can leak into the first batch here.
   beforeEach(() => db.select.mockReset());
 
-  it("returns [] and issues no query for an empty symbol list", async () => {
-    const result = await readMetricCandles({ exchange: "BSE", symbols: [], timeframe: "1D", from: "2016-01-01" });
+  it("returns [] and issues no query for an empty instrument list", async () => {
+    const result = await readMetricCandles({ instruments: [], timeframe: "1D", from: "2016-01-01" });
     expect(result).toEqual([]);
     expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it("filters candles by instrument_id, not exchange/symbol", async () => {
+    let captured: unknown;
+    db.select.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
+
+    await readMetricCandles({ instruments: toInstruments(["AAA"]), timeframe: "1D", from: "2016-01-01" });
+
+    const text = whereClauseText(captured);
+    expect(text).toContain("instrument_id");
+    expect(text).not.toContain("exchange");
+  });
+
+  it("two instruments sharing equivalent symbol metadata remain independent", async () => {
+    let captured: unknown;
+    db.select.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
+
+    // inst-1 and inst-2 both carry the symbol "DUPLICATE" (the exact
+    // production fragmentation shape) - only inst-1 is requested, and the
+    // filter this issues is an instrument_id list, never a symbol match, so
+    // inst-2's rows can never be pulled in just because the symbol matches.
+    await readMetricCandles({
+      instruments: [{ instrumentId: "inst-1", symbol: "DUPLICATE" }],
+      timeframe: "1D",
+      from: "2016-01-01",
+    });
+
+    expect(db.select).toHaveBeenCalledTimes(1);
+    const text = whereClauseText(captured);
+    expect(text).toContain("instrument_id");
+    expect(text).not.toContain("symbol");
+  });
+
+  it("a symbol metadata change on the candle row does not break the read - lookup is by instrument_id only", async () => {
+    // The stored candle row still carries the OLD symbol string (candles
+    // are never rewritten on a rename - see Phase 2A), but the row is still
+    // returned because the query never filters on symbol.
+    db.select.mockReturnValueOnce(
+      selectResult([
+        { symbol: "OLD_SYMBOL", time: "2020-01-01", open: "1", high: "1", low: "1", close: "1", volume: "1" },
+      ])
+    );
+
+    const result = await readMetricCandles({
+      instruments: [{ instrumentId: "inst-1", symbol: "NEW_SYMBOL" }],
+      timeframe: "1D",
+      from: "2016-01-01",
+    });
+
+    expect(result).toHaveLength(1);
   });
 
   it("reads a large symbol list in sequential batches and merges to a single globally (symbol, time)-sorted list", async () => {
@@ -188,8 +287,7 @@ describe("readMetricCandles", () => {
     })() as never);
 
     const result = await readMetricCandles({
-      exchange: "BSE",
-      symbols,
+      instruments: toInstruments(symbols),
       timeframe: "1D",
       from: "2016-01-01",
       to: "2025-01-01",
@@ -228,7 +326,7 @@ describe("readMetricCandles", () => {
       };
     })() as never);
 
-    const result = await readMetricCandles({ exchange: "BSE", symbols, timeframe: "1D", from: "2016-01-01" });
+    const result = await readMetricCandles({ instruments: toInstruments(symbols), timeframe: "1D", from: "2016-01-01" });
 
     expect(new Set(result.map((row) => row.symbol))).toEqual(new Set(symbols));
     expect(result).toHaveLength(symbols.length);
@@ -239,8 +337,7 @@ describe("readMetricCandles", () => {
     db.select.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
 
     await readMetricCandles({
-      exchange: "BSE",
-      symbols: ["AAA"],
+      instruments: toInstruments(["AAA"]),
       timeframe: "1D",
       from: "2016-09-10",
       to: "2026-09-10",
@@ -256,7 +353,7 @@ describe("readMetricCandles", () => {
     let captured: unknown;
     db.select.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
 
-    await readMetricCandles({ exchange: "BSE", symbols: ["AAA"], timeframe: "1D", from: "2016-09-10" });
+    await readMetricCandles({ instruments: toInstruments(["AAA"]), timeframe: "1D", from: "2016-09-10" });
 
     expect(whereClauseText(captured)).toMatch(/time.*<=|<=.*time/);
   });
@@ -280,7 +377,221 @@ describe("readMetricCandles", () => {
       .mockReturnValueOnce(selectRejection(new Error("Query read timeout")));
 
     await expect(
-      readMetricCandles({ exchange: "BSE", symbols, timeframe: "1D", from: "2016-01-01" })
+      readMetricCandles({ instruments: toInstruments(symbols), timeframe: "1D", from: "2016-01-01" })
     ).rejects.toThrow(/Query read timeout/);
+  });
+});
+
+describe("readChartCandles / readCandleHistoryRange - instrument_id identity", () => {
+  beforeEach(() => db.select.mockReset());
+
+  it("readChartCandles filters by instrument_id, never by exchange/symbol", async () => {
+    let captured: unknown;
+    db.select.mockReturnValueOnce(
+      selectResult(
+        [{ instrumentId: "inst-1", time: "2026-01-01", open: "1", high: "1", low: "1", close: "1", volume: "1" }],
+        (arg) => (captured = arg)
+      )
+    );
+
+    const rows = await readChartCandles({ instrumentId: "inst-1", timeframe: "1D" });
+
+    expect(rows).toHaveLength(1);
+    const text = whereClauseText(captured);
+    expect(text).toContain("instrument_id");
+    expect(text).not.toContain("exchange");
+    expect(text).not.toContain("symbol");
+  });
+
+  it("readCandleHistoryRange filters by instrument_id and timeframe only", async () => {
+    let captured: unknown;
+    db.select.mockReturnValueOnce(
+      selectResult([{ from: "2020-01-01", to: "2026-01-01" }], (arg) => (captured = arg))
+    );
+
+    const range = await readCandleHistoryRange({ instrumentId: "inst-1", timeframe: "1D" });
+
+    expect(range).toEqual({ from: "2020-01-01", to: "2026-01-01" });
+    expect(whereClauseText(captured)).toContain("instrument_id");
+  });
+
+  it("a renamed instrument's historical candles stay readable through the stable instrument_id", async () => {
+    db.select.mockReturnValueOnce(
+      selectResult([
+        { instrumentId: "inst-1", time: "2020-06-01", open: "10", high: "11", low: "9", close: "10.5", volume: "500" },
+      ])
+    );
+
+    const rows = await readChartCandles({ instrumentId: "inst-1", timeframe: "1D" });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].instrumentId).toBe("inst-1");
+  });
+
+  it("issues no provider/network call - only db.select", async () => {
+    db.select.mockReturnValueOnce(selectResult([]));
+
+    await readChartCandles({ instrumentId: "inst-1", timeframe: "1D" });
+
+    expect(db.select).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("readScannerDailyCloses", () => {
+  beforeEach(() => db.select.mockReset());
+
+  it("selects only time and close, no other OHLCV columns", async () => {
+    db.select.mockReturnValueOnce(selectResult([{ time: "2026-01-01", close: "100.50" }]));
+
+    await readScannerDailyCloses({ instrumentId: "inst-1" });
+
+    const selectedFields = db.select.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(selectedFields).sort()).toEqual(["close", "time"]);
+  });
+
+  it("filters by instrument_id and timeframe = 1D, never 1W", async () => {
+    let captured: unknown;
+    db.select.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
+
+    await readScannerDailyCloses({ instrumentId: "inst-1" });
+
+    const text = whereClauseText(captured);
+    expect(text).toContain("instrument_id");
+    const values = whereClauseParamValues(captured);
+    expect(values).toContain("1D");
+    expect(values).not.toContain("1W");
+  });
+
+  it("issues no lower date bound when `from` is omitted - the instrument's full stored history is read", async () => {
+    let captured: unknown;
+    db.select.mockReturnValueOnce(selectResult([], (arg) => (captured = arg)));
+
+    await readScannerDailyCloses({ instrumentId: "inst-1" });
+
+    const text = whereClauseText(captured);
+    expect(text).not.toMatch(/>=/);
+  });
+
+  it("converts numeric-as-string close values to numbers", async () => {
+    db.select.mockReturnValueOnce(
+      selectResult([
+        { time: "2026-01-01", close: "100.50" },
+        { time: "2026-01-02", close: "101.25" },
+      ])
+    );
+
+    const rows = await readScannerDailyCloses({ instrumentId: "inst-1" });
+
+    expect(rows).toEqual([
+      { time: "2026-01-01", close: 100.5 },
+      { time: "2026-01-02", close: 101.25 },
+    ]);
+  });
+});
+
+type FakeInsertCall = { values: Record<string, unknown>[]; target: unknown[] };
+
+function fakeCandleWriteClient() {
+  const inserts: FakeInsertCall[] = [];
+  const deletes: { where: unknown }[] = [];
+
+  const dbClient = {
+    insert: () => ({
+      values: (values: Record<string, unknown>[]) => ({
+        onConflictDoUpdate: (options: { target: unknown[] }) => ({
+          returning: async () => {
+            inserts.push({ values, target: options.target });
+            return values.map(() => ({ wasInsert: true }));
+          },
+        }),
+      }),
+    }),
+    delete: () => ({
+      where: async (condition: unknown) => {
+        deletes.push({ where: condition });
+      },
+    }),
+  };
+
+  return { dbClient, inserts, deletes };
+}
+
+function candleInput(overrides: Partial<Parameters<typeof upsertCandles>[0][number]>) {
+  return {
+    instrumentId: "inst-1",
+    exchange: "BSE",
+    symbol: "ABC",
+    timeframe: "1D" as const,
+    time: "2026-01-01",
+    open: 1,
+    high: 1,
+    low: 1,
+    close: 1,
+    volume: 1,
+    source: "provider",
+    ...overrides,
+  };
+}
+
+describe("upsertCandles - instrument_id identity", () => {
+  it("same instrument + same timeframe + same time updates the existing candle, latest write wins", async () => {
+    const { dbClient, inserts } = fakeCandleWriteClient();
+
+    await upsertCandles(
+      [
+        candleInput({ symbol: "OLD", close: 1 }),
+        candleInput({ symbol: "NEW", close: 2 }),
+      ],
+      dbClient as never
+    );
+
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].values).toHaveLength(1);
+    expect(inserts[0].values[0]).toMatchObject({ instrumentId: "inst-1", symbol: "NEW", close: "2" });
+  });
+
+  it("the same symbol string on two different instruments does not collide", async () => {
+    const { dbClient, inserts } = fakeCandleWriteClient();
+
+    await upsertCandles(
+      [
+        candleInput({ instrumentId: "inst-1", symbol: "DUPLICATE" }),
+        candleInput({ instrumentId: "inst-2", symbol: "DUPLICATE" }),
+      ],
+      dbClient as never
+    );
+
+    expect(inserts[0].values).toHaveLength(2);
+  });
+
+  it("existing 1D/1W/1M timeframe behaviour is unchanged - same instrument+time never collide across timeframes", async () => {
+    const { dbClient, inserts } = fakeCandleWriteClient();
+
+    await upsertCandles(
+      [
+        candleInput({ timeframe: "1D" }),
+        candleInput({ timeframe: "1W" }),
+        candleInput({ timeframe: "1M" }),
+      ],
+      dbClient as never
+    );
+
+    expect(inserts[0].values).toHaveLength(3);
+  });
+});
+
+describe("deleteCandlesForRefresh - instrument_id identity", () => {
+  it("targets instrument_id, never exchange/symbol", async () => {
+    const { dbClient, deletes } = fakeCandleWriteClient();
+
+    await deleteCandlesForRefresh(
+      { instrumentId: "inst-1", from: "2026-01-01", to: "2026-01-31" },
+      dbClient as never
+    );
+
+    expect(deletes).toHaveLength(1);
+    const text = whereClauseText(deletes[0].where);
+    expect(text).toContain("instrument_id");
+    expect(text).not.toContain("exchange");
   });
 });
