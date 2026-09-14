@@ -15,6 +15,10 @@ import {
   hasSufficientWeeklyStrongHistory,
   type WeeklyStrongSeriesPoint,
 } from "./weekly-strong-evaluator";
+import { deriveScannerWeeklyCloses } from "../scanner/scanner.candles";
+import { calculateNear250WeekHighScan } from "../scanner/rules/near-250-week-high";
+import { classifyScannerWeeklySeries } from "../scanner/rules/scanner-weekly-series-safety";
+import { SCANNER_LOOKBACK_WEEKS } from "../scanner/scanner.constants";
 
 // Analytical data preparation/orchestration for Relative Strength and Weekly Strong: fetches/prepares candle series, then composes them with the canonical decision logic in weekly-strong-evaluator.ts - never duplicates or inlines evaluator rules here, only calls them.
 
@@ -39,6 +43,72 @@ function findCurrentStreakEntryIndexGapAware(series: WeeklyStrongSeriesPoint[]):
     index--;
   }
   return index;
+}
+
+// Stock Harvest's "In Since" must match the SAME Scanner signal shown as
+// yellow bands on the Charts page (product requirement) - never Weekly
+// Strong's own streak, which is a structurally different evaluator (see
+// weekly-strong-evaluator.ts's own header comment: Scanner has its
+// independent qualification rule). Reuses the exact chart-band pipeline
+// (deriveScannerWeeklyCloses -> excludeIncompleteTradingWeek ->
+// classifyScannerWeeklySeries -> calculateNear250WeekHighScan, the same
+// functions calculateCurrentNear250WeekHighResult calls for the live
+// per-symbol scanner endpoint) fed from the daily rows already fetched for
+// this row, rather than a second per-symbol DB round trip - zero
+// reimplementation of the Scanner formula, only a different data-fetch
+// entrypoint into the identical evaluator chain. Fixed at the 5x/250-week
+// tier (SCANNER_LOOKBACK_WEEKS["5x"]) - Stock Harvest has no per-collection
+// tier setting, and 250 weeks is this system's own DEFAULT_SCANNER_LOOKBACK.
+const HARVEST_SCANNER_LOOKBACK_WEEKS = SCANNER_LOOKBACK_WEEKS["5x"];
+
+function resolveScannerInSince(dailyRows: MetricCandle[], exchange: string): string | null {
+  const dailyCloses = dailyRows.map((row) => ({ time: row.time, close: row.close }));
+  const weeklyCloses = deriveScannerWeeklyCloses(dailyCloses);
+  const completedWeeklyRows = excludeIncompleteTradingWeek(weeklyCloses, exchange);
+  if (completedWeeklyRows.length === 0) return null;
+
+  const { segments, latestSegment, isLatestWeekFresh } = classifyScannerWeeklySeries(
+    completedWeeklyRows,
+    exchange
+  );
+  if (segments.length === 0) return null;
+
+  const scan = calculateNear250WeekHighScan(
+    segments,
+    latestSegment,
+    isLatestWeekFresh,
+    HARVEST_SCANNER_LOOKBACK_WEEKS
+  );
+  if (!scan || scan.matched !== true) return null;
+
+  // scan.highlightTimes is every PASSING week across all segments, ascending
+  // (Monday-anchored, mirroring the chart band's own highlightTimes) - walk
+  // backward to where the CURRENT uninterrupted run of passing weeks began,
+  // the same gap-aware adjacency check used for the (now-unused-here)
+  // Weekly Strong streak walk above, so a structurally missing week can
+  // never be silently bridged into a longer streak than the data supports.
+  //
+  // matched is computed against latestSegment alone, at a lookback that can
+  // fall back to a smaller tier than HARVEST_SCANNER_LOOKBACK_WEEKS when
+  // that segment is shorter (getEffectiveScannerLookbackWeeks) - but
+  // highlightTimes evaluates every segment at the full requested lookback,
+  // unreduced. When latestSegment is shorter than that, its own passing
+  // weeks (including the very latest, matched one) never satisfy that
+  // full-lookback evaluation and so never reach highlightTimes at all, even
+  // though matched is true - highlightTimes would then end on an OLDER
+  // segment's own trailing pass instead. Guard against silently reporting
+  // that unrelated older date as this stock's current entry: only trust
+  // highlightTimes when its last entry really is the latest week.
+  const highlightTimes = scan.highlightTimes;
+  const latestWeekTime = latestSegment[latestSegment.length - 1]?.time;
+  if (highlightTimes.length === 0) return null;
+  if (highlightTimes[highlightTimes.length - 1] !== latestWeekTime) return null;
+
+  let index = highlightTimes.length - 1;
+  while (index > 0 && isConsecutiveIsoWeek(highlightTimes[index], highlightTimes[index - 1])) {
+    index--;
+  }
+  return getWeekEndingFriday(highlightTimes[index]);
 }
 
 export type { MetricCandle };
@@ -268,11 +338,18 @@ export async function computeWeeklyStrongStocks(
 ): Promise<WeeklyStrongStockRow[]> {
   if (instrumentRows.length === 0) return [];
 
+  // 10 years (not Weekly Strong's own 5) so resolveScannerInSince's 250-week
+  // rolling window always has a full trailing window available even for the
+  // oldest week of a long-running current streak - matches the same safe
+  // fetch window computeWeeklyStrongBacktestMembers already uses below.
+  // Widening this doesn't change Weekly Strong's own decision: its rolling
+  // maxes are sliding-window, invariant to extra older history preceding
+  // the window.
   const { dailyCandles, weeklyCandles } = await readDailyAndWeeklyMetricCandles({
     exchange,
     instruments: instrumentRows.map((row) => ({ instrumentId: row.instrumentId, symbol: row.symbol })),
-    dailyFrom: getDateYearsAgo(5),
-    weeklyFrom: getDateYearsAgo(5),
+    dailyFrom: getDateYearsAgo(WEEKLY_STRONG_BACKTEST_FETCH_YEARS),
+    weeklyFrom: getDateYearsAgo(WEEKLY_STRONG_BACKTEST_FETCH_YEARS),
   });
   const dailyCandlesBySymbol = groupMetricCandlesBySymbol(dailyCandles);
   const weeklyCandlesBySymbol = groupMetricCandlesBySymbol(weeklyCandles);
@@ -315,18 +392,24 @@ export async function computeWeeklyStrongStocks(
         ? ((latestDaily.close - previousDaily.close) * 100) / previousDaily.close
         : 0;
 
-    // Return: entry close (start of the still-open qualifying streak) through today's latest close.
+    // Return: entry close (start of the still-open Weekly Strong qualifying
+    // streak) through today's latest close - unchanged, still Weekly
+    // Strong's own entry point (the task only requires In Since to track
+    // Scanner; Return keeps its existing methodology).
     const entryIndex = findCurrentStreakEntryIndexGapAware(series);
     let returnPct: number | null = null;
-    let inSince: string | null = null;
     if (entryIndex !== null) {
       const entryTime = series[entryIndex].time;
-      inSince = getWeekEndingFriday(entryTime);
       const entryClose = weeklyRows.find((row) => row.time === entryTime)?.close;
       if (entryClose !== undefined && entryClose > 0) {
         returnPct = ((latestDaily.close - entryClose) / entryClose) * 100;
       }
     }
+
+    // In Since: the CURRENT Scanner signal (the same yellow band on the
+    // Charts page), never Weekly Strong's own streak - see
+    // resolveScannerInSince above.
+    const inSince = resolveScannerInSince(dailyRows, exchange);
 
     rows.push({
       symbol: instrument.symbol,

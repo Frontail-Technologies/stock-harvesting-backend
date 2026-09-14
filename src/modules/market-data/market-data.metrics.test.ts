@@ -44,7 +44,7 @@ import * as candlesModule from "./market-data.candles";
 import { deriveWeeklyMetricCandlesFromDaily } from "./market-data.candles";
 import * as candleSyncModule from "./market-data.candle-sync";
 import * as instrumentsModule from "./market-data.instruments";
-import { getWeekEndingFriday } from "./trading-calendar";
+import { getWeekEndingFriday, resolveLatestCompletedWeekEnding } from "./trading-calendar";
 import * as evaluatorModule from "./weekly-strong-evaluator";
 import {
   computeAllRelativeStrengthMetrics,
@@ -78,6 +78,52 @@ function buildDailyRows(symbol: string, count: number, startClose = 100): FakeCa
       high: startClose + i + 1,
       low: startClose + i - 1,
       close: startClose + i,
+      volume: 1000,
+    };
+  });
+}
+
+// resolveScannerInSince runs the REAL (unmocked) Scanner evaluator chain, so
+// controlling its output needs real weekly-close data, not a mocked series.
+// One daily bar per ISO week (each exactly 7 days before the next -> always
+// lands in the next distinct week) makes that week's close directly
+// controllable, since a week's aggregated close is just its last candle's
+// close. The series ends exactly on resolveLatestCompletedWeekEnding's own
+// Friday - the same "is this week fresh/complete" check
+// classifyScannerWeeklySeries/excludeIncompleteTradingWeek run against real
+// "now" - so the fixture is always both complete AND fresh regardless of
+// which real weekday the test happens to run on.
+//
+// A flat baseline does NOT reliably fail: once the 250-week rolling window
+// no longer reaches back far enough to see any earlier higher value, a flat
+// series is trivially its own max (rollingMax == its own close), so
+// close > 0.85*rollingMax becomes true for every flat week - not a useful
+// "false" baseline. Instead, the baseline ends with one PEAK week
+// (PEAK_CLOSE) immediately before the controlled tail; that peak stays
+// inside every tail index's 250-week trailing window (it's always within
+// 249 weeks of any tail index tested here), so every tail BASELINE_CLOSE
+// week reliably fails (well under 0.85*PEAK_CLOSE) while a tail week set
+// above 0.85*PEAK_CLOSE reliably passes (and, once it does, becomes the new
+// local high subsequent tail weeks are compared against).
+function buildScannerControlledDailyRows(symbol: string, tailCloses: number[]): FakeCandle[] {
+  const PEAK_CLOSE = 1000;
+  const BASELINE_CLOSE = 50;
+  const BASELINE_WEEKS = 249; // 248 flat weeks + 1 peak week, keeps the peak in-window through the whole tail
+  const closes = [...Array(BASELINE_WEEKS - 1).fill(BASELINE_CLOSE), PEAK_CLOSE, ...tailCloses];
+
+  const latestFriday = resolveLatestCompletedWeekEnding("NSE");
+
+  return closes.map((close, i) => {
+    const weeksAgo = closes.length - 1 - i;
+    const date = new Date(`${latestFriday}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() - weeksAgo * 7);
+    return {
+      symbol,
+      time: date.toISOString().slice(0, 10),
+      open: close,
+      high: close,
+      low: close,
+      close,
       volume: 1000,
     };
   });
@@ -341,7 +387,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     expect(result).toEqual([]);
   });
 
-  it("Return uses the real current-streak-entry helper, not a reimplementation - entry close to today's close", async () => {
+  it("Return still uses Weekly Strong's own current-streak-entry helper - unaffected by the Scanner-based In Since switch", async () => {
     const dailyRows = buildDailyRows("RETSYM", 400, 100);
     readMetricCandles.mockResolvedValueOnce(dailyRows);
 
@@ -365,124 +411,252 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     );
 
     expect(result).toHaveLength(1);
+    // Return keeps its existing methodology (Weekly Strong's own entry) -
+    // only In Since (below) switched source to the Scanner signal.
     expect(result[0].returnPct).toBeCloseTo(((latestClose - entryRow.close) / entryRow.close) * 100);
-    // D: inSince derives from the exact same entryIndex Return itself just used.
-    expect(result[0].inSince).toBe(getWeekEndingFriday(entryRow.time));
   });
 
-  // Test 5 from the task: a stock that reaches the result at all must always
-  // have a valid (non-null) In Since - impossible to reach with a null entry
-  // now that inclusion and inSince are decided from the exact same series.
-  it("5: a Harvest Result stock always has a valid (non-null) In Since", async () => {
-    const dailyRows = buildDailyRows("VALIDENTRY", 400);
-    readMetricCandles.mockResolvedValueOnce(dailyRows);
-    evaluateWeeklyStrongSeries.mockReturnValue([
-      { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
-    ]);
+  // Tests 1, 3, 4, 5 from this task, plus 2 (gap continuity) and 4 (Friday
+  // conversion) from the earlier In Since task - all against the REAL
+  // (unmocked) Scanner evaluator chain via buildScannerControlledDailyRows,
+  // since In Since no longer comes from the mocked evaluateWeeklyStrongSeries
+  // at all. evaluateWeeklyStrongSeries is still mocked to pass (Weekly
+  // Strong still decides Harvest Results INCLUSION, unchanged by this task).
+  describe("In Since tracks the Scanner signal, not Weekly Strong's streak", () => {
+    it("1: table In Since equals the start of the current Scanner PASS streak", async () => {
+      const dailyRows = buildScannerControlledDailyRows("SCANMATCH", [50, 50, 900, 900, 900]);
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
 
-    const result = await computeWeeklyStrongStocks(
-      [{ instrumentId: "VALIDENTRY", symbol: "VALIDENTRY", name: "Valid Entry Co", exchange: "NSE" }],
-      "NSE"
-    );
+      const result = await computeWeeklyStrongStocks(
+        [{ instrumentId: "SCANMATCH", symbol: "SCANMATCH", name: "Scan Match Co", exchange: "NSE" }],
+        "NSE"
+      );
 
-    expect(result).toHaveLength(1);
-    expect(result[0].inSince).not.toBeNull();
-  });
+      // First T in the controlled tail [F,F,T,T,T] is dailyRows[251] (250 baseline weeks + tail index 2).
+      expect(result[0].inSince).toBe(getWeekEndingFriday(dailyRows[251].time));
+    });
 
-  // Test 3 from the task.
-  it("3: [F,F,T,T,T] -> In Since = first T's Friday", async () => {
-    const dailyRows = buildDailyRows("STREAK4", 400);
-    readMetricCandles.mockResolvedValueOnce(dailyRows);
-    evaluateWeeklyStrongSeries.mockReturnValue([
-      { time: "2026-07-31", passes: false, passesDaily: false, passesWeekly: false },
-      { time: "2026-08-07", passes: false, passesDaily: false, passesWeekly: false },
-      { time: "2026-08-14", passes: true, passesDaily: true, passesWeekly: true },
-      { time: "2026-08-21", passes: true, passesDaily: true, passesWeekly: true },
-      { time: "2026-08-28", passes: true, passesDaily: true, passesWeekly: true },
-    ]);
+    // Task test 2 (this task's numbering: [F,F,T,T,T]).
+    it("2: [F,F,T,T,T] -> In Since = first T's Friday", async () => {
+      const dailyRows = buildScannerControlledDailyRows("STREAK4", [50, 50, 900, 900, 900]);
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
 
-    const result = await computeWeeklyStrongStocks(
-      [{ instrumentId: "STREAK4", symbol: "STREAK4", name: "Streak Co", exchange: "NSE" }],
-      "NSE"
-    );
+      const result = await computeWeeklyStrongStocks(
+        [{ instrumentId: "STREAK4", symbol: "STREAK4", name: "Streak Co", exchange: "NSE" }],
+        "NSE"
+      );
 
-    expect(result[0].inSince).toBe("2026-08-14");
-  });
+      expect(result[0].inSince).toBe(getWeekEndingFriday(dailyRows[251].time));
+    });
 
-  // Test 4 from the task.
-  it("4: [T,T,F,T,T] -> In Since = second streak's first T's Friday", async () => {
-    const dailyRows = buildDailyRows("REENTRY", 400);
-    readMetricCandles.mockResolvedValueOnce(dailyRows);
-    evaluateWeeklyStrongSeries.mockReturnValue([
-      { time: "2026-08-14", passes: true, passesDaily: true, passesWeekly: true },
-      { time: "2026-08-21", passes: true, passesDaily: true, passesWeekly: true },
-      { time: "2026-08-28", passes: false, passesDaily: false, passesWeekly: false },
-      { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
-      { time: "2026-09-11", passes: true, passesDaily: true, passesWeekly: true },
-    ]);
+    // Task test 3: [T,T,F,T,T].
+    it("3: [T,T,F,T,T] -> In Since = second streak's first T's Friday", async () => {
+      const dailyRows = buildScannerControlledDailyRows("REENTRY", [900, 900, 100, 950, 950]);
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
 
-    const result = await computeWeeklyStrongStocks(
-      [{ instrumentId: "REENTRY", symbol: "REENTRY", name: "Re-entry Co", exchange: "NSE" }],
-      "NSE"
-    );
+      const result = await computeWeeklyStrongStocks(
+        [{ instrumentId: "REENTRY", symbol: "REENTRY", name: "Re-entry Co", exchange: "NSE" }],
+        "NSE"
+      );
 
-    expect(result[0].inSince).toBe("2026-09-04");
-  });
+      // Second streak's first T is dailyRows[252] (tail index 3), not the
+      // earlier streak's dailyRows[250]/[251].
+      expect(result[0].inSince).toBe(getWeekEndingFriday(dailyRows[252].time));
+    });
 
-  it("E: a non-Friday entry-week candle date is converted to the canonical week-ending Friday, never returned raw", async () => {
-    const dailyRows = buildDailyRows("RAWDATE", 400);
-    readMetricCandles.mockResolvedValueOnce(dailyRows);
-    // 2026-08-10 is a Monday - its ISO week's Friday is 2026-08-14.
-    evaluateWeeklyStrongSeries.mockReturnValue([
-      { time: "2026-08-10", passes: true, passesDaily: true, passesWeekly: true },
-    ]);
+    // Task test 4: chart yellow-band first Friday equals table In Since -
+    // both are literally the same getWeekEndingFriday(highlightTimes[index])
+    // computation the chart's own calculateNear250WeekHighScan pipeline
+    // produces (see near-250-week-high.ts), reused here rather than
+    // reimplemented, so this is true by construction; asserted directly
+    // against the raw candle date to make that visible.
+    it("4: table In Since equals the chart's own week-ending Friday for the same streak-start candle", async () => {
+      const dailyRows = buildScannerControlledDailyRows("CHARTMATCH", [50, 50, 900, 900, 900]);
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
 
-    const result = await computeWeeklyStrongStocks(
-      [{ instrumentId: "RAWDATE", symbol: "RAWDATE", name: "Raw Date Co", exchange: "NSE" }],
-      "NSE"
-    );
+      const result = await computeWeeklyStrongStocks(
+        [{ instrumentId: "CHARTMATCH", symbol: "CHARTMATCH", name: "Chart Match Co", exchange: "NSE" }],
+        "NSE"
+      );
 
-    expect(result[0].inSince).toBe("2026-08-14");
-  });
+      const chartBandFirstFriday = getWeekEndingFriday(dailyRows[251].time);
+      expect(result[0].inSince).toBe(chartBandFirstFriday);
+    });
 
-  it("F: a structurally missing week (not an explicit fail) breaks streak continuity - inSince never bridges the gap", async () => {
-    const dailyRows = buildDailyRows("GAPSYM", 400);
-    readMetricCandles.mockResolvedValueOnce(dailyRows);
-    // 2026-08-14 (Fri) then a two-week jump straight to 2026-08-28 (Fri) -
-    // 2026-08-21's week is entirely absent from the series (e.g. a gap in
-    // that symbol's candle history), not marked false. A naive pass/fail
-    // walk would treat 08-14 and 08-28 as one unbroken streak; the real
-    // current streak only starts at 08-28.
-    evaluateWeeklyStrongSeries.mockReturnValue([
-      { time: "2026-08-14", passes: true, passesDaily: true, passesWeekly: true },
-      { time: "2026-08-28", passes: true, passesDaily: true, passesWeekly: true },
-      { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
-    ]);
+    it("5: a Harvest Result stock reporting a Scanner signal always has a valid (non-null) In Since", async () => {
+      const dailyRows = buildScannerControlledDailyRows("VALIDENTRY", [50, 50, 900, 900, 900]);
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
 
-    const result = await computeWeeklyStrongStocks(
-      [{ instrumentId: "GAPSYM", symbol: "GAPSYM", name: "Gap Co", exchange: "NSE" }],
-      "NSE"
-    );
+      const result = await computeWeeklyStrongStocks(
+        [{ instrumentId: "VALIDENTRY", symbol: "VALIDENTRY", name: "Valid Entry Co", exchange: "NSE" }],
+        "NSE"
+      );
 
-    expect(result[0].inSince).toBe("2026-08-28");
-  });
+      expect(result).toHaveLength(1);
+      expect(result[0].inSince).not.toBeNull();
+    });
 
-  it("G: the latest completed week is included in the streak walk (not off-by-one excluded)", async () => {
-    const dailyRows = buildDailyRows("LATESTWK", 400);
-    readMetricCandles.mockResolvedValueOnce(dailyRows);
-    evaluateWeeklyStrongSeries.mockReturnValue([
-      { time: "2026-08-28", passes: false, passesDaily: false, passesWeekly: false },
-      { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
-    ]);
+    it("changing Weekly Strong's result alone does not change the Scanner-based In Since", async () => {
+      const dailyRows = buildScannerControlledDailyRows("WSINDEPENDENT", [50, 50, 900, 900, 900]);
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
+      const firstResult = await computeWeeklyStrongStocks(
+        [{ instrumentId: "WSINDEPENDENT", symbol: "WSINDEPENDENT", name: "WS Independent Co", exchange: "NSE" }],
+        "NSE"
+      );
 
-    const result = await computeWeeklyStrongStocks(
-      [{ instrumentId: "LATESTWK", symbol: "LATESTWK", name: "Latest Week Co", exchange: "NSE" }],
-      "NSE"
-    );
+      // Same candle data, but Weekly Strong's own mocked series now reports
+      // a completely different (still-passing, so inclusion is unaffected)
+      // shape - In Since must not move, since it no longer reads this at all.
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2020-01-03", passes: true, passesDaily: true, passesWeekly: true },
+        { time: "2020-01-10", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
+      const secondResult = await computeWeeklyStrongStocks(
+        [{ instrumentId: "WSINDEPENDENT", symbol: "WSINDEPENDENT", name: "WS Independent Co", exchange: "NSE" }],
+        "NSE"
+      );
 
-    // The series' own last entry (the latest completed week) is the entry
-    // week itself here, not excluded from consideration.
-    expect(result[0].inSince).toBe("2026-09-04");
+      expect(secondResult[0].inSince).toBe(firstResult[0].inSince);
+    });
+
+    it("a structurally missing week (not an explicit fail) breaks Scanner streak continuity - In Since never bridges the gap", async () => {
+      // A real multi-week calendar gap doesn't just leave a hole in one
+      // series (like a false week would) - classifyScannerWeeklySeries
+      // partitions on any >7-day jump between consecutive weeks into
+      // SEPARATE segments (scanner-weekly-series-safety.ts), and
+      // calculateNear250WeekHighScan concatenates every segment's own
+      // passing weeks into one combined highlightTimes array. So this test
+      // builds two independently full-sized (251-week) segments - both big
+      // enough for the exact same 250-week tier resolveScannerInSince
+      // requests, so there's no lookback-fallback mismatch to confound the
+      // result - separated by a real 3-week gap, and proves the adjacency
+      // walk over the combined highlightTimes stops at the segment boundary
+      // rather than bridging into the older segment's own T's.
+      const latestFriday = resolveLatestCompletedWeekEnding("NSE");
+      const dateForWeeksAgo = (weeksAgo: number) => {
+        const date = new Date(`${latestFriday}T00:00:00.000Z`);
+        date.setUTCDate(date.getUTCDate() - weeksAgo * 7);
+        return date.toISOString().slice(0, 10);
+      };
+      const rowFor = (weeksAgo: number, close: number): FakeCandle => ({
+        symbol: "GAPSYM",
+        time: dateForWeeksAgo(weeksAgo),
+        open: close,
+        high: close,
+        low: close,
+        close,
+        volume: 1000,
+      });
+
+      // Newer segment (weeksAgo 0..250, 251 weeks: 248 flat + 1 peak + T,T).
+      const newerSegment: FakeCandle[] = [
+        ...Array.from({ length: 248 }, (_, i) => rowFor(250 - i, 50)),
+        rowFor(2, 1000),
+        rowFor(1, 900),
+        rowFor(0, 900),
+      ];
+      // Real gap: weeksAgo 251 and 252 are entirely absent (a >7-day jump to
+      // the older segment's most recent week at weeksAgo 253).
+      // Older segment (weeksAgo 253..503, 251 weeks: 248 flat + 1 peak +
+      // T,T), ending in its own PASS - if the walk bridged segments, it
+      // would reach these T's instead of stopping at the newer segment's own.
+      const olderSegment: FakeCandle[] = [
+        ...Array.from({ length: 248 }, (_, i) => rowFor(503 - i, 50)),
+        rowFor(255, 1000),
+        rowFor(254, 900),
+        rowFor(253, 900),
+      ];
+      const dailyRows = [...olderSegment, ...newerSegment];
+
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
+
+      const result = await computeWeeklyStrongStocks(
+        [{ instrumentId: "GAPSYM", symbol: "GAPSYM", name: "Gap Co", exchange: "NSE" }],
+        "NSE"
+      );
+
+      // In Since must be the newer segment's own first T (weeksAgo 1), not
+      // the older segment's T's on the far side of the gap.
+      expect(result[0].inSince).toBe(getWeekEndingFriday(dateForWeeksAgo(1)));
+    });
+
+    it("a matched signal whose latest segment is too short for the full lookback (a fallback-tier mismatch between matched and highlightTimes) reports null rather than an unrelated older date", async () => {
+      // calculateNear250WeekHighScan's own `matched` falls back to a
+      // smaller tier (getEffectiveScannerLookbackWeeks) when the latest
+      // segment is shorter than the requested lookback, but its
+      // highlightTimes evaluates every segment at the full REQUESTED
+      // lookback, unreduced - so a short latest segment's own passing weeks
+      // (including the matched one) never reach highlightTimes at all, even
+      // though matched is true. resolveScannerInSince must recognize this
+      // (highlightTimes' last entry isn't really the latest week) and
+      // return null, never an older segment's unrelated trailing date.
+      const latestFriday = resolveLatestCompletedWeekEnding("NSE");
+      const dateForWeeksAgo = (weeksAgo: number) => {
+        const date = new Date(`${latestFriday}T00:00:00.000Z`);
+        date.setUTCDate(date.getUTCDate() - weeksAgo * 7);
+        return date.toISOString().slice(0, 10);
+      };
+      const rowFor = (weeksAgo: number, close: number): FakeCandle => ({
+        symbol: "SHORTSEG",
+        time: dateForWeeksAgo(weeksAgo),
+        open: close,
+        high: close,
+        low: close,
+        close,
+        volume: 1000,
+      });
+
+      // Newer segment: only 51 weeks - long enough for the 1x/50-week
+      // fallback tier (so matched=true) but short of the full 250-week tier
+      // highlightTimes always uses.
+      const newerSegment: FakeCandle[] = [
+        ...Array.from({ length: 48 }, (_, i) => rowFor(50 - i, 50)),
+        rowFor(2, 1000),
+        rowFor(1, 900),
+        rowFor(0, 900),
+      ];
+      const olderSegment: FakeCandle[] = [
+        ...Array.from({ length: 248 }, (_, i) => rowFor(303 - i, 50)),
+        rowFor(55, 1000),
+        rowFor(54, 900),
+        rowFor(53, 900),
+      ];
+      const dailyRows = [...olderSegment, ...newerSegment];
+
+      readMetricCandles.mockResolvedValueOnce(dailyRows);
+      evaluateWeeklyStrongSeries.mockReturnValue([
+        { time: "2026-09-04", passes: true, passesDaily: true, passesWeekly: true },
+      ]);
+
+      const result = await computeWeeklyStrongStocks(
+        [{ instrumentId: "SHORTSEG", symbol: "SHORTSEG", name: "Short Seg Co", exchange: "NSE" }],
+        "NSE"
+      );
+
+      expect(result[0].inSince).toBeNull();
+    });
   });
 });
 
