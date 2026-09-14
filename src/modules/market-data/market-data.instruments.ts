@@ -413,18 +413,26 @@ async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT
   if (uniqueSymbols.length === 0) return stats;
 
   const startedAt = Date.now();
+  // A per-symbol LATERAL + ORDER BY time DESC LIMIT 2 lets Postgres/Timescale
+  // stop scanning each symbol's chunks as soon as it has 2 rows (typically
+  // satisfied from the newest chunk alone), instead of the previous
+  // row_number() OVER (PARTITION BY symbol ...) window function, which had
+  // no LIMIT to push down and had to rank every matching row across every
+  // hypertable chunk up to the present. Same result shape/rows, just reached
+  // without a full-history scan per symbol.
   const result = await dbClient.execute<LatestStockStatsRow>(sql`
-    SELECT symbol, open, close, volume, time::text AS time FROM (
-      SELECT
-        symbol, open, close, volume, time,
-        row_number() OVER (PARTITION BY symbol ORDER BY time DESC) AS rn
+    SELECT wanted.symbol AS symbol, ranked.open, ranked.close, ranked.volume, ranked.time::text AS time
+    FROM unnest(ARRAY[${sql.join(uniqueSymbols.map((symbol) => sql`${symbol}`), sql`, `)}]::text[]) AS wanted(symbol)
+    CROSS JOIN LATERAL (
+      SELECT open, close, volume, time
       FROM candles
-      WHERE exchange = ${exchange}
-        AND timeframe = ${CANDLE_TIMEFRAME.day}
-        AND symbol = ANY(ARRAY[${sql.join(uniqueSymbols.map((symbol) => sql`${symbol}`), sql`, `)}]::text[])
+      WHERE candles.exchange = ${exchange}
+        AND candles.timeframe = ${CANDLE_TIMEFRAME.day}
+        AND candles.symbol = wanted.symbol
+      ORDER BY candles.time DESC
+      LIMIT 2
     ) ranked
-    WHERE rn <= 2
-    ORDER BY symbol, time DESC
+    ORDER BY wanted.symbol, ranked.time DESC
   `);
   logger.debug(
     {
