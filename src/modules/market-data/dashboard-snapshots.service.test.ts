@@ -114,9 +114,10 @@ describe("getOrComputeWeeklyStrongSnapshot - cache freshness", () => {
     );
 
     expect(computeWeeklyStrongStocks).toHaveBeenCalledTimes(1);
-    expect(computeWeeklyStrongStocks).toHaveBeenCalledWith(MEMBER_ROWS, "NSE");
+    expect(computeWeeklyStrongStocks).toHaveBeenCalledWith(MEMBER_ROWS, "NSE", "5x");
     expect(writeDashboardSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
+        scopeKey: "col-1:5x",
         evaluatorVersion: WEEKLY_STRONG_SNAPSHOT_VERSION,
         payload: fresh,
       }),
@@ -180,7 +181,7 @@ describe("getOrComputeWeeklyStrongSnapshot - cache freshness", () => {
     await getOrComputeWeeklyStrongSnapshot("col-4", "NSE", manyMembers);
 
     expect(computeWeeklyStrongStocks).toHaveBeenCalledTimes(1);
-    expect(computeWeeklyStrongStocks).toHaveBeenCalledWith(manyMembers, "NSE");
+    expect(computeWeeklyStrongStocks).toHaveBeenCalledWith(manyMembers, "NSE", "5x");
   });
 
   it("no cached row at all is also treated as a miss and recomputed", async () => {

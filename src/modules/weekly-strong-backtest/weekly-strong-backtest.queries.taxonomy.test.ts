@@ -79,4 +79,29 @@ describe("getWeeklyStrongBacktestStacked - taxonomy fallback", () => {
     expect(result.generated).toBe(false);
     expect(result.points).toEqual([]);
   });
+
+  it("falls back to current-membership history when historical coverage is shorter", async () => {
+    db.select
+      .mockReturnValueOnce(chain([{ id: "hist-1", weekEnding: "2026-09-07", totalPassing: 62 }]))
+      .mockReturnValueOnce(
+        chain([
+          { id: "current-3", weekEnding: "2026-09-07", totalPassing: 62 },
+          { id: "current-2", weekEnding: "2026-08-31", totalPassing: 58 },
+          { id: "current-1", weekEnding: "2026-08-24", totalPassing: 55 },
+        ])
+      )
+      .mockReturnValueOnce(
+        chain([
+          { runId: "current-1", sector: "Information Technology", count: 55 },
+          { runId: "current-2", sector: "Information Technology", count: 58 },
+          { runId: "current-3", sector: "Information Technology", count: 62 },
+        ])
+      );
+
+    const result = await getWeeklyStrongBacktestStacked({ code: "BSE100" });
+
+    expect(result.membershipMode).toBe("current_membership");
+    expect(result.points).toHaveLength(3);
+    expect(result.points.map((point) => point.total)).toEqual([55, 58, 62]);
+  });
 });

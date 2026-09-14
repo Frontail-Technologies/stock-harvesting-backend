@@ -25,6 +25,7 @@ import {
   NSE_NORMAL_EQUITY_SYMBOL_PATTERN,
   pickTopRelativeStrengthRows,
 } from "../market-data/market-data.service";
+import { DEFAULT_SCANNER_LOOKBACK, type ScannerLookbackMultiplier } from "../scanner/scanner.constants";
 
 // The expensive live computation now lives behind a persisted, change-invalidated snapshot (dashboard-snapshots.service.ts); this in-process cache just collapses concurrent requests in front of that fast DB read, it's not the source of freshness truth.
 const COLLECTION_CACHE_TTL_MS = 60_000;
@@ -244,16 +245,21 @@ export async function getCollectionSectorIndustryTaxonomy(input: { code: string 
 }
 
 // The Weekly Strong breakout screen (see weekly-strong-evaluator.ts for qualification logic), scoped to this collection's active members; reads a persisted snapshot instead of re-running computeWeeklyStrongStocks live - see getOrComputeWeeklyStrongSnapshot.
-export async function getCollectionWeeklyStrongStocks(input: { code: string }) {
+export async function getCollectionWeeklyStrongStocks(input: {
+  code: string;
+  lookback?: ScannerLookbackMultiplier;
+}) {
   const collection = await requireCollectionByCode(input.code);
-  const cacheKey = `collectionWeeklyStrongStocks:${collection.code}`;
+  const lookback = input.lookback ?? DEFAULT_SCANNER_LOOKBACK;
+  const cacheKey = `collectionWeeklyStrongStocks:${collection.code}:${lookback}`;
 
   return getOrSetCache(cacheKey, COLLECTION_CACHE_TTL_MS, async () => {
     const memberRows = await getActiveMemberInstrumentRows(collection.id);
     const { items, weekEnding } = await getOrComputeWeeklyStrongSnapshot(
       collection.id,
       collection.exchange,
-      memberRows
+      memberRows,
+      lookback
     );
     return {
       collection: { code: collection.code, name: collection.name },

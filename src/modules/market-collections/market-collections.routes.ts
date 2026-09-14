@@ -6,8 +6,10 @@ import {
   collectionCodeParamsSchema,
   collectionMembersQuerySchema,
   collectionRelativeStrengthQuerySchema,
+  collectionWeeklyStrongStocksQuerySchema,
   listCollectionsQuerySchema,
 } from "./market-collections.schemas";
+import type { ScannerLookbackMultiplier } from "../scanner/scanner.constants";
 import {
   getCollectionMembers,
   getCollectionRelativeStrength,
@@ -76,10 +78,11 @@ marketCollectionsRouter.get(
 
 marketCollectionsRouter.get(
   "/:code/weekly-strong-stocks",
-  validate({ params: collectionCodeParamsSchema }),
+  validate({ params: collectionCodeParamsSchema, query: collectionWeeklyStrongStocksQuerySchema }),
   asyncHandler(async (req, res) => {
     const params = req.params as { code: string };
-    sendData(res, await getCollectionWeeklyStrongStocks({ code: params.code }));
+    const query = req.query as unknown as { lookback: ScannerLookbackMultiplier };
+    sendData(res, await getCollectionWeeklyStrongStocks({ code: params.code, lookback: query.lookback }));
   })
 );
 

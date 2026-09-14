@@ -1,10 +1,22 @@
-import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import { instruments, weeklyStrongBacktestMembers, weeklyStrongBacktestRuns } from "../../db/schema";
+import { CANDLE_TIMEFRAME } from "../../shared/constants";
 import { notFound } from "../../shared/errors";
-import { requireCollectionByCode } from "../market-collections/market-collections.service";
+import { groupMetricCandlesBySymbol, readMetricCandles } from "../market-data/market-data.candles";
+import { getDateYearsAgo } from "../market-data/market-data.dates";
+import {
+  getActiveMemberInstrumentRows,
+  requireCollectionByCode,
+} from "../market-collections/market-collections.service";
 import { getIsoWeekRange, getWeekEndingFriday } from "../market-data/trading-calendar";
+import { resolveScannerSignalFromDailyCloses } from "../scanner/scanner-current-signal";
+import {
+  DEFAULT_SCANNER_LOOKBACK,
+  SCANNER_LOOKBACK_WEEKS,
+  type ScannerLookbackMultiplier,
+} from "../scanner/scanner.constants";
 import {
   CURRENT_MEMBERSHIP,
   DASHBOARD_BACKTEST_WEEKS,
@@ -12,6 +24,8 @@ import {
   UNCLASSIFIED_SECTOR_LABEL,
   type WeeklyStrongBacktestMembershipMode,
 } from "./weekly-strong-backtest.constants";
+
+const MEMBERSHIP_CHANGES_FETCH_YEARS = 10;
 
 function formatCoverageMonth(dateStr: string) {
   return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString("en-US", {
@@ -52,13 +66,6 @@ async function selectPreferredRuns(collectionId: string, limit: number = DASHBOA
     .orderBy(desc(weeklyStrongBacktestRuns.weekEnding))
     .limit(limit);
 
-  if (historicalRuns.length > 0) {
-    return {
-      mode: HISTORICAL_MEMBERSHIP as WeeklyStrongBacktestMembershipMode,
-      runs: historicalRuns,
-    };
-  }
-
   const currentRuns = await db
     .select({
       id: weeklyStrongBacktestRuns.id,
@@ -74,6 +81,16 @@ async function selectPreferredRuns(collectionId: string, limit: number = DASHBOA
     )
     .orderBy(desc(weeklyStrongBacktestRuns.weekEnding))
     .limit(limit);
+
+  if (
+    historicalRuns.length > 0 &&
+    (currentRuns.length === 0 || historicalRuns.length >= currentRuns.length)
+  ) {
+    return {
+      mode: HISTORICAL_MEMBERSHIP as WeeklyStrongBacktestMembershipMode,
+      runs: historicalRuns,
+    };
+  }
 
   return {
     mode: CURRENT_MEMBERSHIP as WeeklyStrongBacktestMembershipMode,
@@ -257,74 +274,6 @@ function dedupeByInstrumentId<T extends { instrumentId: string }>(members: T[]):
   return deduped;
 }
 
-async function resolveMembershipMode(collectionId: string): Promise<WeeklyStrongBacktestMembershipMode> {
-  const [existingHistoricalRun] = await db
-    .select({ id: weeklyStrongBacktestRuns.id })
-    .from(weeklyStrongBacktestRuns)
-    .where(
-      and(
-        eq(weeklyStrongBacktestRuns.collectionId, collectionId),
-        eq(weeklyStrongBacktestRuns.membershipMode, HISTORICAL_MEMBERSHIP),
-      ),
-    )
-    .limit(1);
-
-  return existingHistoricalRun ? HISTORICAL_MEMBERSHIP : CURRENT_MEMBERSHIP;
-}
-
-type BacktestRunRow = { id: string; weekEnding: string; totalPassing: number };
-
-async function findRunForWeek(
-  collectionId: string,
-  mode: WeeklyStrongBacktestMembershipMode,
-  weekEnding: string,
-): Promise<BacktestRunRow | null> {
-  const { start, end } = getIsoWeekRange(weekEnding);
-  const [run] = await db
-    .select({
-      id: weeklyStrongBacktestRuns.id,
-      weekEnding: weeklyStrongBacktestRuns.weekEnding,
-      totalPassing: weeklyStrongBacktestRuns.totalPassing,
-    })
-    .from(weeklyStrongBacktestRuns)
-    .where(
-      and(
-        eq(weeklyStrongBacktestRuns.collectionId, collectionId),
-        eq(weeklyStrongBacktestRuns.membershipMode, mode),
-        gte(weeklyStrongBacktestRuns.weekEnding, start),
-        lte(weeklyStrongBacktestRuns.weekEnding, end),
-      ),
-    )
-    .limit(1);
-
-  return run ?? null;
-}
-
-async function findPreviousRun(
-  collectionId: string,
-  mode: WeeklyStrongBacktestMembershipMode,
-  beforeWeekEnding: string,
-): Promise<BacktestRunRow | null> {
-  const [run] = await db
-    .select({
-      id: weeklyStrongBacktestRuns.id,
-      weekEnding: weeklyStrongBacktestRuns.weekEnding,
-      totalPassing: weeklyStrongBacktestRuns.totalPassing,
-    })
-    .from(weeklyStrongBacktestRuns)
-    .where(
-      and(
-        eq(weeklyStrongBacktestRuns.collectionId, collectionId),
-        eq(weeklyStrongBacktestRuns.membershipMode, mode),
-        lt(weeklyStrongBacktestRuns.weekEnding, beforeWeekEnding),
-      ),
-    )
-    .orderBy(desc(weeklyStrongBacktestRuns.weekEnding))
-    .limit(1);
-
-  return run ?? null;
-}
-
 export function computeMembershipChanges<T extends WeeklyStrongBacktestMembershipChangeMember>(
   currentMembersInput: T[],
   previousMembersInput: T[] | null,
@@ -345,66 +294,87 @@ export function computeMembershipChanges<T extends WeeklyStrongBacktestMembershi
   };
 }
 
+// Stock Harvest membership is Scanner-driven (see market-data.metrics.ts's
+// computeWeeklyStrongStocks) - Stocks In/Out must diff the same
+// Scanner-qualified sets, not weeklyStrongBacktestRuns (a Weekly-Strong-
+// specific persisted table this function never touches). Computed live from
+// the collection's current active members and their candle history - no new
+// table, no schema change - reusing computeMembershipChanges above (a pure
+// instrumentId diff, agnostic to which evaluator produced its inputs) and
+// resolveScannerSignalFromDailyCloses (the same Scanner chain the chart and
+// Stock Harvest table use) for both the current AND the immediately
+// preceding completed week's membership in one pass per symbol.
 export async function getWeeklyStrongBacktestMembershipChanges(input: {
   code: string;
   weekEnding: string;
+  lookback?: ScannerLookbackMultiplier;
 }): Promise<WeeklyStrongBacktestMembershipChanges> {
   const collection = await requireCollectionByCode(input.code);
-  const mode = await resolveMembershipMode(collection.id);
-
+  const lookback = input.lookback ?? DEFAULT_SCANNER_LOOKBACK;
   const baseResponse = {
     collection: { code: collection.code, name: collection.name },
-    membershipMode: mode,
+    membershipMode: CURRENT_MEMBERSHIP as WeeklyStrongBacktestMembershipMode,
   };
 
-  const currentRun = await findRunForWeek(collection.id, mode, input.weekEnding);
+  const memberRows = await getActiveMemberInstrumentRows(collection.id);
+  const unavailable = {
+    ...baseResponse,
+    available: false,
+    weekEnding: null,
+    previousWeekEnding: null,
+    enteredStocks: [],
+    exitedStocks: [],
+  };
+  if (memberRows.length === 0) return unavailable;
 
-  if (!currentRun) {
-    return {
-      ...baseResponse,
-      available: false,
-      weekEnding: null,
-      previousWeekEnding: null,
-      enteredStocks: [],
-      exitedStocks: [],
+  const dailyCandles = await readMetricCandles({
+    instruments: memberRows.map((row) => ({ instrumentId: row.instrumentId, symbol: row.symbol })),
+    timeframe: CANDLE_TIMEFRAME.day,
+    from: getDateYearsAgo(MEMBERSHIP_CHANGES_FETCH_YEARS),
+  });
+  const dailyCandlesBySymbol = groupMetricCandlesBySymbol(dailyCandles);
+
+  let weekEnding: string | null = null;
+  let previousWeekEnding: string | null = null;
+  const currentMembers: WeeklyStrongBacktestMembershipChangeMember[] = [];
+  const previousMembers: WeeklyStrongBacktestMembershipChangeMember[] = [];
+
+  for (const member of memberRows) {
+    const dailyRows = dailyCandlesBySymbol.get(member.symbol) ?? [];
+    if (dailyRows.length === 0) continue;
+
+    const signal = resolveScannerSignalFromDailyCloses(
+      dailyRows.map((row) => ({ time: row.time, close: row.close })),
+      collection.exchange,
+      SCANNER_LOOKBACK_WEEKS[lookback],
+    );
+
+    if (signal.currentTime && !weekEnding) weekEnding = getWeekEndingFriday(signal.currentTime);
+    if (signal.previousWeekTime && !previousWeekEnding) previousWeekEnding = getWeekEndingFriday(signal.previousWeekTime);
+
+    const changeMember: WeeklyStrongBacktestMembershipChangeMember = {
+      instrumentId: member.instrumentId,
+      symbol: member.symbol,
+      name: member.name,
+      exchange: member.exchange,
     };
+    if (signal.matched) currentMembers.push(changeMember);
+    if (signal.previousWeekMatched) previousMembers.push(changeMember);
   }
 
-  const previousRun = await findPreviousRun(collection.id, mode, currentRun.weekEnding);
-
-  const runIds = previousRun ? [currentRun.id, previousRun.id] : [currentRun.id];
-  const memberRows = await db
-    .select({
-      runId: weeklyStrongBacktestMembers.runId,
-      instrumentId: weeklyStrongBacktestMembers.instrumentId,
-      symbol: weeklyStrongBacktestMembers.symbol,
-      name: weeklyStrongBacktestMembers.name,
-      exchange: weeklyStrongBacktestMembers.exchange,
-    })
-    .from(weeklyStrongBacktestMembers)
-    .where(inArray(weeklyStrongBacktestMembers.runId, runIds))
-    .orderBy(asc(weeklyStrongBacktestMembers.symbol));
-
-  const currentMembers = memberRows.filter((row) => row.runId === currentRun.id);
-  const previousMembers = previousRun ? memberRows.filter((row) => row.runId === previousRun.id) : null;
-
-  const toChangeMember = (row: (typeof memberRows)[number]): WeeklyStrongBacktestMembershipChangeMember => ({
-    instrumentId: row.instrumentId,
-    symbol: row.symbol,
-    name: row.name,
-    exchange: row.exchange,
-  });
+  if (!weekEnding) return unavailable;
+  if (getIsoWeekRange(input.weekEnding).start !== getIsoWeekRange(weekEnding).start) return unavailable;
 
   const { enteredStocks, exitedStocks } = computeMembershipChanges(
-    currentMembers.map(toChangeMember),
-    previousMembers?.map(toChangeMember) ?? null,
+    currentMembers,
+    previousWeekEnding ? previousMembers : null,
   );
 
   return {
     ...baseResponse,
     available: true,
-    weekEnding: getWeekEndingFriday(currentRun.weekEnding),
-    previousWeekEnding: previousRun ? getWeekEndingFriday(previousRun.weekEnding) : null,
+    weekEnding,
+    previousWeekEnding,
     enteredStocks,
     exitedStocks,
   };

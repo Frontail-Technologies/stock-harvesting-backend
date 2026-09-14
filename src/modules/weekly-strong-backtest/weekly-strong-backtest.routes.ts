@@ -7,6 +7,7 @@ import {
   collectionCodeWeekParamsSchema,
   membershipChangesQuerySchema,
 } from "./weekly-strong-backtest.schemas";
+import type { ScannerLookbackMultiplier } from "../scanner/scanner.constants";
 import {
   getWeeklyStrongBacktestMembershipChanges,
   getWeeklyStrongBacktestStacked,
@@ -31,10 +32,14 @@ weeklyStrongBacktestRouter.get(
   validate({ params: collectionCodeParamsSchema, query: membershipChangesQuerySchema }),
   asyncHandler(async (req, res) => {
     const params = req.params as { code: string };
-    const query = req.query as unknown as { weekEnding: string };
+    const query = req.query as unknown as { weekEnding: string; lookback: ScannerLookbackMultiplier };
     sendData(
       res,
-      await getWeeklyStrongBacktestMembershipChanges({ code: params.code, weekEnding: query.weekEnding })
+      await getWeeklyStrongBacktestMembershipChanges({
+        code: params.code,
+        weekEnding: query.weekEnding,
+        lookback: query.lookback,
+      })
     );
   })
 );

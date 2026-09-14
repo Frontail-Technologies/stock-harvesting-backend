@@ -53,6 +53,16 @@ describe("near-250-week-high scan (Scanner live path) - single continuous segmen
     expect(result?.matched).toBe(true);
   });
 
+  it("uses the effective fallback tier for highlightTimes when the requested window is longer than the segment", () => {
+    const weeklyCandles = buildWeeklySeries(150, (index) => (index === 10 ? 1000 : 900));
+
+    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
+
+    expect(result?.metrics.lookbackWeeks).toBe(150);
+    expect(result?.matched).toBe(true);
+    expect(result?.highlightTimes).toContain(weeklyCandles[weeklyCandles.length - 1].time);
+  });
+
   it("highlights multiple historical weeks, never before a full lookbackWeeks window exists", () => {
     const weeks = 60;
     // Rising close, so every index at or after the 50-week warm-up point is

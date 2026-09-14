@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_SCANNER_LOOKBACK, SCANNER_LOOKBACK_MULTIPLIERS } from "../scanner/scanner.constants";
 
 // Deliberately NOT the shared exchangeSchema here: that schema carries its
 // own `.default(DEFAULT_EXCHANGE)` ("US") baked in for endpoints where "no
@@ -39,5 +40,11 @@ export const collectionRelativeStrengthQuerySchema = z
   .object({
     limit: z.coerce.number().int().positive().max(500).default(200),
     groupBy: z.enum(["sector", "industry"]).optional(),
+  })
+  .strict();
+
+export const collectionWeeklyStrongStocksQuerySchema = z
+  .object({
+    lookback: z.enum(SCANNER_LOOKBACK_MULTIPLIERS).default(DEFAULT_SCANNER_LOOKBACK),
   })
   .strict();

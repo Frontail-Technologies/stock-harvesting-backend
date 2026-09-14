@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, or, like } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import { dashboardMetricSnapshots } from "../../db/schema";
@@ -10,8 +10,8 @@ export type DashboardSnapshotMetricType = "relative_strength" | "weekly_strong";
 // Version tag (not a formula hash) so old/new RS snapshots can be told apart, mirroring weekly-strong-evaluator.ts's own version constant; lives in this dependency-free module so market-data.service.ts can reuse it without an import cycle. v2 switched to 55-day-change-only ranking (dropped the near-250-week-high pre-filter and weekly MACD/monthly terms), so a v1 snapshot's row set/values are invalid under the current formula and must be treated as a miss - see readDashboardSnapshotWithMeta's version-aware callers.
 export const RELATIVE_STRENGTH_SNAPSHOT_VERSION = "relative-strength-v2";
 
-// Same idea for the Weekly Strong snapshot, but its OWN version tag, separate from WEEKLY_STRONG_EVALUATOR_VERSION which tags the pass/fail decision logic itself and is persisted on immutable Backtest history - bumping this one only forces a Dashboard cache refresh. v2 added returnPct; a v1 row is missing the field entirely (not the same as returnPct: null), so it must be treated as a cache miss.
-export const WEEKLY_STRONG_SNAPSHOT_VERSION = "weekly-strong-snapshot-v3";
+// Same idea for the Weekly Strong snapshot, but its OWN version tag, separate from WEEKLY_STRONG_EVALUATOR_VERSION which tags the pass/fail decision logic itself and is persisted on immutable Backtest history - bumping this one only forces a Dashboard cache refresh. v2 added returnPct; a v1 row is missing the field entirely (not the same as returnPct: null), so it must be treated as a cache miss. v4 switched Stock Harvest membership/In Since/Return from Weekly Strong to the Scanner rule - a v3 row's membership set and values are computed under a different evaluator entirely and must be treated as a miss.
+export const WEEKLY_STRONG_SNAPSHOT_VERSION = "weekly-strong-snapshot-v4";
 
 // Deliberately zero dependency on market-data.service.ts - pure schema-level read/write/delete kept as its own tiny module so both market-data.service.ts and dashboard-snapshots.service.ts can depend on it one-directionally without a cycle.
 
@@ -114,5 +114,13 @@ export async function deleteDashboardSnapshots(
 ): Promise<void> {
   await db
     .delete(dashboardMetricSnapshots)
-    .where(and(eq(dashboardMetricSnapshots.scopeType, scopeType), eq(dashboardMetricSnapshots.scopeKey, scopeKey)));
+    .where(
+      and(
+        eq(dashboardMetricSnapshots.scopeType, scopeType),
+        or(
+          eq(dashboardMetricSnapshots.scopeKey, scopeKey),
+          like(dashboardMetricSnapshots.scopeKey, `${scopeKey}:%`)
+        )
+      )
+    );
 }

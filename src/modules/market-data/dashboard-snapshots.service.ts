@@ -5,6 +5,7 @@ import {
   type RelativeStrengthMetricRow,
   type WeeklyStrongStockRow,
 } from "./market-data.service";
+import { DEFAULT_SCANNER_LOOKBACK, type ScannerLookbackMultiplier } from "../scanner/scanner.constants";
 import {
   deleteDashboardSnapshots,
   readDashboardSnapshotWithMeta,
@@ -84,11 +85,13 @@ export async function getOrComputeCollectionRelativeStrengthBase(
 export async function getOrComputeWeeklyStrongSnapshot(
   collectionId: string,
   exchange: string,
-  memberRows: Parameters<typeof computeWeeklyStrongStocks>[0]
+  memberRows: Parameters<typeof computeWeeklyStrongStocks>[0],
+  lookback: ScannerLookbackMultiplier = DEFAULT_SCANNER_LOOKBACK
 ): Promise<{ items: WeeklyStrongStockRow[]; weekEnding: string }> {
+  const scopeKey = `${collectionId}:${lookback}`;
   const cached = await readDashboardSnapshotWithMeta<WeeklyStrongStockRow[]>(
     "collection",
-    collectionId,
+    scopeKey,
     "weekly_strong"
   );
   if (cached && cached.evaluatorVersion === WEEKLY_STRONG_SNAPSHOT_VERSION) {
@@ -99,10 +102,10 @@ export async function getOrComputeWeeklyStrongSnapshot(
     };
   }
 
-  const computed = await computeWeeklyStrongStocks(memberRows, exchange);
+  const computed = await computeWeeklyStrongStocks(memberRows, exchange, lookback);
   const { asOfDate } = await writeDashboardSnapshot({
     scopeType: "collection",
-    scopeKey: collectionId,
+    scopeKey,
     metricType: "weekly_strong",
     exchange,
     evaluatorVersion: WEEKLY_STRONG_SNAPSHOT_VERSION,

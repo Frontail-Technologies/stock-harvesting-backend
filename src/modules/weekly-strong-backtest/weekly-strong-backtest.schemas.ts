@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_SCANNER_LOOKBACK, SCANNER_LOOKBACK_MULTIPLIERS } from "../scanner/scanner.constants";
 
 export const collectionCodeParamsSchema = z
   .object({
@@ -22,6 +23,7 @@ export const membershipChangesQuerySchema = z
       .string()
       .trim()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "weekEnding must be YYYY-MM-DD"),
+    lookback: z.enum(SCANNER_LOOKBACK_MULTIPLIERS).default(DEFAULT_SCANNER_LOOKBACK),
   })
   .strict();
 

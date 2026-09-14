@@ -1,39 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../db/client", () => ({ db: { select: vi.fn() } }));
 vi.mock("../market-collections/market-collections.service", () => ({
   requireCollectionByCode: vi.fn(),
+  getActiveMemberInstrumentRows: vi.fn(),
+}));
+vi.mock("../market-data/market-data.candles", async () => {
+  const actual = await vi.importActual<typeof import("../market-data/market-data.candles")>(
+    "../market-data/market-data.candles",
+  );
+  return { ...actual, readMetricCandles: vi.fn() };
+});
+vi.mock("../scanner/scanner-current-signal", () => ({
+  resolveScannerSignalFromDailyCloses: vi.fn(),
 }));
 
-import * as dbClientModule from "../../db/client";
 import { getWeekEndingFriday } from "../market-data/trading-calendar";
 import * as marketCollectionsModule from "../market-collections/market-collections.service";
+import * as candlesModule from "../market-data/market-data.candles";
+import * as scannerSignalModule from "../scanner/scanner-current-signal";
 import {
   computeMembershipChanges,
   getWeeklyStrongBacktestMembershipChanges,
   type WeeklyStrongBacktestMembershipChangeMember,
 } from "./weekly-strong-backtest.queries";
 
-const db = vi.mocked(dbClientModule.db);
 const requireCollectionByCode = vi.mocked(marketCollectionsModule.requireCollectionByCode);
+const getActiveMemberInstrumentRows = vi.mocked(marketCollectionsModule.getActiveMemberInstrumentRows);
+const readMetricCandles = vi.mocked(candlesModule.readMetricCandles);
+const resolveScannerSignalFromDailyCloses = vi.mocked(scannerSignalModule.resolveScannerSignalFromDailyCloses);
 
 function member(symbol: string, exchange = "NSE", instrumentId = `${exchange}:${symbol}`) {
   return { instrumentId, symbol, name: symbol, exchange };
-}
-
-// Mimics drizzle's chainable, awaitable query builder just enough for this
-// file's queries (select/from/where/orderBy/limit, awaited at any point in
-// the chain) - no real Postgres reachable in this environment.
-function selectResult(rows: unknown[]) {
-  const chain = {
-    from: () => chain,
-    where: () => chain,
-    orderBy: () => chain,
-    limit: () => chain,
-    then: (resolve: (value: unknown[]) => void, reject: (reason?: unknown) => void) =>
-      Promise.resolve(rows).then(resolve, reject),
-  };
-  return chain as never;
 }
 
 function assertInOutInvariants(
@@ -180,7 +177,22 @@ describe("computeMembershipChanges", () => {
   });
 });
 
-describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested week", () => {
+function dailyRow(symbol: string, time = "2026-09-11", close = 100) {
+  return { symbol, time, open: close, high: close, low: close, close, volume: 1000 };
+}
+
+function scannerMembers(instrumentRows: ReturnType<typeof member>[]) {
+  return instrumentRows.map((m) => ({
+    instrumentId: m.instrumentId,
+    symbol: m.symbol,
+    name: m.name,
+    exchange: m.exchange,
+    sector: null,
+    industry: null,
+  }));
+}
+
+describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membership diff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requireCollectionByCode.mockResolvedValue({
@@ -191,153 +203,167 @@ describe("getWeeklyStrongBacktestMembershipChanges - anchored to the requested w
     } as never);
   });
 
-  it("A: the requested week matches the latest persisted run -> resolves that run and the one before it, both labeled by their week-ending Friday", async () => {
-    db.select
-      .mockReturnValueOnce(selectResult([])) // resolveMembershipMode: no historical runs -> current_membership
-      .mockReturnValueOnce(selectResult([{ id: "run-2", weekEnding: "2026-09-01", totalPassing: 2 }])) // findRunForWeek (raw stored value - a Tuesday)
-      .mockReturnValueOnce(selectResult([{ id: "run-1", weekEnding: "2026-08-25", totalPassing: 1 }])) // findPreviousRun (raw stored value)
-      .mockReturnValueOnce(
-        selectResult([
-          { runId: "run-1", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" },
-          { runId: "run-2", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" },
-          { runId: "run-2", instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" },
-        ])
-      );
+  it("11: previous Scanner ON, current Scanner OFF -> Stocks Out", async () => {
+    const a = member("A");
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
+    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: false,
+      effectiveLookbackWeeks: 250,
+      currentTime: "2026-09-08",
+      currentClose: 100,
+      entryTime: null,
+      entryClose: null,
+      previousWeekMatched: true,
+      previousWeekTime: "2026-09-01",
+    } as never);
 
-    const result = await getWeeklyStrongBacktestMembershipChanges({
-      code: "SEG1",
-      weekEnding: "2026-09-04",
-    });
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-11" });
 
     expect(result.available).toBe(true);
-    expect(result.weekEnding).toBe(getWeekEndingFriday("2026-09-01"));
-    expect(result.previousWeekEnding).toBe(getWeekEndingFriday("2026-08-25"));
-    // The canonical example from the task: current week ending 04 Sep 2026,
-    // previous week ending 28 Aug 2026.
-    expect(result.weekEnding).toBe("2026-09-04");
-    expect(result.previousWeekEnding).toBe("2026-08-28");
-    expect(result.enteredStocks).toEqual([{ instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" }]);
+    expect(result.weekEnding).toBe(getWeekEndingFriday("2026-09-08"));
+    expect(result.previousWeekEnding).toBe(getWeekEndingFriday("2026-09-01"));
+    expect(result.enteredStocks).toEqual([]);
+    expect(result.exitedStocks).toEqual([{ instrumentId: a.instrumentId, symbol: "A", name: "A", exchange: "NSE" }]);
+  });
+
+  it("12: previous Scanner OFF, current Scanner ON -> Stocks In", async () => {
+    const a = member("A");
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
+    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: true,
+      effectiveLookbackWeeks: 250,
+      currentTime: "2026-09-08",
+      currentClose: 100,
+      entryTime: "2026-09-08",
+      entryClose: 100,
+      previousWeekMatched: false,
+      previousWeekTime: "2026-09-01",
+    } as never);
+
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-11" });
+
+    expect(result.enteredStocks).toEqual([{ instrumentId: a.instrumentId, symbol: "A", name: "A", exchange: "NSE" }]);
     expect(result.exitedStocks).toEqual([]);
   });
 
-  it("B: the Harvest week is older than the Backtest's latest run -> the exact requested week is used, not the latest", async () => {
-    db.select
-      .mockReturnValueOnce(selectResult([]))
-      .mockReturnValueOnce(selectResult([{ id: "run-old", weekEnding: "2026-08-18", totalPassing: 1 }]))
-      .mockReturnValueOnce(selectResult([]))
-      .mockReturnValueOnce(
-        selectResult([{ runId: "run-old", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }])
-      );
+  it("D: the task's canonical example via Scanner signals - previous [A,B,C], current [B,C,D] -> IN [D], OUT [A]", async () => {
+    const [a, b, c, d] = [member("A"), member("B"), member("C"), member("D")];
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a, b, c, d]) as never);
+    readMetricCandles.mockResolvedValue(
+      [dailyRow("A"), dailyRow("B"), dailyRow("C"), dailyRow("D")] as never
+    );
+    const baseSignal = {
+      effectiveLookbackWeeks: 250,
+      currentTime: "2026-09-08",
+      currentClose: 100,
+      previousWeekTime: "2026-09-01",
+    };
+    resolveScannerSignalFromDailyCloses
+      .mockReturnValueOnce({ ...baseSignal, matched: false, entryTime: null, entryClose: null, previousWeekMatched: true } as never) // A: out
+      .mockReturnValueOnce({ ...baseSignal, matched: true, entryTime: "2026-09-08", entryClose: 100, previousWeekMatched: true } as never) // B: unchanged
+      .mockReturnValueOnce({ ...baseSignal, matched: true, entryTime: "2026-09-08", entryClose: 100, previousWeekMatched: true } as never) // C: unchanged
+      .mockReturnValueOnce({ ...baseSignal, matched: true, entryTime: "2026-09-08", entryClose: 100, previousWeekMatched: false } as never); // D: in
 
-    const result = await getWeeklyStrongBacktestMembershipChanges({
-      code: "SEG1",
-      weekEnding: "2026-08-19",
-    });
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-11" });
 
-    // Matches the task's own example: a raw stored 2026-08-18 (Tuesday)
-    // must surface as its week-ending Friday, 2026-08-21 - not 2026-08-18
-    // itself, and not the unrelated latest run's own week.
-    expect(result.weekEnding).toBe("2026-08-21");
-    expect(result.weekEnding).toBe(getWeekEndingFriday("2026-08-18"));
-    expect(result.weekEnding).not.toBe(getWeekEndingFriday("2026-09-01"));
+    expect(result.enteredStocks).toEqual([{ instrumentId: d.instrumentId, symbol: "D", name: "D", exchange: "NSE" }]);
+    expect(result.exitedStocks).toEqual([{ instrumentId: a.instrumentId, symbol: "A", name: "A", exchange: "NSE" }]);
   });
 
-  it("C: the requested week has no persisted run -> unavailable, with no forward/backward fallback", async () => {
-    db.select
-      .mockReturnValueOnce(selectResult([]))
-      .mockReturnValueOnce(selectResult([])); // findRunForWeek: nothing in range
+  it("13: uses instrumentId identity, not symbol text - a symbol rename (same instrumentId) is unchanged", async () => {
+    const renamed = member("NEWNAME", "NSE", "instrument-1");
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([renamed]) as never);
+    readMetricCandles.mockResolvedValue([dailyRow("NEWNAME")] as never);
+    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: true,
+      effectiveLookbackWeeks: 250,
+      currentTime: "2026-09-08",
+      currentClose: 100,
+      entryTime: "2026-09-08",
+      entryClose: 100,
+      previousWeekMatched: true,
+      previousWeekTime: "2026-09-01",
+    } as never);
 
-    const result = await getWeeklyStrongBacktestMembershipChanges({
-      code: "SEG1",
-      weekEnding: "2026-09-04",
-    });
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-11" });
+
+    expect(result.enteredStocks).toEqual([]);
+    expect(result.exitedStocks).toEqual([]);
+  });
+
+  it("no members have a currently-fresh Scanner week -> unavailable", async () => {
+    const a = member("A");
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
+    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: false,
+      effectiveLookbackWeeks: null,
+      currentTime: null,
+      currentClose: null,
+      entryTime: null,
+      entryClose: null,
+      previousWeekMatched: null,
+      previousWeekTime: null,
+    } as never);
+
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-11" });
 
     expect(result.available).toBe(false);
     expect(result.weekEnding).toBeNull();
-    expect(result.previousWeekEnding).toBeNull();
     expect(result.enteredStocks).toEqual([]);
     expect(result.exitedStocks).toEqual([]);
-    expect(db.select).toHaveBeenCalledTimes(2);
   });
 
-  it("D: the previous week is resolved as the closest persisted run strictly before the requested week, never a later one", async () => {
-    db.select
-      .mockReturnValueOnce(selectResult([]))
-      .mockReturnValueOnce(selectResult([{ id: "run-3", weekEnding: "2026-09-08", totalPassing: 1 }]))
-      .mockReturnValueOnce(selectResult([{ id: "run-2", weekEnding: "2026-09-01", totalPassing: 2 }]))
-      .mockReturnValueOnce(
-        selectResult([{ runId: "run-3", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }])
-      );
+  it("a collection with no active members is unavailable without ever fetching candles", async () => {
+    getActiveMemberInstrumentRows.mockResolvedValue([] as never);
 
-    const result = await getWeeklyStrongBacktestMembershipChanges({
-      code: "SEG1",
-      weekEnding: "2026-09-10",
-    });
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-11" });
 
-    expect(result.weekEnding).toBe(getWeekEndingFriday("2026-09-08"));
-    expect(result.previousWeekEnding).toBe(getWeekEndingFriday("2026-09-01"));
-    expect(result.weekEnding).toBe("2026-09-11");
-    expect(result.previousWeekEnding).toBe("2026-09-04");
-    // Current must always be strictly newer than previous - never equal, never reversed.
-    expect(new Date(result.weekEnding as string).getTime()).toBeGreaterThan(
-      new Date(result.previousWeekEnding as string).getTime()
-    );
+    expect(result.available).toBe(false);
+    expect(readMetricCandles).not.toHaveBeenCalled();
   });
 
-  it("E: findPreviousRun is called with the current run's own weekEnding, not a hardcoded/reversed direction - the query filter proves the ordering cannot silently invert", async () => {
-    const whereSpy = vi.fn().mockReturnValue({
-      orderBy: () => ({ limit: () => Promise.resolve([{ id: "run-1", weekEnding: "2026-08-25", totalPassing: 1 }]) }),
-    });
-    db.select
-      .mockReturnValueOnce(selectResult([]))
-      .mockReturnValueOnce(selectResult([{ id: "run-2", weekEnding: "2026-09-01", totalPassing: 2 }]))
-      .mockReturnValueOnce({ from: () => ({ where: whereSpy }) } as never)
-      .mockReturnValueOnce(selectResult([]));
+  it("no earlier week exists at all -> previousWeekEnding is null and every current member counts as entered", async () => {
+    const a = member("A");
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
+    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: true,
+      effectiveLookbackWeeks: 250,
+      currentTime: "2026-09-08",
+      currentClose: 100,
+      entryTime: "2026-09-08",
+      entryClose: 100,
+      previousWeekMatched: null,
+      previousWeekTime: null,
+    } as never);
 
-    await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-04" });
-
-    expect(whereSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("no earlier run exists at all -> previousWeekEnding is null and every current member counts as entered", async () => {
-    db.select
-      .mockReturnValueOnce(selectResult([]))
-      .mockReturnValueOnce(selectResult([{ id: "run-1", weekEnding: "2026-08-25", totalPassing: 1 }]))
-      .mockReturnValueOnce(selectResult([])) // findPreviousRun: nothing before it
-      .mockReturnValueOnce(
-        selectResult([{ runId: "run-1", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }])
-      );
-
-    const result = await getWeeklyStrongBacktestMembershipChanges({
-      code: "SEG1",
-      weekEnding: "2026-08-28",
-    });
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-11" });
 
     expect(result.previousWeekEnding).toBeNull();
-    expect(result.enteredStocks).toEqual([{ instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }]);
+    expect(result.enteredStocks).toEqual([{ instrumentId: a.instrumentId, symbol: "A", name: "A", exchange: "NSE" }]);
     expect(result.exitedStocks).toEqual([]);
   });
 
-  it("duplicate member rows for the same instrumentId within one run do not duplicate entered/exited results", async () => {
-    db.select
-      .mockReturnValueOnce(selectResult([]))
-      .mockReturnValueOnce(selectResult([{ id: "run-2", weekEnding: "2026-09-01", totalPassing: 1 }]))
-      .mockReturnValueOnce(selectResult([{ id: "run-1", weekEnding: "2026-08-25", totalPassing: 1 }]))
-      .mockReturnValueOnce(
-        selectResult([
-          { runId: "run-1", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" },
-          { runId: "run-1", instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" },
-          { runId: "run-2", instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" },
-          { runId: "run-2", instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" },
-        ])
-      );
+  it("a requested week that doesn't match the current live Scanner week is unavailable, not silently substituted", async () => {
+    const a = member("A");
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
+    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: true,
+      effectiveLookbackWeeks: 250,
+      currentTime: "2026-09-08",
+      currentClose: 100,
+      entryTime: "2026-09-08",
+      entryClose: 100,
+      previousWeekMatched: true,
+      previousWeekTime: "2026-09-01",
+    } as never);
 
-    const result = await getWeeklyStrongBacktestMembershipChanges({
-      code: "SEG1",
-      weekEnding: "2026-09-04",
-    });
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-08-01" });
 
-    expect(result.enteredStocks).toEqual([{ instrumentId: "id-b", symbol: "B", name: "Beta", exchange: "NSE" }]);
-    expect(result.exitedStocks).toEqual([{ instrumentId: "id-a", symbol: "A", name: "Alpha", exchange: "NSE" }]);
+    expect(result.available).toBe(false);
   });
 });

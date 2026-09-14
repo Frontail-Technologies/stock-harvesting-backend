@@ -1,5 +1,6 @@
-import { getEffectiveScannerLookbackWeeks } from "../scanner.constants";
 import type { Near250WeekHighScanMatch } from "../scanner.types";
+import { resolveCurrentScannerSignal } from "../scanner-current-signal";
+import { getEffectiveScannerLookbackWeeks } from "../scanner.constants";
 import { evaluateScannerWeeklySeries, type ScannerWeeklyCandle } from "./scanner-weekly-rule";
 
 export function calculateNear250WeekHighScan(
@@ -10,20 +11,16 @@ export function calculateNear250WeekHighScan(
 ): Near250WeekHighScanMatch | null {
   const highlightTimes: string[] = [];
   for (const segment of segments) {
-    for (const point of evaluateScannerWeeklySeries(segment, requestedLookbackWeeks)) {
+    const segmentLookbackWeeks = getEffectiveScannerLookbackWeeks(requestedLookbackWeeks, segment.length);
+    if (!segmentLookbackWeeks) continue;
+    for (const point of evaluateScannerWeeklySeries(segment, segmentLookbackWeeks)) {
       if (point.passes) highlightTimes.push(point.time);
     }
   }
 
-  let matched: boolean | undefined;
-  let currentLookbackWeeks: number | null = null;
-  if (isLatestWeekFresh) {
-    currentLookbackWeeks = getEffectiveScannerLookbackWeeks(requestedLookbackWeeks, latestSegment.length);
-    if (currentLookbackWeeks) {
-      const currentPoints = evaluateScannerWeeklySeries(latestSegment, currentLookbackWeeks);
-      matched = currentPoints[currentPoints.length - 1]?.passes;
-    }
-  }
+  const signal = resolveCurrentScannerSignal(latestSegment, isLatestWeekFresh, requestedLookbackWeeks);
+  const matched = isLatestWeekFresh && signal.effectiveLookbackWeeks ? signal.matched : undefined;
+  const currentLookbackWeeks = signal.effectiveLookbackWeeks;
 
   if (highlightTimes.length === 0 && matched === undefined) return null;
 
