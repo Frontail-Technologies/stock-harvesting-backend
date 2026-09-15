@@ -67,6 +67,14 @@ export const updateUserRoleBodySchema = z
   })
   .strict();
 
+export const createAdminUserBodySchema = z
+  .object({
+    email: z.string().trim().toLowerCase().email(),
+    name: z.string().trim().min(1).max(255),
+    password: z.string().min(8).max(128),
+  })
+  .strict();
+
 export const updateUserPlanBodySchema = z
   .object({
     plan: z.enum(USER_PLANS),

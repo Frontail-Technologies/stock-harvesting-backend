@@ -8,15 +8,18 @@ import {
 } from "../../db/schema";
 import {
   BRANDING_DEFAULTS,
+  DEFAULT_USER_PLAN,
   JOB_NAMES,
   JOB_STATUS,
   SYNC_JOB_TYPES,
+  USER_ROLE,
   type UserPlan,
   type UserRole,
 } from "../../shared/constants";
 import { env } from "../../shared/env";
-import { badRequest, getErrorMessage, notFound } from "../../shared/errors";
+import { badRequest, conflict, getErrorMessage, notFound } from "../../shared/errors";
 import { writeAuditLog } from "../../shared/audit/audit.service";
+import { hashPassword, normalizeEmail } from "../security/passwords";
 import {
   backfillDailyCandles,
   backfillIndexCandles,
@@ -187,6 +190,49 @@ function getAdminUserOrderBy(
             : users.createdAt;
 
   return direction === "asc" ? asc(column) : desc(column);
+}
+
+export async function createAdminUser(input: {
+  actorUserId: string;
+  email: string;
+  name: string;
+  password: string;
+}) {
+  const email = normalizeEmail(input.email);
+
+  const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  if (existing) throw conflict("A user with this email already exists");
+
+  const passwordHash = await hashPassword(input.password);
+
+  const [created] = await db
+    .insert(users)
+    .values({
+      email,
+      name: input.name,
+      passwordHash,
+      role: USER_ROLE.admin,
+      plan: DEFAULT_USER_PLAN,
+      emailVerifiedAt: new Date(),
+    })
+    .returning({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      plan: users.plan,
+      createdAt: users.createdAt,
+    });
+
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "user.created",
+    targetType: "user",
+    targetId: created.id,
+    metadata: { email: created.email, role: created.role },
+  });
+
+  return created;
 }
 
 export async function updateUserRole(input: {

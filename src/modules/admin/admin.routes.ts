@@ -28,6 +28,7 @@ import {
   adminUsersExportQuerySchema,
   adminUsersQuerySchema,
   backfillCandlesBodySchema,
+  createAdminUserBodySchema,
   brandingBodySchema,
   bulkDeleteCollectionsBodySchema,
   bulkImportFileBodySchema,
@@ -54,6 +55,7 @@ import {
 } from "./admin.schemas";
 import {
   completeProviderConnection,
+  createAdminUser,
   createProviderConnectUrl,
   deleteUser,
   exportAdminUsersCsv,
@@ -125,6 +127,21 @@ adminRouter.get(
   asyncHandler(async (req, res) => {
     const query = req.query as unknown as Parameters<typeof listAdminUsers>[0];
     sendData(res, await listAdminUsers(query));
+  })
+);
+
+adminRouter.post(
+  "/users",
+  validate({ body: createAdminUserBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { email: string; name: string; password: string };
+    const user = await createAdminUser({
+      actorUserId: getAuthUserId(req),
+      email: body.email,
+      name: body.name,
+      password: body.password,
+    });
+    sendData(res, { user });
   })
 );
 
