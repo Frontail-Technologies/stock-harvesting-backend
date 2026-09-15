@@ -16,3 +16,4 @@ export * from "./scanner";
 export * from "./users";
 export * from "./watchlists";
 export * from "./weekly-strong-backtest";
+export * from "./widget-preferences";

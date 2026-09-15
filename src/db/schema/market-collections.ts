@@ -37,6 +37,9 @@ export const marketCollections = pgTable(
     membersUnavailable: integer("members_unavailable"),
     // The market_collection_versions row from the import that last reset preparationStatus - re-checked before the final write so a stale job can't mark a superseded membership READY.
     latestMembershipVersionId: uuid("latest_membership_version_id"),
+    // Admin-controlled Widget page defaults - a collection with this true is included in the DB-derived default source list for a user with no saved widget preference yet. widgetOrder positions it among the other defaults (nulls sort last); neither field affects any other feature.
+    showOnWidgetDefault: boolean("show_on_widget_default").default(false).notNull(),
+    widgetOrder: integer("widget_order"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

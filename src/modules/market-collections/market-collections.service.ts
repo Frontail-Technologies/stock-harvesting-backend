@@ -71,6 +71,8 @@ export async function listCollections(input: { exchange?: string; countryCode?: 
       preparationError: marketCollections.preparationError,
       membersWithRequiredHistory: marketCollections.membersWithRequiredHistory,
       membersUnavailable: marketCollections.membersUnavailable,
+      showOnWidgetDefault: marketCollections.showOnWidgetDefault,
+      widgetOrder: marketCollections.widgetOrder,
       // Table-qualified on both sides deliberately: an unqualified "id" here resolves to market_collection_members' own PK, not marketCollections.id, silently making the correlation always-false and memberCount always 0 (confirmed via .toSQL()).
       memberCount: sql<number>`(
         select count(*)::int from "market_collection_members"
@@ -342,6 +344,8 @@ export async function updateCollection(input: {
   name?: string;
   description?: string | null;
   active?: boolean;
+  showOnWidgetDefault?: boolean;
+  widgetOrder?: number | null;
   actorUserId: string;
 }) {
   const collection = await requireCollectionById(input.id);
@@ -351,6 +355,8 @@ export async function updateCollection(input: {
       name: input.name ?? collection.name,
       description: input.description === undefined ? collection.description : input.description,
       active: input.active ?? collection.active,
+      showOnWidgetDefault: input.showOnWidgetDefault ?? collection.showOnWidgetDefault,
+      widgetOrder: input.widgetOrder === undefined ? collection.widgetOrder : input.widgetOrder,
       updatedAt: new Date(),
     })
     .where(eq(marketCollections.id, input.id))
@@ -362,7 +368,12 @@ export async function updateCollection(input: {
     action: "market_collection.updated",
     targetType: "market_collection",
     targetId: input.id,
-    metadata: { name: input.name, active: input.active },
+    metadata: {
+      name: input.name,
+      active: input.active,
+      showOnWidgetDefault: input.showOnWidgetDefault,
+      widgetOrder: input.widgetOrder,
+    },
   });
   return updated;
 }

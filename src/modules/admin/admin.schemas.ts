@@ -137,6 +137,8 @@ export const updateCollectionBodySchema = z
     name: z.string().trim().min(1).max(160).optional(),
     description: z.string().trim().max(500).nullable().optional(),
     active: z.boolean().optional(),
+    showOnWidgetDefault: z.boolean().optional(),
+    widgetOrder: z.number().int().nullable().optional(),
   })
   .strict();
 

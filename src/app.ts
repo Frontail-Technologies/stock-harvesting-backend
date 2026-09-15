@@ -17,6 +17,7 @@ import { pushSubscriptionsRouter } from "./modules/push-subscriptions/push-subsc
 import { scannerRouter } from "./modules/scanner/scanner.routes";
 import { watchlistsRouter } from "./modules/watchlists/watchlists.routes";
 import { weeklyStrongBacktestRouter } from "./modules/weekly-strong-backtest/weekly-strong-backtest.routes";
+import { widgetPreferencesRouter } from "./modules/widget-preferences/widget-preferences.routes";
 import { API_ROUTES, HTTP_STATUS } from "./shared/constants";
 import { corsOrigins, env } from "./shared/env";
 import { errorHandler, getErrorMessage, notFound } from "./shared/errors";
@@ -106,6 +107,7 @@ export function createApp() {
   app.use(API_ROUTES.priceAlerts, priceAlertsRouter);
   app.use(API_ROUTES.pushSubscriptions, pushSubscriptionsRouter);
   app.use(API_ROUTES.watchlists, watchlistsRouter);
+  app.use(API_ROUTES.widgetPreferences, widgetPreferencesRouter);
   app.use(API_ROUTES.monetization, monetizationRouter);
   app.use(API_ROUTES.weeklyStrongBacktest, weeklyStrongBacktestRouter);
 

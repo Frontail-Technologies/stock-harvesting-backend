@@ -13,6 +13,7 @@ export const API_ROUTES = {
   priceAlerts: "/api/price-alerts",
   pushSubscriptions: "/api/push-subscriptions",
   watchlists: "/api/watchlists",
+  widgetPreferences: "/api/widget-preferences",
   monetization: "/api/monetization",
   weeklyStrongBacktest: "/api/weekly-strong-backtest",
 } as const;

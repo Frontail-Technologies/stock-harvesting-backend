@@ -479,7 +479,13 @@ adminRouter.patch(
   validate({ params: collectionIdParamsSchema, body: updateCollectionBodySchema }),
   asyncHandler(async (req, res) => {
     const params = req.params as { id: string };
-    const body = req.body as { name?: string; description?: string | null; active?: boolean };
+    const body = req.body as {
+      name?: string;
+      description?: string | null;
+      active?: boolean;
+      showOnWidgetDefault?: boolean;
+      widgetOrder?: number | null;
+    };
     const collection = await updateCollection({
       id: params.id,
       actorUserId: getAuthUserId(req),
