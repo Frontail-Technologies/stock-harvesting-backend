@@ -3,6 +3,7 @@ import { DEFAULT_EXCHANGE, JOB_NAMES } from "../../shared/constants";
 import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import { normalizeSymbol } from "../../shared/normalize";
+import { recordChartEnsureFreshResultIfNeeded } from "../jobs/background-job-runs.service";
 import { getMarketDataQueue, getMarketDataQueueEvents } from "../jobs/queues";
 import { refreshDailyCandles, type DailyCandleSyncResult, type DailyCandleSyncStatus } from "./market-data.candle-sync";
 import { getLatestExpectedTradingDay } from "./trading-calendar";
@@ -56,6 +57,7 @@ function runInMemoryFallback(input: { symbol: string; exchange: string }, key: s
   const promise = refreshDailyCandles(input)
     .then((result) => {
       inMemoryResults.set(key, result);
+      void recordChartEnsureFreshResultIfNeeded(result, input.symbol, input.exchange);
       return result;
     })
     .catch((error) => {

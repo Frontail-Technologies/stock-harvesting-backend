@@ -22,7 +22,7 @@ import { isProviderEnabled } from "../data-provider/data-provider-settings.servi
 import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 import type { ProviderDailyCandle, ProviderExchange } from "../data-provider/data-provider.types";
 import { aggregateMonthlyCandles, aggregateWeeklyCandles } from "./candle-aggregation";
-import { getWeekEndingFriday } from "./trading-calendar";
+import { getWeekEndingFriday, isCompletedTradingWeek } from "./trading-calendar";
 import {
   readCandleHistoryRange,
   readChartCandles,
@@ -141,13 +141,25 @@ export async function getChartHistoryRange(input: {
 // call. Candle freshness/gap repair is the daily sync job's job
 // (syncDailyCandlesForActiveInstruments / refreshDailyCandles in
 // market-data.candle-sync.ts), not this read.
+export type ChartCandlesResult = {
+  candles: ReturnType<typeof toChartCandleResponse>[];
+  dataThrough: string | null;
+};
+
+// dataThrough is always the latest ACTUAL underlying 1D trading-day candle
+// date - never a weekly/monthly bucket label (see toChartCandleResponse's
+// Friday relabeling for 1W). For 1D it's the last daily row itself; for
+// 1W/1M it's still the last DAILY row, not the aggregated candle's own
+// timestamp, since the weekly/monthly bucket can legitimately be labeled
+// at a future-within-its-own-week date (the week-ending Friday) before
+// that date's own trading day has actually completed.
 export async function getChartCandles(input: {
   symbol: string;
   timeframe: CandleTimeframe;
   from?: string;
   to?: string;
   exchange?: string;
-}) {
+}): Promise<ChartCandlesResult> {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
 
@@ -162,9 +174,13 @@ export async function getChartCandles(input: {
     : [];
 
   if (dailyRows.length > 0) {
-    return deriveChartCandlesFromDailyRows(dailyRows, input.timeframe).map((row) =>
+    const candles = deriveChartCandlesFromDailyRows(dailyRows, input.timeframe).map((row) =>
       toChartCandleResponse(row, input.timeframe)
     );
+    return {
+      candles: excludeIncompleteWeeklyCandle(candles, input.timeframe, exchange),
+      dataThrough: dailyRows[dailyRows.length - 1].time,
+    };
   }
 
   if (input.timeframe !== CANDLE_TIMEFRAME.day && instrument) {
@@ -175,11 +191,31 @@ export async function getChartCandles(input: {
       to: input.to,
     });
     if (legacyRows.length > 0) {
-      return legacyRows.map((row) => toChartCandleResponse(row, input.timeframe));
+      const candles = legacyRows.map((row) => toChartCandleResponse(row, input.timeframe));
+      return {
+        candles: excludeIncompleteWeeklyCandle(candles, input.timeframe, exchange),
+        dataThrough: null,
+      };
     }
   }
 
-  return [];
+  return { candles: [], dataThrough: null };
+}
+
+// The 1W chart must only ever show COMPLETED weeks (see
+// trading-calendar.ts's isCompletedTradingWeek) - an in-progress week's
+// candle is dropped entirely, never shown early under a future
+// week-ending Friday label. Checked on the already-Friday-labeled time
+// (toChartCandleResponse), which isCompletedTradingWeek handles
+// correctly since getWeekEndingFriday is idempotent for a Friday input.
+// 1D and 1M are untouched.
+function excludeIncompleteWeeklyCandle<T extends { time: string }>(
+  candlesList: T[],
+  timeframe: CandleTimeframe,
+  exchange: string
+): T[] {
+  if (timeframe !== CANDLE_TIMEFRAME.week) return candlesList;
+  return candlesList.filter((candle) => isCompletedTradingWeek(candle.time, exchange));
 }
 
 function deriveChartCandlesFromDailyRows(

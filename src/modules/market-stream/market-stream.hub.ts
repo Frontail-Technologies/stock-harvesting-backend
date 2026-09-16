@@ -1,6 +1,7 @@
 import type WebSocket from "ws";
 
 import type {
+  AdminMarketDataEvent,
   MarketStreamEvent,
   MarketStreamServerMessage,
   MarketStreamSymbol,
@@ -13,6 +14,7 @@ type Client = {
   socket: WebSocket;
   user: MarketStreamUser;
   subscriptions: Map<string, MarketStreamSymbol>;
+  adminSubscribed: boolean;
 };
 
 type RegisterClientOptions = {
@@ -49,6 +51,7 @@ export function registerMarketStreamClient(
     socket,
     user,
     subscriptions: new Map(),
+    adminSubscribed: false,
   };
 
   clients.add(client);
@@ -113,6 +116,12 @@ export function registerMarketStreamClient(
         },
       });
     },
+    subscribeAdmin() {
+      client.adminSubscribed = true;
+    },
+    unsubscribeAdmin() {
+      client.adminSubscribed = false;
+    },
     error(code: string, message: string) {
       send(socket, {
         type: "error",
@@ -131,14 +140,23 @@ export function publishMarketStreamEvent(event: MarketStreamEvent) {
   }
 }
 
+export function publishAdminMarketDataEvent(event: AdminMarketDataEvent) {
+  for (const client of clients) {
+    if (client.adminSubscribed) send(client.socket, event);
+  }
+}
+
 export function getMarketStreamStats() {
   let subscriptionCount = 0;
+  let adminSubscriberCount = 0;
   for (const client of clients) {
     subscriptionCount += client.subscriptions.size;
+    if (client.adminSubscribed) adminSubscriberCount += 1;
   }
 
   return {
     clients: clients.size,
     subscriptions: subscriptionCount,
+    adminSubscribers: adminSubscriberCount,
   };
 }

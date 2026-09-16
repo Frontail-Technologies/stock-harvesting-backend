@@ -147,6 +147,19 @@ describe("getOrComputeWeeklyStrongSnapshot - cache freshness", () => {
     expect(result.weekEnding).toBe(resolveCompletedWeekEndingFromTradingDay("2024-06-01"));
   });
 
+  it("6. dashboard Analysis week never surfaces the in-progress week's Friday - a snapshot cached mid-week (14-18 Sep 2026) resolves to 11 Sep, not 18 Sep", async () => {
+    const cachedRows = [buildRow()];
+    readDashboardSnapshotWithMeta.mockResolvedValueOnce({
+      payload: cachedRows,
+      asOfDate: "2026-09-16",
+      evaluatorVersion: WEEKLY_STRONG_SNAPSHOT_VERSION,
+    });
+
+    const result = await getOrComputeWeeklyStrongSnapshot("col-sep2026", "BSE", MEMBER_ROWS);
+
+    expect(result.weekEnding).toBe("2026-09-11");
+  });
+
   it("C: a modern cached row with a numeric returnPct is served as-is", async () => {
     const cachedRows = [buildRow({ returnPct: 8.42 })];
     readDashboardSnapshotWithMeta.mockResolvedValueOnce({

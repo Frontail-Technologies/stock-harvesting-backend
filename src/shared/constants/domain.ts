@@ -91,6 +91,16 @@ export const JOB_STATUS = {
 
 export const SCAN_RUN_STATUSES = JOB_STATUSES;
 
+export const BACKGROUND_JOB_RUN_STATUSES = ["running", "completed", "partial", "failed"] as const;
+export type BackgroundJobRunStatus = (typeof BACKGROUND_JOB_RUN_STATUSES)[number];
+
+export const BACKGROUND_JOB_RUN_STATUS = {
+  running: "running",
+  completed: "completed",
+  partial: "partial",
+  failed: "failed",
+} as const satisfies Record<BackgroundJobRunStatus, BackgroundJobRunStatus>;
+
 export const COLLECTION_PREPARATION_STATUSES = [
   "pending",
   "syncing_candles",

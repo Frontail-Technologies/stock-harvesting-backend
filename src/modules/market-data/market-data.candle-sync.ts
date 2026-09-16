@@ -490,6 +490,7 @@ export type DailyCandleSyncStatus =
 
 export type DailyCandleSyncResult = {
   symbol: string;
+  instrumentId: string | null;
   status: DailyCandleSyncStatus;
   insertedDaily: number;
   failedDates: string[];
@@ -507,7 +508,7 @@ export async function refreshDailyCandles(
 
   const instrument = await getOrCreateInstrument(symbol, exchange, dbClient);
   if (!instrument) {
-    return { symbol, status: "provider-empty", insertedDaily: 0, failedDates: [] };
+    return { symbol, instrumentId: null, status: "provider-empty", insertedDaily: 0, failedDates: [] };
   }
 
   const history = await readCandleHistoryRange({
@@ -519,7 +520,7 @@ export async function refreshDailyCandles(
   const plan = planDailyCandleSync({ latestStoredDate, latestExpectedTradingDate });
 
   if (plan.kind === "bootstrap-required") {
-    return { symbol, status: "bootstrap-required", insertedDaily: 0, failedDates: [] };
+    return { symbol, instrumentId: instrument.id, status: "bootstrap-required", insertedDaily: 0, failedDates: [] };
   }
 
   const datesBefore = await readCandleDatesInRange({
@@ -532,7 +533,7 @@ export async function refreshDailyCandles(
   const result = await backfillDailyCandles({ symbol, exchange, from: plan.from, to: plan.to }, dbClient);
 
   if (result.dailyCandles.length === 0) {
-    return { symbol, status: "provider-empty", insertedDaily: 0, failedDates: [] };
+    return { symbol, instrumentId: instrument.id, status: "provider-empty", insertedDaily: 0, failedDates: [] };
   }
 
   const datesAfter = await readCandleDatesInRange({
@@ -548,17 +549,23 @@ export async function refreshDailyCandles(
 
   if (failedDates.length > 0) {
     logger.error({ exchange, symbol, failedDates }, "Daily candle sync persistence failure");
-    return { symbol, status: "failed", insertedDaily: result.insertedDaily, failedDates };
+    return { symbol, instrumentId: instrument.id, status: "failed", insertedDaily: result.insertedDaily, failedDates };
   }
 
   const wasAlreadyFresh = latestStoredDate !== null && latestStoredDate >= latestExpectedTradingDate;
   const status: DailyCandleSyncStatus =
     datesAfter.size > datesBefore.size ? (wasAlreadyFresh ? "repaired" : "updated") : "already-current";
 
-  return { symbol, status, insertedDaily: result.insertedDaily, failedDates: [] };
+  return { symbol, instrumentId: instrument.id, status, insertedDaily: result.insertedDaily, failedDates: [] };
 }
 
 const DAILY_CANDLE_SYNC_CONCURRENCY = 8;
+
+export type DailyCandleSyncFailureDetail = {
+  instrumentId: string | null;
+  symbol: string;
+  reason: string;
+};
 
 export type DailyCandleSyncSummary = {
   processed: number;
@@ -569,14 +576,26 @@ export type DailyCandleSyncSummary = {
   providerEmpty: number;
   failed: number;
   failedSymbols: string[];
+  failedDetails: DailyCandleSyncFailureDetail[];
 };
 
 // The routine post-market-close sync: every active instrument on the exchange
 // gets the same last-stored-date incremental + bounded recent repair window
 // (planDailyCandleSync) that refreshDailyCandles uses for a single symbol. One
 // symbol failing never aborts the run - failures are isolated and reported.
+const DAILY_CANDLE_SYNC_PROGRESS_BATCH_SIZE = 25;
+
+export type DailyCandleSyncProgress = {
+  processed: number;
+  total: number;
+  updated: number;
+  repaired: number;
+  failed: number;
+};
+
 export async function syncDailyCandlesForActiveInstruments(
-  exchange: string = DEFAULT_EXCHANGE
+  exchange: string = DEFAULT_EXCHANGE,
+  onProgress?: (progress: DailyCandleSyncProgress) => void
 ): Promise<DailyCandleSyncSummary> {
   const rows = await db
     .select({ symbol: instruments.symbol })
@@ -592,6 +611,7 @@ export async function syncDailyCandlesForActiveInstruments(
     providerEmpty: 0,
     failed: 0,
     failedSymbols: [],
+    failedDetails: [],
   };
 
   await runWithConcurrency(rows, DAILY_CANDLE_SYNC_CONCURRENCY, async (row) => {
@@ -606,14 +626,34 @@ export async function syncDailyCandlesForActiveInstruments(
       else {
         summary.failed += 1;
         summary.failedSymbols.push(row.symbol);
+        summary.failedDetails.push({
+          instrumentId: result.instrumentId,
+          symbol: row.symbol,
+          reason: result.failedDates.length > 0 ? `persistence gap: ${result.failedDates.join(",")}` : "sync failed",
+        });
       }
     } catch (error) {
       summary.failed += 1;
       summary.failedSymbols.push(row.symbol);
+      summary.failedDetails.push({
+        instrumentId: null,
+        symbol: row.symbol,
+        reason: getErrorMessage(error, "Unknown error"),
+      });
       logger.error(
         { exchange, symbol: row.symbol, message: getErrorMessage(error, "Unknown error") },
         "Daily candle sync failed for symbol"
       );
+    }
+
+    if (onProgress && (summary.processed % DAILY_CANDLE_SYNC_PROGRESS_BATCH_SIZE === 0 || summary.processed === rows.length)) {
+      onProgress({
+        processed: summary.processed,
+        total: rows.length,
+        updated: summary.updated,
+        repaired: summary.repaired,
+        failed: summary.failed,
+      });
     }
   });
 

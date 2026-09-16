@@ -81,6 +81,10 @@ import {
   updateUserPlan,
   updateUserRole,
 } from "./admin.service";
+import { listRecentBackgroundJobRuns } from "../jobs/background-job-runs.service";
+import { getScheduledDailyCandleSyncStatuses } from "../jobs/scheduled-job-status.service";
+import { getMarketDataWorkerStatuses } from "../jobs/worker-status.service";
+import { getMarketDataHealth } from "../market-data/market-data.health";
 import { triggerCollectionPreparation } from "../market-collections/market-collection-preparation.service";
 import {
   bulkDeleteMarketCollections,
@@ -332,6 +336,22 @@ adminRouter.post(
     sendAccepted(res, result);
   })
 );
+
+adminRouter.get("/market-data/workers", asyncHandler(async (_req, res) => {
+  sendData(res, { workers: await getMarketDataWorkerStatuses() });
+}));
+
+adminRouter.get("/market-data/health", asyncHandler(async (_req, res) => {
+  sendData(res, await getMarketDataHealth());
+}));
+
+adminRouter.get("/market-data/job-runs", asyncHandler(async (_req, res) => {
+  sendData(res, { runs: await listRecentBackgroundJobRuns() });
+}));
+
+adminRouter.get("/market-data/schedules", asyncHandler(async (_req, res) => {
+  sendData(res, { schedules: await getScheduledDailyCandleSyncStatuses() });
+}));
 
 adminRouter.get("/jobs", asyncHandler(async (_req, res) => {
   sendData(res, { jobs: await listJobs() });

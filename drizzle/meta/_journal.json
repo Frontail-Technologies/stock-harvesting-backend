@@ -162,6 +162,13 @@
       "when": 1789473142964,
       "tag": "0022_greedy_radioactive_man",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789478148337,
+      "tag": "0023_thin_doctor_faustus",
+      "breakpoints": true
     }
   ]
 }

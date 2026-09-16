@@ -11,13 +11,21 @@ import {
   syncDailyCandlesForActiveInstruments,
 } from "./modules/market-data/market-data.candle-sync";
 import { getRedisConnectionOptions } from "./modules/jobs/queues";
+import {
+  emitJobProgress,
+  failBackgroundJobRun,
+  finishBackgroundJobRunFromSummary,
+  recordChartEnsureFreshResultIfNeeded,
+  startBackgroundJobRun,
+} from "./modules/jobs/background-job-runs.service";
+import { WORKER_HEARTBEAT_INTERVAL_MS, WORKER_NAMES, writeWorkerHeartbeat } from "./modules/jobs/worker-heartbeat";
 import { prepareCollectionData } from "./modules/market-collections/market-collection-preparation.service";
 import {
   runWeeklyStrongBacktestBackfill,
   runWeeklyStrongBacktestHistoricalRebuild,
   syncWeeklyStrongBacktestIncremental,
 } from "./modules/weekly-strong-backtest/weekly-strong-backtest.generation";
-import { JOB_NAMES, JOB_STATUS, QUEUE_NAMES } from "./shared/constants";
+import { BACKGROUND_JOB_TYPES, JOB_NAMES, JOB_STATUS, QUEUE_NAMES, type BackgroundJobType } from "./shared/constants";
 import { env } from "./shared/env";
 import { getErrorMessage, serializeError } from "./shared/errors";
 import { logger } from "./shared/logger";
@@ -104,6 +112,26 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
   }
 }
 
+async function runTrackedDailyCandleSync(exchange: string | undefined, jobType: BackgroundJobType) {
+  const runId = await startBackgroundJobRun(jobType);
+  try {
+    const summary = await syncDailyCandlesForActiveInstruments(exchange, (progress) => {
+      void emitJobProgress({ runId, jobType, ...progress });
+    });
+    await finishBackgroundJobRunFromSummary(runId, jobType, summary);
+    return summary;
+  } catch (error) {
+    await failBackgroundJobRun(runId, jobType, getErrorMessage(error, "Job failed"));
+    throw error;
+  }
+}
+
+async function runTrackedChartEnsureFresh(symbol: string, exchange: string | undefined) {
+  const result = await refreshDailyCandles({ symbol, exchange });
+  await recordChartEnsureFreshResultIfNeeded(result, symbol, exchange ?? "");
+  return result;
+}
+
 function recordJobOutcome(
   endTimer: (labels?: Record<string, string>) => number,
   jobType: string,
@@ -150,16 +178,18 @@ const worker = new Worker(
     }
 
     if (job.name === JOB_NAMES.dailyCandleSync) {
-      return runTrackedJob(job, () =>
-        syncDailyCandlesForActiveInstruments(exchange),
-      );
+      const jobType =
+        typeof job.data.jobType === "string"
+          ? (job.data.jobType as BackgroundJobType)
+          : BACKGROUND_JOB_TYPES.dailyCandlePostMarket;
+      return runTrackedJob(job, () => runTrackedDailyCandleSync(exchange, jobType));
     }
 
     if (job.name === JOB_NAMES.chartCandleEnsureFresh) {
       const symbol =
         typeof job.data.symbol === "string" ? job.data.symbol : undefined;
       if (!symbol) throw new Error("chartCandleEnsureFresh job missing symbol");
-      return runTrackedJob(job, () => refreshDailyCandles({ symbol, exchange }));
+      return runTrackedJob(job, () => runTrackedChartEnsureFresh(symbol, exchange));
     }
 
     if (job.name === JOB_NAMES.weeklyStrongBacktestBackfill) {
@@ -213,6 +243,22 @@ const worker = new Worker(
   { connection },
 );
 
+const workerStartedAt = new Date().toISOString();
+
+async function heartbeat() {
+  try {
+    const client = await worker.client;
+    await writeWorkerHeartbeat(client, WORKER_NAMES.marketData, workerStartedAt);
+  } catch (error) {
+    logger.warn({ message: getErrorMessage(error, "Unknown error") }, "Failed to write worker heartbeat");
+  }
+}
+
+void heartbeat();
+const heartbeatTimer = setInterval(() => void heartbeat(), WORKER_HEARTBEAT_INTERVAL_MS);
+
+logger.info({ startedAt: workerStartedAt, queue: QUEUE_NAMES.marketData }, "Market data worker started");
+
 worker.on("completed", (job) => {
   logger.info({ jobId: job.id, name: job.name }, "Job completed");
 });
@@ -230,6 +276,7 @@ worker.on("failed", (job, error) => {
 
 async function shutdown(signal: string) {
   logger.info({ signal }, "Shutting down worker");
+  clearInterval(heartbeatTimer);
   await worker.close();
   await pool.end();
   process.exit(0);

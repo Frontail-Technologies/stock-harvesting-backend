@@ -79,13 +79,13 @@ marketDataRouter.get(
   asyncHandler(async (req, res) => {
     const params = req.params as { symbol: string };
     const query = req.query as unknown as { exchange: string };
-    const candleRows = await getChartCandles({
+    const result = await getChartCandles({
       symbol: params.symbol,
       timeframe: CANDLE_TIMEFRAME.day,
       exchange: query.exchange,
     });
 
-    sendData(res, { candles: candleRows });
+    sendData(res, result);
   })
 );
 
@@ -161,7 +161,7 @@ marketDataRouter.get(
       to?: string;
       exchange: string;
     };
-    const candleRows = await getChartCandles({
+    const result = await getChartCandles({
       symbol: params.symbol,
       timeframe: query.timeframe,
       from: query.from,
@@ -169,6 +169,6 @@ marketDataRouter.get(
       exchange: query.exchange,
     });
 
-    sendData(res, { candles: candleRows });
+    sendData(res, result);
   })
 );

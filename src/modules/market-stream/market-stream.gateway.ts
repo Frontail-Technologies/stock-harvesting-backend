@@ -12,6 +12,7 @@ import {
   subscribeMarketStreamSymbols,
   unsubscribeMarketStreamSymbols,
 } from "./market-stream.service";
+import { canSubscribeToAdminMarketData } from "./market-stream.utils";
 import type { MarketStreamClientMessage, MarketStreamUser } from "./market-stream.types";
 
 const MARKET_STREAM_PATH = "/ws/market";
@@ -53,19 +54,31 @@ export function attachMarketStreamGateway(server: Server) {
       return;
     }
 
-    let user;
+    let user: MarketStreamUser;
     try {
-      const payload = verifyAccessToken(token, TOKEN_AUDIENCE.user);
+      const payload = verifyAccessToken(token, TOKEN_AUDIENCE.admin);
       user = {
         id: payload.sub,
         email: payload.email,
         role: payload.role,
         plan: payload.plan,
+        portal: "admin",
       };
     } catch {
-      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-      socket.destroy();
-      return;
+      try {
+        const payload = verifyAccessToken(token, TOKEN_AUDIENCE.user);
+        user = {
+          id: payload.sub,
+          email: payload.email,
+          role: payload.role,
+          plan: payload.plan,
+          portal: "user",
+        };
+      } catch {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -104,6 +117,20 @@ function setupMarketStreamConnection(socket: WebSocket, user: MarketStreamUser) 
 
     if (message.type === "unsubscribe") {
       client.unsubscribe(message.symbols);
+      return;
+    }
+
+    if (message.type === "admin.subscribe") {
+      if (!canSubscribeToAdminMarketData(user)) {
+        client.error("FORBIDDEN", "Admin market-data events require an admin session");
+        return;
+      }
+      client.subscribeAdmin();
+      return;
+    }
+
+    if (message.type === "admin.unsubscribe") {
+      client.unsubscribeAdmin();
       return;
     }
 

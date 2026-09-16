@@ -1,10 +1,11 @@
-import type { UserPlan, UserRole } from "../../shared/constants";
+import type { AuthPortal, UserPlan, UserRole } from "../../shared/constants";
 
 export type MarketStreamUser = {
   id: string;
   email: string;
   role: UserRole;
   plan: UserPlan;
+  portal: AuthPortal;
 };
 
 export type MarketStreamSymbol = {
@@ -56,11 +57,71 @@ export type JobProgressEvent = {
   };
 };
 
+export type MarketSymbolRefreshedEvent = {
+  type: "market.symbol.refreshed";
+  data: MarketStreamSymbol & {
+    instrumentId: string | null;
+    latestDataDate: string;
+    status: "updated" | "repaired";
+    time: string;
+  };
+};
+
 export type MarketStreamEvent =
   | MarketTickEvent
   | MarketCandleUpdateEvent
   | MarketProviderStatusEvent
-  | JobProgressEvent;
+  | JobProgressEvent
+  | MarketSymbolRefreshedEvent;
+
+export type AdminJobStartedEvent = {
+  type: "market-data:job-started";
+  data: { runId: string; jobType: string; startedAt: string };
+};
+
+export type AdminJobProgressEvent = {
+  type: "market-data:job-progress";
+  data: {
+    runId: string;
+    jobType: string;
+    processed: number;
+    total: number;
+    updated: number;
+    repaired: number;
+    failed: number;
+  };
+};
+
+export type AdminJobCompletedEvent = {
+  type: "market-data:job-completed";
+  data: {
+    runId: string;
+    jobType: string;
+    status: "completed" | "partial";
+    finishedAt: string;
+    processed: number;
+    updated: number;
+    repaired: number;
+    failed: number;
+  };
+};
+
+export type AdminJobFailedEvent = {
+  type: "market-data:job-failed";
+  data: { runId: string; jobType: string; status: "failed"; finishedAt: string; failed: number };
+};
+
+export type AdminWorkerStatusEvent = {
+  type: "worker:status";
+  data: { name: string; status: "online" | "offline"; lastHeartbeat: string | null };
+};
+
+export type AdminMarketDataEvent =
+  | AdminJobStartedEvent
+  | AdminJobProgressEvent
+  | AdminJobCompletedEvent
+  | AdminJobFailedEvent
+  | AdminWorkerStatusEvent;
 
 export type MarketStreamClientMessage =
   | {
@@ -72,11 +133,18 @@ export type MarketStreamClientMessage =
       symbols: MarketStreamSymbol[];
     }
   | {
+      type: "admin.subscribe";
+    }
+  | {
+      type: "admin.unsubscribe";
+    }
+  | {
       type: "ping";
     };
 
 export type MarketStreamServerMessage =
   | MarketStreamEvent
+  | AdminMarketDataEvent
   | {
       type: "connection.ready";
       data: {

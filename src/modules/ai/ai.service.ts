@@ -195,7 +195,7 @@ export async function askScannerQuestion(input: {
   const settings = await getAiSettings();
   const model = env.GEMINI_CHAT_MODEL ?? settings?.model ?? AI_SETTINGS_DEFAULTS.model;
 
-  const [stockList, candles] = await Promise.all([
+  const [stockList, chartCandles] = await Promise.all([
     listStocks({ q: input.symbol, page: 1, limit: 1, exchange: input.exchange }),
     getChartCandles({ symbol: input.symbol, timeframe: input.timeframe, exchange: input.exchange }),
   ]);
@@ -205,7 +205,7 @@ export async function askScannerQuestion(input: {
     exchange: input.exchange,
     timeframe: input.timeframe,
     stock: stockList.stocks[0],
-    recentCandles: candles.slice(-CANDLE_CONTEXT_LIMIT),
+    recentCandles: chartCandles.candles.slice(-CANDLE_CONTEXT_LIMIT),
   });
 
   const answer = await callGemini({

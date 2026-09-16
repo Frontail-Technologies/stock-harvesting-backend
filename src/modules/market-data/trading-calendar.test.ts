@@ -168,6 +168,50 @@ describe("resolveCompletedWeekEndingFromTradingDay", () => {
   });
 });
 
+// Regression suite for the reported "incomplete-week Friday" bug: the
+// current trading week is Mon 14 - Fri 18 Sep 2026; the latest ACTUALLY
+// COMPLETED week is Fri 11 Sep 2026 until the 18th itself has closed.
+// BSE closes 15:30 IST = 10:00 UTC.
+describe("resolveLatestCompletedWeekEnding - Sep 2026 incomplete-week regression", () => {
+  it("1. Mon 14 Sep -> 11 Sep (the in-progress week's own Friday has not happened yet)", () => {
+    const at = new Date("2026-09-14T10:05:00Z");
+    expect(resolveLatestCompletedWeekEnding("BSE", at)).toBe("2026-09-11");
+  });
+
+  it("2. Wed 16 Sep -> 11 Sep", () => {
+    const at = new Date("2026-09-16T10:05:00Z");
+    expect(resolveLatestCompletedWeekEnding("BSE", at)).toBe("2026-09-11");
+  });
+
+  it("3. Fri 18 Sep BEFORE market close -> still 11 Sep (that Friday has not completed yet)", () => {
+    const at = new Date("2026-09-18T05:00:00Z"); // 10:30 IST, market still open
+    expect(resolveLatestCompletedWeekEnding("BSE", at)).toBe("2026-09-11");
+  });
+
+  it("4. Fri 18 Sep AFTER market close -> 18 Sep (that week is now complete)", () => {
+    const at = new Date("2026-09-18T11:00:00Z"); // 16:30 IST, after the 15:30 close
+    expect(resolveLatestCompletedWeekEnding("BSE", at)).toBe("2026-09-18");
+  });
+
+  it("5. a historical, already-completed week still maps to its own Friday, not a shifted one", () => {
+    expect(getWeekEndingFriday("2026-09-14")).toBe("2026-09-18");
+    // Monday of the FOLLOWING week - Sep 18's week is now unambiguously in the past.
+    expect(resolveCompletedWeekEndingFromTradingDay("2026-09-21")).toBe("2026-09-18");
+  });
+
+  it("6a. Dashboard/Weekly Strong: a stale persisted asOfDate from mid-week still resolves to the last real completed Friday, not the in-progress one", () => {
+    // Mirrors dashboard-snapshots.service.ts's resolveCompletedWeekEndingFromTradingDay(cached.asOfDate) read-time call.
+    const staleAsOfDate = "2026-09-16"; // Wednesday, as if a snapshot was written mid-week
+    expect(resolveCompletedWeekEndingFromTradingDay(staleAsOfDate)).toBe("2026-09-11");
+  });
+
+  it("6b. Scanner/Weekly Strong completeness gate: the in-progress week is excluded, not treated as complete", () => {
+    const at = new Date("2026-09-16T10:05:00Z");
+    expect(isCompletedTradingWeek("2026-09-14", "BSE", at)).toBe(false);
+    expect(isCompletedTradingWeek("2026-09-07", "BSE", at)).toBe(true);
+  });
+});
+
 describe("isConsecutiveIsoWeek", () => {
   it("is true for two back-to-back ISO weeks, Monday values", () => {
     expect(isConsecutiveIsoWeek("2026-09-14", "2026-09-07")).toBe(true);

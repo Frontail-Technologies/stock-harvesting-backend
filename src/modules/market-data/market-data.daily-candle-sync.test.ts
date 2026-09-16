@@ -225,4 +225,26 @@ describe("syncDailyCandlesForActiveInstruments", () => {
       failedSymbols: [],
     });
   });
+
+  it("throttles onProgress instead of firing once per symbol, and reports a final call with the true total", async () => {
+    const symbols = Array.from({ length: 60 }, (_, index) => `SYM${index}`);
+    mockActiveInstruments(symbols);
+    readCandleHistoryRange.mockResolvedValue(null);
+
+    const progressCalls: Array<{ processed: number; total: number }> = [];
+    await syncDailyCandlesForActiveInstruments("BSE", (progress) => {
+      progressCalls.push({ processed: progress.processed, total: progress.total });
+    });
+
+    expect(progressCalls.length).toBeLessThan(symbols.length);
+    expect(progressCalls.every((call) => call.total === 60 && call.processed <= 60)).toBe(true);
+    expect(progressCalls.at(-1)).toEqual(expect.objectContaining({ processed: 60, total: 60 }));
+  });
+
+  it("does not call onProgress when it isn't provided", async () => {
+    mockActiveInstruments(["ONE"]);
+    readCandleHistoryRange.mockResolvedValue(null);
+
+    await expect(syncDailyCandlesForActiveInstruments("BSE")).resolves.toBeDefined();
+  });
 });

@@ -1,6 +1,7 @@
 import { Queue, QueueEvents } from "bullmq";
 
 import {
+  BACKGROUND_JOB_TYPES,
   JOB_NAMES,
   QUEUE_NAMES,
   SUPPORTED_EXCHANGE_CODES,
@@ -150,38 +151,46 @@ export async function scheduleRepeatableMarketDataSync() {
   }
 }
 
-// No existing scheduled job covers a once-daily, post-close candle sync -
-// instrumentSync's 30-min cadence exists for the live latest-price ticker
-// (refreshAllLatestInstrumentPrices), not for last-stored-date incremental +
-// recent-repair candle sync. Two fires a day, same queue/worker mechanism:
-// the main run once BSE settles, a retry in case the main run hit a
-// transient provider failure.
-const DAILY_CANDLE_SYNC_TZ = "Asia/Kolkata";
-const DAILY_CANDLE_SYNC_CRON = "45 15 * * 1-5";
+export const DAILY_CANDLE_SYNC_TZ = "Asia/Kolkata";
+const DAILY_CANDLE_SYNC_MORNING_CRON = "40 9 * * 1-5";
+const DAILY_CANDLE_SYNC_POST_MARKET_CRON = "50 15 * * 1-5";
 const DAILY_CANDLE_SYNC_RETRY_CRON = "0 17 * * 1-5";
+
+export const DAILY_CANDLE_SYNC_SCHEDULES = [
+  { suffix: "morning", pattern: DAILY_CANDLE_SYNC_MORNING_CRON, jobType: BACKGROUND_JOB_TYPES.dailyCandleMorning },
+  {
+    suffix: "post-market",
+    pattern: DAILY_CANDLE_SYNC_POST_MARKET_CRON,
+    jobType: BACKGROUND_JOB_TYPES.dailyCandlePostMarket,
+  },
+  { suffix: "retry", pattern: DAILY_CANDLE_SYNC_RETRY_CRON, jobType: BACKGROUND_JOB_TYPES.dailyCandleRetry },
+] as const;
 
 export async function scheduleRepeatableDailyCandleSync() {
   const queue = getMarketDataQueue();
-  if (!queue) return;
+  if (!queue) {
+    logger.warn("Market data queue unavailable; daily candle sync schedules were not registered");
+    return;
+  }
 
+  let registered = 0;
   for (const exchange of SUPPORTED_EXCHANGE_CODES) {
-    for (const [suffix, pattern] of [
-      ["main", DAILY_CANDLE_SYNC_CRON],
-      ["retry", DAILY_CANDLE_SYNC_RETRY_CRON],
-    ] as const) {
+    for (const schedule of DAILY_CANDLE_SYNC_SCHEDULES) {
       try {
         await queue.add(
           JOB_NAMES.dailyCandleSync,
-          { exchange },
+          { exchange, jobType: schedule.jobType },
           {
-            jobId: `repeatable-daily-candle-sync-${exchange}-${suffix}`,
-            repeat: { pattern, tz: DAILY_CANDLE_SYNC_TZ },
+            jobId: `repeatable-daily-candle-sync-${exchange}-${schedule.suffix}`,
+            repeat: { pattern: schedule.pattern, tz: DAILY_CANDLE_SYNC_TZ },
           },
         );
+        registered += 1;
       } catch (error) {
         logger.warn(
           {
             exchange,
+            jobType: schedule.jobType,
             message: getErrorMessage(error, "Unknown error"),
           },
           "Failed to schedule repeatable daily candle sync",
@@ -189,6 +198,17 @@ export async function scheduleRepeatableDailyCandleSync() {
       }
     }
   }
+
+  logger.info(
+    { registered, exchanges: SUPPORTED_EXCHANGE_CODES, tz: DAILY_CANDLE_SYNC_TZ },
+    "Daily candle sync schedules registered",
+  );
+}
+
+export async function getRepeatableDailyCandleSyncJobs() {
+  const queue = getMarketDataQueue();
+  if (!queue) return [];
+  return queue.getJobSchedulers();
 }
 
 // Best-effort cleanup - the real safety net against a stale job acting on a deleted collection is prepareCollectionData's own no-op check, not this removal.
@@ -211,6 +231,30 @@ export async function removeQueuedCollectionPrepareJobs(collectionIds: string[])
       { collectionIds, message: getErrorMessage(error, "Unknown error") },
       "Failed to remove queued collection preparation jobs"
     );
+  }
+}
+
+const QUEUE_CLIENT_LOOKUP_TIMEOUT_MS = 3_000;
+
+export async function getMarketDataQueueRedisClient() {
+  const queue = getMarketDataQueue();
+  if (!queue) return null;
+  try {
+    return await Promise.race([
+      queue.client,
+      new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error("Timed out resolving the market data queue Redis client")),
+          QUEUE_CLIENT_LOOKUP_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } catch (error) {
+    logger.warn(
+      { message: getErrorMessage(error, "Unknown error") },
+      "Failed to resolve market data queue Redis client",
+    );
+    return null;
   }
 }
 

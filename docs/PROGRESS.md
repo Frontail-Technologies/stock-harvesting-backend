@@ -3,8 +3,291 @@
 Single source of truth for backend cleanup progress. Update this file
 whenever a module's audit/cleanup/test/verification state changes.
 
-Current focus: Analysis Week — Remove Extra One-Week Completion Lag
+Current focus: Phase 4D — WebSocket Live Market-Data Observability
 Status: Done
+
+Completed (Phase 4D):
+- Audited first: no Socket.IO, no Redis pub/sub, no admin-scoped WS channel
+  existed. A raw `ws`-based gateway (`market-stream` module, `/ws/market`)
+  already existed for live price ticks - reused verbatim, not replaced.
+  `ioredis` was added as an explicit backend dependency (previously only a
+  transitive dependency nested under `bullmq`, not importable) so a
+  dedicated publish connection and a dedicated subscribe connection could
+  be opened against the SAME `REDIS_URL` - required because a Redis
+  connection in subscriber mode can't run other commands, so BullMQ's own
+  queue client could not be reused for this.
+- New Redis pub/sub bridge (`modules/jobs/realtime-events.ts`):
+  `publishRealtimeEvent`/`subscribeRealtimeEvents`, one channel
+  (`market-data:realtime-events`) carrying a `{kind: "admin"|"symbol",
+  event}` envelope. The worker process (and the API process's own
+  in-memory ensure-fresh fallback) call `publishRealtimeEvent`; only the
+  API process calls `subscribeRealtimeEvents`, forwarding received
+  messages into the existing WS hub. This is the cross-process bridge the
+  task required - a worker's job/heartbeat state was previously invisible
+  to the API process's WS clients entirely.
+- Admin/user separation is real, not a naming convention: the gateway now
+  accepts either portal's access token (previously only the USER-portal
+  audience, meaning an admin-portal token could never authenticate at
+  all - a real pre-existing gap this phase's dual-audience token check
+  closed) and a new `admin.subscribe` client message is honored only when
+  `canSubscribeToAdminMarketData(user)` - portal `"admin"` AND role
+  `"admin"`, mirroring `requireAdminAuth`+`requireAdmin`'s existing
+  combined check, never role alone. Admin events are fanned out only to
+  admin-subscribed sockets (`publishAdminMarketDataEvent`); symbol-refresh
+  events reuse the hub's existing exchange+symbol subscription matching
+  used for live ticks - no separate room concept was needed for that case.
+- Job lifecycle events are wired into the SAME functions that already
+  write `background_job_runs` (Phase 4C) - `job-started` after the
+  `running` insert, `job-completed`/`job-failed` AFTER the terminal DB
+  write (verified in order by a test), `job-progress` is WS-only and
+  never persisted (no second job-status model). `syncDailyCandlesForActiveInstruments`
+  gained an optional `onProgress` callback, throttled to roughly every 25
+  processed symbols plus a guaranteed final call - additive, no change to
+  the Phase 4A range-planning logic it wraps.
+- `symbol-refreshed` publishes only for `updated`/`repaired` (never
+  `already-current`/`bootstrap-required`/`provider-empty`/`failed`),
+  reusing the exact same gate (`recordChartEnsureFreshResultIfNeeded`)
+  Phase 4C already built for "don't spam durable history on a cache hit" -
+  one gate now serves both concerns.
+- Worker online/offline transitions are detected by a small API-side
+  poller (`startWorkerStatusChangeMonitor`, 20s interval) re-reading the
+  existing Redis heartbeat and publishing only on an actual status change
+  - not persisted, not one event per heartbeat.
+- **A real failure-tolerance bug found and fixed during this phase's own
+  verification**: `publishRealtimeEvent` resolved its Redis client
+  outside its own try/catch, so a synchronous failure there (confirmed
+  live: happens whenever the connection genuinely can't be established)
+  would reject the returned promise - and every call site uses it
+  fire-and-forget (`void publishRealtimeEvent(...)`), so this was a real
+  unhandled-rejection risk, not merely theoretical (reproduced via the
+  existing `market-data.chart-ensure-fresh.test.ts` suite once this
+  phase's code started calling it transitively). Fixed by wrapping the
+  entire function body in one try/catch - publishing now truly can never
+  throw, matching "must never make a successful candle refresh fail."
+- Frontend: `useMarketStream`'s event union extended with
+  `market.symbol.refreshed`; the scanner chart's existing `onEvent`
+  handler (already subscribed to its own symbol for live ticks) now also
+  invalidates its own candle query on a matching refresh event - never
+  calls ensure-fresh again itself. New `useAdminMarketDataStream` hook
+  (separate from the existing symbol-keyed hook, since the admin channel
+  has no symbol/reconnect-resubscribe complexity) drives
+  `/admin/jobs`: `job-started`/`job-progress`/`worker:status` patch the
+  React Query cache directly (no REST round-trip); `job-completed`/
+  `job-failed` patch the cache AND trigger one REST reconcile
+  (worker/health/job-runs/schedules invalidated); a reconnect (tracked via
+  a "was previously connected" ref) triggers the same reconcile, per the
+  "DB/REST is the recovery source, never replay events" requirement.
+- Files changed (backend): `package.json`/`package-lock.json` (+ioredis),
+  `modules/jobs/realtime-events.ts` (new),
+  `modules/jobs/background-job-runs.service.ts`,
+  `modules/jobs/worker-status.service.ts`,
+  `modules/market-data/market-data.candle-sync.ts` (additive `onProgress`
+  param only), `worker.ts`, `server.ts`,
+  `modules/market-stream/market-stream.types.ts`,
+  `modules/market-stream/market-stream.gateway.ts`,
+  `modules/market-stream/market-stream.hub.ts`,
+  `modules/market-stream/market-stream.utils.ts`,
+  `modules/market-stream/index.ts`. No schema/migration change this
+  phase (nothing new to persist - progress/heartbeat/admin events are all
+  transient by design).
+- Files changed (frontend): `features/market-stream/types.ts`,
+  `features/market-stream/hooks/use-market-stream.ts`,
+  `features/market-stream/index.ts`,
+  `features/scanner/components/ScannerPage.tsx`,
+  `features/admin/hooks/use-admin-market-data-stream.ts` (new),
+  `features/admin/components/market-data/AdminMarketDataPage.tsx`.
+- New backend tests: `modules/market-stream/market-stream.utils.test.ts`
+  (admin-portal+role gating, symbol key normalization),
+  `modules/market-stream/market-stream.hub.test.ts` (admin fan-out
+  isolation, symbol-event routing, stats), `modules/jobs/realtime-events.test.ts`
+  (publish/subscribe, never-throws including the bug found above),
+  `modules/jobs/worker-status.service.test.ts` (transition-only
+  publishing), plus additions to `background-job-runs.service.test.ts`
+  (start/complete/fail publish order and payloads, progress publish,
+  symbol-refresh gating) and `market-data.daily-candle-sync.test.ts`
+  (progress throttling). Frontend has no test runner (unchanged) -
+  chart/admin live-update wiring verified by code reading plus the
+  controlled live run below, not a browser session (none available this
+  session either).
+- Controlled live verification (BSE, TCS, no full-universe run, same
+  sandbox as Phase 4C where Redis is configured but unreachable):
+  `publishRealtimeEvent` now fails in ~1ms (immediate
+  `enableOfflineQueue:false` rejection, caught, never hangs) instead of
+  ever blocking a caller; `subscribeRealtimeEvents` degrades the same way
+  (logged, no crash); `getMarketDataWorkerStatuses` still correctly hits
+  its Phase 4C 3s bound and reports offline; `ensureFreshDailyCandles`
+  for TCS returned `already-current` and, correctly, triggered no
+  `symbol-refreshed` publish attempt at all (the gate). Full end-to-end
+  worker-process -> Redis -> API-process -> browser delivery could not be
+  exercised live in this sandbox (no reachable Redis, same constraint as
+  every prior phase's live verification) - covered instead by the unit
+  tests proving each hop (publish, subscribe, hub fan-out, gating)
+  independently and correctly.
+- `npx tsc --noEmit`/`npm run lint`/`npm test` clean (backend, 760/760,
+  80 files, +26 since Phase 4C). Frontend `npx tsc --noEmit`/`npm run
+  lint`/`npm run build` clean. No Scanner formula, Weekly Strong formula,
+  Stock Harvest logic, candle identity, provider mapping, Phase 4A 5-day/
+  35-day planner, chart-open-awaits-ensure-fresh fix, manual chart
+  Refresh, 3s Redis health timeout, durable `background_job_runs`, Redis
+  worker heartbeat, or chart GET DB-only behavior was touched or
+  regressed.
+
+Completed (Phase 4C):
+- Scheduling: the daily candle sync now fires three times a day instead of
+  two - morning `40 9 * * 1-5`, post-market `50 15 * * 1-5` (was `45 15`),
+  retry `0 17 * * 1-5`, all `Asia/Kolkata`, all reusing the exact same
+  `syncDailyCandlesForActiveInstruments`/`refreshDailyCandles`
+  (Phase 4A) - no second sync algorithm, no change to the 5-day overlap or
+  35-day repair window. Each scheduled run now carries a `jobType`
+  (`daily_candle_morning`/`daily_candle_post_market`/`daily_candle_retry`)
+  in its job data so the worker can attribute the run correctly.
+- New `background_job_runs` table (audited first: no durable history
+  existed for scheduled runs - `sync_jobs` only ever gets a row when an
+  admin-triggered action explicitly passes a `syncJobId`, which the
+  repeatable cron jobs never did). One row per scheduled run
+  (`running` -> `completed`/`partial`/`failed`), not one row per symbol;
+  per-run counts (processed/updated/repaired/alreadyCurrent/
+  bootstrapRequired/failed) plus a capped `metadata.failedSymbols`
+  list (`{instrumentId, symbol, reason}`, capped at 25).
+- Chart ensure-fresh (self-heal + manual refresh) is tracked the same way,
+  but only when an actual provider refresh executed or failed -
+  `already-current`/`bootstrap-required`/`provider-empty` (no provider
+  call made) are never persisted, so a normal chart open doesn't spam the
+  table. One shared gate (`recordChartEnsureFreshResultIfNeeded`) is used
+  by both the BullMQ worker job path and the in-memory single-instance
+  fallback path, so tracking doesn't silently disappear when Redis is
+  unavailable (as it is in this sandbox).
+- Worker heartbeat is Redis-only (`worker-heartbeat.ts`), reusing the
+  existing `market-data` BullMQ queue's own Redis connection
+  (`queue.client`/`worker.client`) - no new Redis client, no DB heartbeat
+  row. The worker writes `{startedAt, lastHeartbeat}` every 20s with a 90s
+  TTL; a reader (admin API) additionally checks the timestamp itself
+  (online if `lastHeartbeat` is within 90s), not just key presence, so
+  staleness is a real, testable rule rather than an implicit Redis-expiry
+  side effect.
+- Data health (`market-data.health.ts`) is DB-only, per RULES.md #16: it
+  reads `instruments.latestPriceAt` (already maintained by every candle
+  write path as "this instrument's latest stored 1D candle date" -
+  confirmed by reading `refreshLatestInstrumentStats`/`getLatestStockStats`)
+  against `getLatestExpectedTradingDay`, with no candle table join and no
+  provider call. `fresh`/`stale`/`bootstrapRequired` (null `latestPriceAt`)
+  counts, plus `lastSuccessfulRefresh` sourced from the newest
+  completed/partial scheduled `background_job_runs` row.
+- Four new admin-only endpoints (`GET /admin/market-data/workers`,
+  `/health`, `/job-runs`, `/schedules`), all behind the existing
+  `requireAdminAuth`/`requireAdmin` router-level gate - no new auth
+  middleware. `/schedules` also reads BullMQ's own `getJobSchedulers()`
+  for each repeatable job's real `next` timestamp, rather than
+  recomputing cron math.
+- Admin UI: the previously-stub `/admin/jobs` route (a bare redirect to
+  `/admin/users`, orphaned - not even linked from the sidebar) now renders
+  a "Market Data / Workers" page: worker online/offline + last heartbeat,
+  latest expected candle date, fresh/stale/bootstrap-required counts,
+  last successful refresh, three schedule cards (last run + next run),
+  and a recent-runs table with an expandable failed-symbols row per
+  partial/failed run. Added to the sidebar nav as "Market Data". No chart
+  library - plain cards/table, per the task's own "keep it simple."
+- Manual chart Refresh: a small header bar above the chart
+  (`ChartRefreshBar.tsx`) showing `SYMBOL · EXCHANGE`, `Data through:
+  <latest candle date>` (from the already-loaded candle data, not a
+  client fetch timestamp), and a Refresh button with
+  Refresh/Refreshing.../Updated/Already current/Failed states. It calls
+  the *existing* `POST /market-data/candles/ensure-fresh` endpoint
+  (Phase 4B) for the single viewed symbol only - no new backend endpoint,
+  no market-wide trigger, no change to that endpoint's existing
+  BullMQ-job-id dedupe (same symbol + same expected trading date collapses
+  into one in-flight repair, unchanged).
+- **Chart-open self-heal bug found and fixed**: `useCandles`'s `queryFn`
+  called `ensureFreshCandles(...)` but never awaited it
+  (`void ensureFreshCandles(...).catch(() => undefined)`), then
+  immediately called `getCandles(...)` and returned that as the query's
+  result. The ensure-fresh request genuinely fired and the backend
+  genuinely repaired data, but the repair result was completely discarded
+  - nothing invalidated or fed back into the chart query, so a chart open
+  never actually rendered the repaired candles until an unrelated
+  page reload happened to bypass the stale cache. This directly explains
+  the "only updates after a manual refresh" reports and contradicts what
+  this file's own prior Phase 4B entry described as the fix. Corrected to
+  `await ensureFreshCandles(...).catch(() => undefined)` before
+  `getCandles(...)` - one request lifecycle, matching the originally
+  intended design; the repaired data is now the direct result of the same
+  query, no separate invalidate needed.
+- Files changed (backend): `db/schema/background-jobs.ts` (new),
+  `db/schema/enums.ts`, `db/schema/index.ts`, `db/schema/market-collections.ts`
+  (untouched this phase), `shared/constants/domain.ts`, `shared/constants/jobs.ts`,
+  `modules/jobs/background-job-runs.service.ts` (new),
+  `modules/jobs/worker-heartbeat.ts` (new),
+  `modules/jobs/worker-status.service.ts` (new),
+  `modules/jobs/scheduled-job-status.service.ts` (new), `modules/jobs/queues.ts`,
+  `modules/market-data/market-data.health.ts` (new),
+  `modules/market-data/market-data.candle-sync.ts` (additive
+  `instrumentId`/`failedDetails` fields only - no planning/window logic
+  touched), `modules/market-data/market-data.chart-ensure-fresh.ts`,
+  `modules/admin/admin.routes.ts`, `worker.ts`. Migration
+  `drizzle/0023_thin_doctor_faustus.sql` (new `background_job_runs` table +
+  `background_job_run_status` enum only - purely additive).
+- Files changed (frontend): `features/market-data/hooks/use-market-data.ts`
+  (the await fix + new `useManualChartRefresh`),
+  `features/market-data/index.ts`, `features/scanner/components/ChartRefreshBar.tsx`
+  (new), `features/scanner/components/ScannerPage.tsx`,
+  `features/admin/components/market-data/AdminMarketDataPage.tsx` (new),
+  `features/admin/hooks/use-admin-market-data.ts` (new),
+  `features/admin/api/admin-api.ts`, `features/admin/types.ts`,
+  `features/admin/constants/admin-nav.tsx`, `features/api/constants/api-routes.ts`,
+  `features/api/lib/query-keys.ts`, `app/(app)/admin/jobs/page.tsx`
+  (rebuilt from a stub redirect).
+- New tests: `modules/jobs/queues.daily-candle-sync-schedule.test.ts` (7),
+  `modules/jobs/background-job-runs.service.test.ts` (13),
+  `modules/jobs/worker-heartbeat.test.ts` (3),
+  `modules/market-data/market-data.health.test.ts` (2),
+  `modules/market-collections/market-collections.widget-defaults.test.ts`
+  carried over from the prior phase, unrelated. `worker.ts` itself is not
+  unit-tested (pre-existing pattern - it has top-level side effects,
+  `process.exit(0)` when `REDIS_URL` is unset, that make it unsafe to
+  import in vitest; confirmed no prior test file did either). Its two new
+  wrapper functions (`runTrackedDailyCandleSync`/`runTrackedChartEnsureFresh`)
+  are thin glue over already-tested functions
+  (`syncDailyCandlesForActiveInstruments`, `refreshDailyCandles`,
+  `background-job-runs.service`), verified by direct code reading.
+- Controlled live verification (BSE, real DB, TCS/LALPATHLAB/RELIANCE, no
+  full-universe run): manual refresh for all three symbols returned
+  `already-current`/`changed:false` on both the first and a repeated
+  call - proving both the fix (repaired data would now flow through the
+  same awaited call path) and dedupe (identical second call, no extra
+  provider work). `listRecentBackgroundJobRuns` correctly held only the
+  real `chart_ensure_fresh`/`updated` rows written during an earlier part
+  of this same verification pass (before these three symbols were already
+  current) and gained zero new rows for the three `already-current` calls
+  - confirming the "don't log cache hits" gate. `getMarketDataHealth("BSE")`:
+  5,815 active BSE instruments, 3 fresh, 438 stale, 5,374
+  bootstrap-required as of 2026-09-15 (this sandbox's DB has substantial
+  pre-existing unsynced history, unrelated to and unrepaired by this
+  phase - a reporting phase, not a repair phase); `lastSuccessfulRefresh:
+  null` since no scheduled `daily_candle_*` run has ever completed here
+  (no worker process has run against reachable Redis in this sandbox).
+  `getMarketDataWorkerStatuses()` correctly reported the worker `offline`
+  with a null heartbeat, since no worker is running.
+- **A second real bug found and fixed during this verification**:
+  `getMarketDataQueueRedisClient` (`queues.ts`, backing the new
+  `/admin/market-data/workers` endpoint) awaited `queue.client` with no
+  timeout. In this sandbox - Redis configured but unreachable, exactly
+  the condition the worker-online/offline feature exists to detect -
+  that await never resolved or rejected, so the admin worker-status
+  lookup hung indefinitely instead of reporting "offline" within a
+  reasonable time. Fixed with the same bounded-race pattern already used
+  elsewhere in this file (`addJobWithTimeout`'s `ENQUEUE_TIMEOUT_MS`): a
+  3s timeout race around `queue.client`, falling back to the existing
+  "queue unavailable" `null` path (which `getMarketDataWorkerStatuses`
+  already turned into an `offline` result) on timeout. Confirmed by
+  re-running the same verification script: before the fix it never
+  reached the `workers`/`done` log lines; after the fix it completed in
+  well under a second past that point, returning `offline` correctly.
+- `npx tsc --noEmit`/`npm run lint`/`npm test` clean (backend, 734/734,
+  76 files, +25 since the prior phase). Frontend `npx tsc --noEmit`/
+  `npm run lint`/`npm run build` clean, all 26 routes including the
+  rebuilt `/admin/jobs` build successfully. No Scanner formula, Weekly
+  Strong formula, Stock Harvest logic, candle identity, provider mapping,
+  or Phase 4A 5-day/35-day planning constant was touched.
 
 Follow-up fix: the real-data verification for the Analysis Week fix ran
 `syncWeeklyStrongBacktestIncremental("BSE")`, which generated a single
@@ -800,7 +1083,7 @@ is not marked Done here unless it went through the controlled process in
 | Instruments | Done (2026-09-12) | Partial (rename handling, 2026-09-12) | Done (rename handling) | Done (typecheck+test) | In progress |
 | Candles | Done (identity, 2026-09-12) | Done (all normal reads/writes on instrument_id, 2026-09-12; shared weekly aggregation timestamp made canonical, 2026-09-13) | Done (identity tests + canonical-weekly-timestamp tests) | Done (typecheck+lint+test+DB verify) | In progress (bootstrap checkpoints deferred) |
 | Scanner | Done (2026-09-13) | Done (standalone weekly rule + bounded 1D query + fully-missing-week-only continuity boundary, decoupled from Weekly Strong, 2026-09-13; local weekly-timestamp normalization removed as redundant once fixed at the shared source, 2026-09-13; partial-week continuity fix, 2026-09-13) | Done (rule + safety + backtest-consistency + bounded-query + segment-partition + partial-week-continuity tests) | Done (typecheck+lint+test+DB completeness/comparison/segment/continuity audits) | In progress (Phase 3C stored-1W read + candle staleness/gap repair deferred) |
-| Market Data | Not started | Not started | Not started | Not started | Not started |
+| Market Data | Done (Phase 4C scheduling/health, 2026-09-15) | Done (Phase 4C: 3x-daily schedule, data-health reporting; candle sync/identity itself already clean from earlier phases) | Done (schedule + health tests) | Done (typecheck+lint+test+DB verify) | In progress (widespread candle staleness in this dev DB is a known, deferred repair - not this phase's scope) |
 | Collections | Not started | Not started | Not started | Not started | Not started |
 | Analysis | Not started | Not started | Not started | Not started | Not started |
 | Dashboard | Not started | Not started | Not started | Not started | Not started |
@@ -809,4 +1092,4 @@ is not marked Done here unless it went through the controlled process in
 | Alerts | Not started | Not started | Not started | Not started | Not started |
 | Admin | Not started | Not started | Not started | Not started | Not started |
 | Providers | Not started | Not started | Not started | Not started | Not started |
-| Jobs | Not started | Not started | Not started | Not started | Not started |
+| Jobs | Done (Phase 4C, 2026-09-15) | Done (durable job-run history + worker heartbeat added) | Done (schedule/run-tracking/heartbeat tests) | Done (typecheck+lint+test+DB+live verify) | In progress (admin UI covers Market Data jobs only, not every job type) |

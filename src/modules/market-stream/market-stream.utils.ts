@@ -1,4 +1,5 @@
-import type { MarketStreamSymbol } from "./market-stream.types";
+import { USER_ROLE } from "../../shared/constants";
+import type { MarketStreamSymbol, MarketStreamUser } from "./market-stream.types";
 
 export function normalizeStreamSymbol(input: MarketStreamSymbol): MarketStreamSymbol | null {
   const exchange = input.exchange?.trim().toUpperCase();
@@ -12,4 +13,8 @@ export function normalizeStreamSymbol(input: MarketStreamSymbol): MarketStreamSy
 
 export function streamSymbolKey(input: MarketStreamSymbol) {
   return `${input.exchange}:${input.symbol}`;
+}
+
+export function canSubscribeToAdminMarketData(user: MarketStreamUser) {
+  return user.portal === "admin" && user.role === USER_ROLE.admin;
 }
