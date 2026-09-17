@@ -32,4 +32,16 @@ describe("getEffectiveScannerLookbackWeeks", () => {
   it("returns null when even the smallest tier isn't covered", () => {
     expect(getEffectiveScannerLookbackWeeks(250, 49)).toBeNull();
   });
+
+  describe("strict mode (no smaller-tier fallback)", () => {
+    it("still returns the requested tier when enough weekly history exists", () => {
+      expect(getEffectiveScannerLookbackWeeks(250, 250, { strict: true })).toBe(250);
+    });
+
+    it("returns null instead of falling back when history is short of the requested tier", () => {
+      expect(getEffectiveScannerLookbackWeeks(250, 200, { strict: true })).toBeNull();
+      expect(getEffectiveScannerLookbackWeeks(250, 60, { strict: true })).toBeNull();
+      expect(getEffectiveScannerLookbackWeeks(250, 49, { strict: true })).toBeNull();
+    });
+  });
 });

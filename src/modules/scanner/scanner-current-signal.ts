@@ -30,12 +30,17 @@ const EMPTY_SIGNAL: CurrentScannerSignal = {
 export function resolveCurrentScannerSignal(
   latestSegment: ScannerWeeklyCandle[],
   isLatestWeekFresh: boolean,
-  requestedLookbackWeeks: number
+  requestedLookbackWeeks: number,
+  options: { strict?: boolean } = {}
 ): CurrentScannerSignal {
   if (!isLatestWeekFresh || latestSegment.length === 0) return EMPTY_SIGNAL;
 
   const current = latestSegment[latestSegment.length - 1];
-  const effectiveLookbackWeeks = getEffectiveScannerLookbackWeeks(requestedLookbackWeeks, latestSegment.length);
+  const effectiveLookbackWeeks = getEffectiveScannerLookbackWeeks(
+    requestedLookbackWeeks,
+    latestSegment.length,
+    options
+  );
   if (!effectiveLookbackWeeks) {
     return { ...EMPTY_SIGNAL, currentTime: current.time, currentClose: current.close };
   }

@@ -44,23 +44,17 @@ describe("near-250-week-close-high scan (Scanner live path) - single continuous 
     expect(result).toBeNull();
   });
 
-  it("falls back to a smaller lookback tier for the CURRENT verdict when the full requested window isn't available", () => {
+  it("returns null (no fallback) for the CURRENT verdict when the full requested window isn't available", () => {
+    // The Scanner's own on-demand 1x/3x/5x chart lookback is strict - a
+    // symbol without 250 weeks of history requesting 5x shows no result for
+    // that tier, not one silently computed over a shorter window (unlike
+    // the Dashboard Weekly Strong harvest path, which still falls back -
+    // see resolveScannerSignalFromDailyCloses).
     const weeklyCandles = buildWeeklySeries(150, (index) => (index === 10 ? 1000 : 900));
 
     const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 250);
 
-    expect(result?.metrics.lookbackWeeks).toBe(150);
-    expect(result?.matched).toBe(true);
-  });
-
-  it("uses the effective fallback tier for highlightTimes when the requested window is longer than the segment", () => {
-    const weeklyCandles = buildWeeklySeries(150, (index) => (index === 10 ? 1000 : 900));
-
-    const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 250);
-
-    expect(result?.metrics.lookbackWeeks).toBe(150);
-    expect(result?.matched).toBe(true);
-    expect(result?.highlightTimes).toContain(weeklyCandles[weeklyCandles.length - 1].time);
+    expect(result).toBeNull();
   });
 
   it("highlights multiple historical weeks, never before a full lookbackWeeks window exists", () => {
