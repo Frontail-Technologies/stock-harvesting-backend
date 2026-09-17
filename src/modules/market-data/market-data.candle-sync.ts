@@ -773,15 +773,21 @@ export async function syncDailyCandlesForActiveInstruments(
         });
       }
     } catch (error) {
+      // getSafeProviderErrorMessage (not plain getErrorMessage) - a DB failure here is a
+      // DrizzleQueryError whose own .message is just "Failed query: <sql> params: <params>";
+      // the actual reason (timeout, too many connections, connection terminated, etc.) lives
+      // on .cause and was previously discarded, leaving both this reason and the log line
+      // useless for diagnosing a real DB failure.
       summary.failed += 1;
       summary.failedSymbols.push(row.symbol);
+      const safeMessage = getSafeProviderErrorMessage(error);
       summary.failedDetails.push({
         instrumentId: null,
         symbol: row.symbol,
-        reason: getErrorMessage(error, "Unknown error"),
+        reason: safeMessage,
       });
       logger.error(
-        { exchange, symbol: row.symbol, message: getErrorMessage(error, "Unknown error") },
+        { exchange, symbol: row.symbol, message: safeMessage },
         "Daily candle sync failed for symbol"
       );
     }

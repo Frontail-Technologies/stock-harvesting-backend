@@ -26,9 +26,15 @@ describe("DAILY_CANDLE_SYNC_SCHEDULES", () => {
     expect(retry?.jobType).toBe(BACKGROUND_JOB_TYPES.dailyCandleRetry);
   });
 
-  it("defines exactly three schedules, one per job type", () => {
-    expect(DAILY_CANDLE_SYNC_SCHEDULES).toHaveLength(3);
+  it("schedules the evening sync at 20:00 IST, Monday-Friday - a later catch-up for symbols the 17:00 retry missed because GDF's own settling window runs through 8 PM", () => {
+    const evening = DAILY_CANDLE_SYNC_SCHEDULES.find((schedule) => schedule.suffix === "evening");
+    expect(evening?.pattern).toBe("0 20 * * 1-5");
+    expect(evening?.jobType).toBe(BACKGROUND_JOB_TYPES.dailyCandleEvening);
+  });
+
+  it("defines exactly four schedules, one per job type", () => {
+    expect(DAILY_CANDLE_SYNC_SCHEDULES).toHaveLength(4);
     const jobTypes = new Set(DAILY_CANDLE_SYNC_SCHEDULES.map((schedule) => schedule.jobType));
-    expect(jobTypes.size).toBe(3);
+    expect(jobTypes.size).toBe(4);
   });
 });

@@ -201,6 +201,7 @@ export const DAILY_CANDLE_SYNC_TZ = "Asia/Kolkata";
 const DAILY_CANDLE_SYNC_MORNING_CRON = "40 9 * * 1-5";
 const DAILY_CANDLE_SYNC_POST_MARKET_CRON = "50 15 * * 1-5";
 const DAILY_CANDLE_SYNC_RETRY_CRON = "0 17 * * 1-5";
+const DAILY_CANDLE_SYNC_EVENING_CRON = "0 20 * * 1-5";
 
 export const DAILY_CANDLE_SYNC_SCHEDULES = [
   { suffix: "morning", pattern: DAILY_CANDLE_SYNC_MORNING_CRON, jobType: BACKGROUND_JOB_TYPES.dailyCandleMorning },
@@ -210,6 +211,7 @@ export const DAILY_CANDLE_SYNC_SCHEDULES = [
     jobType: BACKGROUND_JOB_TYPES.dailyCandlePostMarket,
   },
   { suffix: "retry", pattern: DAILY_CANDLE_SYNC_RETRY_CRON, jobType: BACKGROUND_JOB_TYPES.dailyCandleRetry },
+  { suffix: "evening", pattern: DAILY_CANDLE_SYNC_EVENING_CRON, jobType: BACKGROUND_JOB_TYPES.dailyCandleEvening },
 ] as const;
 
 export async function scheduleRepeatableDailyCandleSync() {

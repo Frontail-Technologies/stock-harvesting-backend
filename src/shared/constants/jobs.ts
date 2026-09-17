@@ -17,6 +17,7 @@ export const BACKGROUND_JOB_TYPES = {
   dailyCandleMorning: "daily_candle_morning",
   dailyCandlePostMarket: "daily_candle_post_market",
   dailyCandleRetry: "daily_candle_retry",
+  dailyCandleEvening: "daily_candle_evening",
   chartEnsureFresh: "chart_ensure_fresh",
 } as const;
 
@@ -26,6 +27,7 @@ export const SCHEDULED_DAILY_CANDLE_SYNC_JOB_TYPES: BackgroundJobType[] = [
   BACKGROUND_JOB_TYPES.dailyCandleMorning,
   BACKGROUND_JOB_TYPES.dailyCandlePostMarket,
   BACKGROUND_JOB_TYPES.dailyCandleRetry,
+  BACKGROUND_JOB_TYPES.dailyCandleEvening,
 ];
 
 export const SYNC_JOB_TYPES = {
