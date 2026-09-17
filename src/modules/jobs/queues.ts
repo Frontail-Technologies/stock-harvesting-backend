@@ -24,6 +24,7 @@ registerBullmqJobsCollector(async (gauge) => {
 });
 
 const REPEATABLE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+const CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS = 10 * 60 * 1000;
 
 let marketDataQueue: Queue | null = null;
 let marketDataQueueEvents: QueueEvents | null = null;
@@ -146,6 +147,51 @@ export async function scheduleRepeatableMarketDataSync() {
           message: getErrorMessage(error, "Unknown error"),
         },
         "Failed to schedule repeatable market data sync",
+      );
+    }
+  }
+}
+
+export async function enqueueCandleBootstrapJobs(exchange: string, symbols: string[]) {
+  const queue = getMarketDataQueue();
+  if (!queue || symbols.length === 0) return { queued: 0 };
+
+  const normalized = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))];
+  const jobs = normalized.map((symbol) => ({
+    name: JOB_NAMES.chartCandleEnsureFresh,
+    data: { symbol, exchange },
+    opts: {
+      jobId: `initial-candle-bootstrap-${exchange}-${symbol}`,
+      removeOnComplete: true,
+      removeOnFail: true,
+    },
+  }));
+
+  const chunkSize = 100;
+  for (let start = 0; start < jobs.length; start += chunkSize) {
+    await queue.addBulk(jobs.slice(start, start + chunkSize));
+  }
+  return { queued: jobs.length };
+}
+
+export async function scheduleCandleBootstrapReconciliation() {
+  const queue = getMarketDataQueue();
+  if (!queue) return;
+
+  for (const exchange of SUPPORTED_EXCHANGE_CODES) {
+    try {
+      await queue.add(
+        JOB_NAMES.candleBootstrapReconcile,
+        { exchange },
+        {
+          jobId: `repeatable-candle-bootstrap-reconcile-${exchange}`,
+          repeat: { every: CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS },
+        },
+      );
+    } catch (error) {
+      logger.warn(
+        { exchange, message: getErrorMessage(error, "Unknown error") },
+        "Failed to schedule candle bootstrap reconciliation",
       );
     }
   }

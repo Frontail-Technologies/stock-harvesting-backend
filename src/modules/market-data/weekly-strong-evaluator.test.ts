@@ -75,7 +75,7 @@ describe("passesNearHigh (single-timeframe predicate)", () => {
   });
 
   it("is a strict inequality - exactly at the threshold does not pass", () => {
-    // Scanner's near-250-week-high.ts chart-highlight rule now delegates to this same evaluateWeeklyStrongSeries (see docs/KNOWN_ISSUES.md) instead of its own independent check that could disagree, so this strict inequality is now authoritative for both surfaces.
+    // Scanner's near-250-week-close-high.ts chart-highlight rule now delegates to this same evaluateWeeklyStrongSeries (see docs/KNOWN_ISSUES.md) instead of its own independent check that could disagree, so this strict inequality is now authoritative for both surfaces.
     const closes = [1000, 850]; // 850 is exactly 85% of 1000
     expect(passesNearHigh(closes, 1, 2, WEEKLY_STRONG_NEAR_HIGH_RATIO)).toBe(false);
   });

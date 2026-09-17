@@ -706,6 +706,13 @@ Each entry stays until explicitly superseded by a new dated entry.
   already built (`recordChartEnsureFreshResultIfNeeded`) for deciding
   when a chart refresh is durable-history-worthy - an `already-current`
   cache hit produces neither a DB row nor a WebSocket event.
+- 2026-09-16 — Phase 4D.1 process-boundary audit: the live market-stream
+  WebSocket provider, provisional current-day candle memory, chart WS
+  gateway, and current-day candle HTTP endpoint all run in the API
+  process (`server.ts`). The separate worker process handles background
+  jobs only. In-memory provisional candles are valid for the current
+  single API/WS deployment; Redis is only required if API/WS is later
+  split across multiple API processes or replicas.
 - 2026-09-16 — Found and fixed a real bug in `publishRealtimeEvent`:
   resolving the Redis publisher client happened outside its own
   try/catch, so a synchronous connection failure there rejected the
@@ -717,3 +724,69 @@ Each entry stays until explicitly superseded by a new dated entry.
   propagate to (or block) the caller, matching the explicit requirement
   that WebSocket publishing must never make a successful candle refresh
   fail.
+- 2026-09-16 — Phase 4D.2: root-caused why the live-stream current-day
+  capability had been observed returning "Function not enabled" against
+  our GlobalDataFeeds account (`market-stream.capabilities.ts`'s
+  cooldown tracking exists because of this). Confirmed against provider
+  documentation that our account holds GDF's 15-minute-**delayed**
+  entitlement, and that entitlement's WebSocket message types are
+  `GetSnapshot`/`SubscribeSnapshot`/`GetExchangeSnapshot` - distinct
+  message types from the full-realtime `GetLastQuote`/`SubscribeRealtime`
+  the code had been using, which our account is not entitled to. Fixed
+  by switching `GlobalDatafeedsMarketStreamProvider` from
+  `SubscribeRealtime` to `SubscribeSnapshot` (Periodicity MINUTE, Period
+  1) and adding a new `GetSnapshot`-based `fetchDelayedSnapshot` adapter
+  method (new `current_price_snapshot` provider capability) as the
+  primary current-day-price mechanism, with the passive stream state as
+  fallback. `GetHistory` (canonical daily candle sync) already used the
+  correct message type - GDF's own docs confirm delayed variants reuse
+  the identical `GetHistory` request/response shape, delay applied
+  server-side, so that path was left untouched.
+- 2026-09-16 — Live-verified during real BSE market hours (10:17 IST):
+  `GetSnapshot` for TCS/RELIANCE returned real OHLC with an observed
+  `LastTradeTime` delay of ~19 minutes versus request time, consistent
+  with the account's 15-minute-delayed entitlement (some extra latency
+  is expected from the 1-minute snapshot periodicity plus request/queue
+  time). `GetExchangeSnapshot` for BSE also succeeded, returning 1,627
+  instruments (including TCS/RELIANCE, correctly identifier-matched) in
+  a single request - materially fewer round trips than batching
+  `GetSnapshot` 25-at-a-time for a full-exchange refresh. Per the task's
+  explicit instruction this is a diagnostic finding only, not adopted -
+  whole-exchange refresh still uses the existing per-symbol
+  `GetHistory`/`GetSnapshot` paths. Recommended as a candidate for a
+  future phase, pending payload-size/rate-limit testing at full
+  ~5,800-instrument BSE universe scale (this diagnostic used the live
+  default response, not the full universe).
+- 2026-09-17 — Stock search (`symbol`/`name` `ILIKE '%q%'`) was slow because
+  a leading-wildcard ILIKE cannot use a plain B-tree index - confirmed via
+  `EXPLAIN` that it was a sequential scan. Added the `pg_trgm` extension
+  plus GIN trigram indexes on `instruments.symbol`/`instruments.name`
+  (`drizzle/0024_green_paladin.sql`) - `EXPLAIN` after the migration shows
+  a `Bitmap Index Scan` on the new index for the same query. A results
+  cache was considered instead (the user's original suggestion) but
+  rejected as the primary fix: it only helps repeated identical queries,
+  while the index fixes every query including first-time ones, with no
+  staleness risk. `searchChartEligibleBseStocks` (the navbar Ctrl+K
+  search) additionally got the same 20s in-memory `getOrSetCache` wrapper
+  `listStocks` already used - it previously had no caching layer at all
+  and also ran a correlated `EXISTS` subquery per matching row.
+- 2026-09-17 — Security audit found two real gaps in the IP-keyed rate
+  limiter (`shared/middleware/rate-limit.ts`, applied to auth/login/
+  registration/password-reset routes): (1) `app.ts` never called
+  `app.set("trust proxy", ...)`, so `req.ip` would resolve to the
+  reverse proxy's address (not the real client's) the moment this runs
+  behind any load balancer/CDN in production - collapsing every user
+  into one shared rate-limit bucket. Fixed by adding a `TRUST_PROXY_HOPS`
+  env var (default `0` - trust nothing, matching today's actual behavior
+  unchanged for local/undeployed setups) that must be set to the real
+  hop count in production; deliberately not guessed or hardcoded since
+  setting it wrong in the other direction (trusting a hop that doesn't
+  exist) lets clients spoof their own IP via X-Forwarded-For, which is
+  worse than the gap it fixes. (2) The limiter's in-memory bucket Map
+  had no eviction - every unique IP+email key seen stayed in memory for
+  the life of the process, unbounded. Fixed with the same periodic sweep
+  `shared/cache.ts` already uses (5-minute interval, unref'd). Also
+  confirmed: no application-level rate limiting exists outside auth
+  routes, and classic network-flood DDoS protection is out of scope for
+  application code (belongs at a CDN/WAF layer, which this repo has no
+  visibility into) - not something addressed by this fix.

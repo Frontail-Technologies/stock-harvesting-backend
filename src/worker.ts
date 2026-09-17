@@ -8,9 +8,10 @@ import {
 } from "./modules/market-data/market-data.service";
 import {
   refreshDailyCandles,
+  findActiveSymbolsWithoutDailyCandles,
   syncDailyCandlesForActiveInstruments,
 } from "./modules/market-data/market-data.candle-sync";
-import { getRedisConnectionOptions } from "./modules/jobs/queues";
+import { enqueueCandleBootstrapJobs, getRedisConnectionOptions } from "./modules/jobs/queues";
 import {
   emitJobProgress,
   failBackgroundJobRun,
@@ -190,6 +191,14 @@ const worker = new Worker(
         typeof job.data.symbol === "string" ? job.data.symbol : undefined;
       if (!symbol) throw new Error("chartCandleEnsureFresh job missing symbol");
       return runTrackedJob(job, () => runTrackedChartEnsureFresh(symbol, exchange));
+    }
+
+    if (job.name === JOB_NAMES.candleBootstrapReconcile) {
+      return runTrackedJob(job, async () => {
+        const targetExchange = exchange ?? "BSE";
+        const symbols = await findActiveSymbolsWithoutDailyCandles(targetExchange);
+        return enqueueCandleBootstrapJobs(targetExchange, symbols);
+      });
     }
 
     if (job.name === JOB_NAMES.weeklyStrongBacktestBackfill) {

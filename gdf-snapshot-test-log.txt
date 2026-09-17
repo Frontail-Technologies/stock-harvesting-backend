@@ -1,0 +1,300 @@
+GlobalDataFeeds (GDF) Delayed API — Live Test Log
+==================================================
+Symbols tested: TCS, RELIANCE, TITAN, LALPATHLAB (BSE)
+Transport: single persistent WebSocket connection (env.GLOBAL_DATAFEEDS_WS_URL),
+JSON request/response correlated by UserTag, per
+backend/src/modules/data-provider/adapters/global-datafeeds/global-datafeeds.websocket-client.ts
+
+
+==================================================
+TEST 1 — GetHistory (Delayed)
+Date/time: 2026-09-16, ~10:17 IST (market hours)
+==================================================
+REQUEST:
+{
+  "MessageType": "GetHistory",
+  "Exchange": "BSE",
+  "InstrumentIdentifier": "TITAN",
+  "Periodicity": "DAY",
+  "Period": 1,
+  "From": <epoch for 2026-09-10>,
+  "To": <epoch for 2026-09-16, end of day>,
+  "isShortIdentifier": "False",
+  "AdjustSplits": true
+}
+
+RESPONSE (MessageType: HistoryResult):
+[
+  { "time": "2026-09-10", "open": 5005,   "high": 5021.5, "low": 4976,   "close": 5010, "volume": 27133 },
+  { "time": "2026-09-11", "open": 4970,   "high": 5014.3, "low": 4943.75,"close": 5005, "volume": 22564 },
+  { "time": "2026-09-15", "open": 5015.7, "high": 5015.7, "low": 4850,   "close": 4850, "volume": 16815 }
+]
+
+OBSERVATION: no row for 2026-09-16 (today) yet, even mid-market-hours. GetHistory
+lags behind the live trading day — confirmed this is expected/normal, not a bug.
+
+
+==================================================
+TEST 2 — GetSnapshot (Delayed), batch of 3 symbols
+Date/time: 2026-09-16, ~10:17 IST (market hours)
+==================================================
+REQUEST:
+{
+  "MessageType": "GetSnapshot",
+  "Exchange": "BSE",
+  "Periodicity": "MINUTE",
+  "Period": 1,
+  "isShortIdentifiers": "false",
+  "InstrumentIdentifiers": [
+    { "Value": "TCS" },
+    { "Value": "RELIANCE" },
+    { "Value": "LALPATHLAB" }
+  ]
+}
+
+RESPONSE (MessageType: SnapshotResult):
+[
+  { "InstrumentIdentifier": "TCS",      "Exchange": "BSE", "LastTradeTime": 1789552740, "TradedQty": 353,   "Open": 2191.5,  "High": 2191.5,  "Low": 2191.5,  "Close": 2191.5 },
+  { "InstrumentIdentifier": "RELIANCE", "Exchange": "BSE", "LastTradeTime": 1789552740, "TradedQty": 11956, "Open": 1241.4,  "High": 1241.4,  "Low": 1241.4,  "Close": 1241.4 }
+]
+(LALPATHLAB: absent from this response entirely)
+
+OBSERVATION: TCS/RELIANCE returned real data, ~19 minute observed delay
+(LastTradeTime vs request time) — matches the 15-minute-delayed entitlement.
+LALPATHLAB did not come back at all in this batch call.
+
+
+==================================================
+TEST 3 — GetExchangeSnapshot (Delayed), whole BSE
+Date/time: 2026-09-16, ~10:17 IST (market hours)
+==================================================
+REQUEST:
+{
+  "MessageType": "GetExchangeSnapshot",
+  "Exchange": "BSE",
+  "Periodicity": "Minute",
+  "Period": 1
+}
+
+RESPONSE (MessageType: ExchangeSnapshotResult):
+Outer Result: 1 envelope object
+  envelope.Result: 1627 instrument rows, e.g.
+  [
+    { "InstrumentIdentifier": "ABB",   "Exchange": "BSE", "LastTradeTime": 1789552740, "TradedQty": 2,    "Open": 6982,    "High": 6982,    "Low": 6982,    "Close": 6982,    "TokenNumber": "500002" },
+    { "InstrumentIdentifier": "INFY",  "Exchange": "BSE", "LastTradeTime": 1789552740, "TradedQty": 3087, "Open": 1060.65, "High": 1060.65, "Low": 1060.65, "Close": 1060.65, "TokenNumber": "500209" },
+    { "InstrumentIdentifier": "GRASIM","Exchange": "BSE", "LastTradeTime": 1789552740, "TradedQty": 52,   "Open": 3189.95, "High": 3189.95, "Low": 3189.95, "Close": 3189.95, "TokenNumber": "500300" },
+    ... (1627 rows total)
+  ]
+TCS present: yes. RELIANCE present: yes.
+
+OBSERVATION: response is nested one level (Result[0].Result[]), not flat.
+Materially fewer round trips than batching GetSnapshot 25-at-a-time, but NOT
+adopted into production per the task's explicit "diagnose only" instruction.
+
+
+==================================================
+TEST 4 — GetHistory (Delayed), re-check post-close
+Date/time: 2026-09-16, ~16:35 IST (after 15:30 close)
+==================================================
+REQUEST:
+{
+  "MessageType": "GetHistory",
+  "Exchange": "BSE",
+  "InstrumentIdentifier": "TITAN",
+  "Periodicity": "DAY",
+  "Period": 1,
+  "From": <epoch for 2026-09-14>,
+  "To": <epoch for 2026-09-16, end of day>,
+  "isShortIdentifier": "False",
+  "AdjustSplits": true
+}
+
+RESPONSE:
+[
+  { "time": "2026-09-15", "open": 5015.7, "high": 5015.7, "low": 4850, "close": 4850, "volume": 16860 }
+]
+
+OBSERVATION: still no 2026-09-16 row over an hour after close. Provider's own
+stated "exact day close" window is 4-8 PM IST.
+
+
+==================================================
+TEST 5 — GetSnapshot (Delayed), post-close decay
+Date/time: 2026-09-16, 10:35 UTC through 10:43 UTC (16:05-16:13 IST)
+==================================================
+REQUEST (same shape each time):
+{
+  "MessageType": "GetSnapshot",
+  "Exchange": "BSE",
+  "Periodicity": "MINUTE",
+  "Period": 1,
+  "isShortIdentifiers": "false",
+  "InstrumentIdentifiers": [ { "Value": "TITAN" }, { "Value": "TCS" }, { "Value": "RELIANCE" } ]
+}
+
+RESPONSE @ 10:35 UTC:
+[ { "InstrumentIdentifier": "TITAN", "LastTradeTime": ..., "Open": 5015.7, "High": 5015.7, "Low": 4850, "Close": 4914.95, "TradedQty": 62 } ]
+(real data)
+
+RESPONSE @ 10:41 UTC:
+[
+  { "InstrumentIdentifier": "RELIANCE", "LastTradeTime": 1789554240, "Open": 1241.4, "High": 1241.4, "Low": 1241.4, "Close": 1241.4 },
+  { "InstrumentIdentifier": "TITAN",    "LastTradeTime": 0, "Open": 0, "High": 0, "Low": 0, "Close": 0 },
+  { "InstrumentIdentifier": "TCS",      "LastTradeTime": 0, "Open": 0, "High": 0, "Low": 0, "Close": 0 }
+]
+
+RESPONSE @ 10:43 UTC:
+[
+  { "InstrumentIdentifier": "RELIANCE", "LastTradeTime": 0, "Open": 0, "High": 0, "Low": 0, "Close": 0 },
+  { "InstrumentIdentifier": "TITAN",    "LastTradeTime": 0, "Open": 0, "High": 0, "Low": 0, "Close": 0 },
+  { "InstrumentIdentifier": "TCS",      "LastTradeTime": 0, "Open": 0, "High": 0, "Low": 0, "Close": 0 }
+]
+
+OBSERVATION: GDF's delayed snapshot cache visibly decays to all-zero rows a
+short time after market close. Our code already treats LastTradeTime=0 as
+"no data" and returns null — never fabricates a candle.
+
+
+==================================================
+TEST 6 — All 4 APIs for LALPATHLAB, post-close
+Date/time: 2026-09-16, 11:09-11:13 UTC (16:39-16:43 IST)
+==================================================
+GetHistory REQUEST:
+{ "MessageType": "GetHistory", "Exchange": "BSE", "InstrumentIdentifier": "LALPATHLAB",
+  "Periodicity": "DAY", "Period": 1, "From": <2026-09-10>, "To": <2026-09-16 EOD>,
+  "isShortIdentifier": "False", "AdjustSplits": true }
+GetHistory RESPONSE:
+[
+  { "time": "2026-09-10", "open": 1922.75, "high": 1925.7, "low": 1881,    "close": 1916.7, "volume": 3541 },
+  { "time": "2026-09-11", "open": 1897.25, "high": 1923,   "low": 1897.25, "close": 1909.4, "volume": 4666 },
+  { "time": "2026-09-15", "open": 1904.95, "high": 1919.9, "low": 1884.05, "close": 1905,   "volume": 10622 }
+]
+(no 2026-09-16 row yet)
+
+GetSnapshot REQUEST:
+{ "MessageType": "GetSnapshot", "Exchange": "BSE", "Periodicity": "MINUTE", "Period": 1,
+  "isShortIdentifiers": "false", "InstrumentIdentifiers": [ { "Value": "LALPATHLAB" } ] }
+GetSnapshot RESPONSE:
+[ { "InstrumentIdentifier": "LALPATHLAB", "LastTradeTime": 0, "TradedQty": 0, "Open": 0, "High": 0, "Low": 0, "Close": 0, "TokenNumber": null } ]
+
+SubscribeSnapshot REQUEST (subscribe):
+{ "MessageType": "SubscribeSnapshot", "Exchange": "BSE", "InstrumentIdentifier": "LALPATHLAB",
+  "Periodicity": "MINUTE", "Period": 1, "Unsubscribe": "false" }
+SubscribeSnapshot RESULT: subscribed successfully (ack), then waited 65 seconds
+listening for RealtimeSnapshotResult pushes -> 0 pushes received.
+(unsubscribe sent afterward with "Unsubscribe": "true")
+
+GetExchangeSnapshot REQUEST:
+{ "MessageType": "GetExchangeSnapshot", "Exchange": "BSE", "Periodicity": "Minute", "Period": 1 }
+GetExchangeSnapshot RESPONSE: succeeded, but only 97 instrument rows this time
+(vs 1627 during market hours in Test 3). LALPATHLAB not present in the 97.
+
+OBSERVATION: all 4 APIs independently confirm no usable 2026-09-16 data for
+LALPATHLAB at this point in time - consistent with the general post-close
+decay seen in Test 5, not LALPATHLAB-specific at this point.
+
+
+==================================================
+TEST 7 — Root-cause fix verification, live market hours (2026-09-17, 13:00 IST)
+==================================================
+Calendar state at request time:
+  getLatestExpectedTradingDay("BSE") = "2026-09-16"
+  getExchangeTodayIfTradingDay("BSE") = "2026-09-17"
+
+GetHistory REQUEST (LALPATHLAB):
+{ "MessageType": "GetHistory", "Exchange": "BSE", "InstrumentIdentifier": "LALPATHLAB",
+  "Periodicity": "DAY", "Period": 1, "From": <2026-09-11>, "To": <2026-09-17 EOD>,
+  "isShortIdentifier": "False", "AdjustSplits": true }
+GetHistory RESPONSE:
+[
+  { "time": "2026-09-11", "open": 1897.25, "high": 1923,   "low": 1897.25, "close": 1909.4, "volume": 4666 },
+  { "time": "2026-09-15", "open": 1904.95, "high": 1919.9, "low": 1884.05, "close": 1905,   "volume": 10622 },
+  { "time": "2026-09-16", "open": 1932.25, "high": 2035,   "low": 1872.85, "close": 1894,   "volume": 67347 }
+]
+OBSERVATION: 2026-09-16's final candle has now settled correctly overnight
+(this is the data that was missing in Tests 4 and 6).
+
+GetSnapshot REQUEST (batch, LALPATHLAB + TCS + RELIANCE + TITAN):
+{ "MessageType": "GetSnapshot", "Exchange": "BSE", "Periodicity": "MINUTE", "Period": 1,
+  "isShortIdentifiers": "false",
+  "InstrumentIdentifiers": [ { "Value": "LALPATHLAB" }, { "Value": "TCS" }, { "Value": "RELIANCE" }, { "Value": "TITAN" } ] }
+GetSnapshot RESPONSE:
+[
+  { "InstrumentIdentifier": "RELIANCE",   "LastTradeTime": 1789629180, "TradedQty": 173, "Open": 1246.4,  "High": 1246.4,  "Low": 1245.7,  "Close": 1246 },
+  { "InstrumentIdentifier": "TCS",        "LastTradeTime": 1789629180, "TradedQty": 173, "Open": 2192.6,  "High": 2192.6,  "Low": 2192,    "Close": 2192.25 },
+  { "InstrumentIdentifier": "TITAN",      "LastTradeTime": 1789629180, "TradedQty": 126, "Open": 4869,    "High": 4870,    "Low": 4869,    "Close": 4869 },
+  { "InstrumentIdentifier": "LALPATHLAB", "LastTradeTime": 0, "TradedQty": 0, "Open": 0, "High": 0, "Low": 0, "Close": 0, "TokenNumber": null }
+]
+OBSERVATION: TCS/RELIANCE/TITAN all real, ~18 min observed delay (matches
+entitlement). LALPATHLAB is STILL zero, even though it is actively trading
+right now (see Test 8) - this is LALPATHLAB-specific to GetSnapshot, not a
+general market-hours outage.
+
+
+==================================================
+TEST 8 — LALPATHLAB minute-level GetHistory, same moment as Test 7
+Date/time: 2026-09-17, 13:01 IST
+==================================================
+REQUEST:
+{ "MessageType": "GetHistory", "Exchange": "BSE", "InstrumentIdentifier": "LALPATHLAB",
+  "Periodicity": "MINUTE", "Period": 1, "Max": 10, "isShortIdentifier": "False" }
+
+RESPONSE (MessageType: HistoryOHLCResult), most recent bars:
+[
+  { "LastTradeTime": 1789629060, "TradedQty": 1,   "Open": 1932.7,  "High": 1932.7,  "Low": 1932.7,  "Close": 1932.7 },
+  { "LastTradeTime": 1789628880, "TradedQty": 1,   "Open": 1931.8,  "High": 1931.8,  "Low": 1931.8,  "Close": 1931.8 },
+  { "LastTradeTime": 1789628760, "TradedQty": 100, "Open": 1929.3,  "High": 1929.3,  "Low": 1929.3,  "Close": 1929.3 },
+  { "LastTradeTime": 1789628460, "TradedQty": 100, "Open": 1934.4,  "High": 1934.4,  "Low": 1934.4,  "Close": 1934.4 },
+  { "LastTradeTime": 1789628280, "TradedQty": 56,  "Open": 1931.8,  "High": 1931.8,  "Low": 1929.5,  "Close": 1929.5 }
+  ... (10 rows total, all within the last ~30 minutes)
+]
+
+OBSERVATION: LALPATHLAB IS actively trading right now (most recent bar only
+33 seconds before this request). Proves the Test 7 zero result is NOT an
+illiquidity/no-recent-trade issue.
+
+
+==================================================
+TEST 9 — LALPATHLAB by numeric token instead of trade symbol
+Date/time: 2026-09-17, 13:01 IST
+==================================================
+GetInstrumentsOnSearch REQUEST:
+{ "MessageType": "GetInstrumentsOnSearch", "Exchange": "BSE", "Search": "LALPATHLAB",
+  "OnlyActive": true, "DetailedInfo": true }
+GetInstrumentsOnSearch RESPONSE (relevant row):
+{ "TokenNumber": "539524", "Identifier": "LALPATHLAB", "TradeSymbol": "LALPATHLAB",
+  "Description": "Dr. Lal Pathlabs Limited", "ISIN": "INE600L01024", "Series": "A" }
+
+GetSnapshot REQUEST (retry using numeric token instead of symbol string):
+{ "MessageType": "GetSnapshot", "Exchange": "BSE", "Periodicity": "MINUTE", "Period": 1,
+  "isShortIdentifiers": "false", "InstrumentIdentifiers": [ { "Value": "539524" } ] }
+GetSnapshot RESPONSE:
+[ { "InstrumentIdentifier": "539524", "LastTradeTime": 0, "TradedQty": 0, "Open": 0, "High": 0, "Low": 0, "Close": 0, "TokenNumber": null } ]
+
+OBSERVATION: same zero result with the numeric token as with the trade-symbol
+string. Rules out an identifier-format issue on our side - this is confirmed
+to be a GDF-side GetSnapshot gap specific to LALPATHLAB (BSE token 539524),
+while GetHistory (both DAY and MINUTE periodicity) works correctly for the
+exact same instrument at the exact same moment.
+
+
+==================================================
+SUMMARY
+==================================================
+- GetHistory (Delayed): works correctly for all 4 symbols, including
+  LALPATHLAB, at every periodicity tested (DAY, MINUTE). Settles the final
+  daily candle some time after close (confirmed next-day for 2026-09-16).
+- GetSnapshot (Delayed): works correctly for TCS/RELIANCE/TITAN during
+  market hours (~15-19 min observed delay). Decays to all-zero rows for all
+  symbols some time after close. Returns all-zero specifically for
+  LALPATHLAB during live market hours too, under both symbol and numeric
+  token identifiers, while GetHistory confirms LALPATHLAB is actively
+  trading at that exact moment - a genuine provider-side gap for this one
+  instrument, not reproducible for TCS/RELIANCE/TITAN.
+- SubscribeSnapshot (Delayed): subscription accepted, but 0 pushes observed
+  in a 65-second window for LALPATHLAB post-close (consistent with the
+  GetSnapshot cache being empty for it at that time).
+- GetExchangeSnapshot (Delayed): works, single BSE-wide request. Returned
+  1627 instruments during market hours, only 97 an hour after close -
+  confirms the whole delayed cache shrinks post-close, not just per-symbol
+  polling. Diagnostic only, not adopted into production per task scope.

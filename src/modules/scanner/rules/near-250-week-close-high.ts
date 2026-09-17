@@ -1,14 +1,14 @@
-import type { Near250WeekHighScanMatch } from "../scanner.types";
+import type { Near250WeekCloseHighScanMatch } from "../scanner.types";
 import { resolveCurrentScannerSignal } from "../scanner-current-signal";
 import { getEffectiveScannerLookbackWeeks } from "../scanner.constants";
 import { evaluateScannerWeeklySeries, type ScannerWeeklyCandle } from "./scanner-weekly-rule";
 
-export function calculateNear250WeekHighScan(
+export function calculateNear250WeekCloseHighScan(
   segments: ScannerWeeklyCandle[][],
   latestSegment: ScannerWeeklyCandle[],
   isLatestWeekFresh: boolean,
   requestedLookbackWeeks: number
-): Near250WeekHighScanMatch | null {
+): Near250WeekCloseHighScanMatch | null {
   const highlightTimes: string[] = [];
   for (const segment of segments) {
     const segmentLookbackWeeks = getEffectiveScannerLookbackWeeks(requestedLookbackWeeks, segment.length);

@@ -67,6 +67,9 @@ function getRequestMessageType(response: GlobalDatafeedsResponse) {
     LastQuoteResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getLastQuote,
     LastQuoteArrayResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getLastQuoteArray,
     RealtimeResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.subscribeRealtime,
+    SnapshotResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getSnapshot,
+    RealtimeSnapshotResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.subscribeSnapshot,
+    ExchangeSnapshotResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getExchangeSnapshot,
   };
 
   return (
@@ -304,7 +307,10 @@ export class GlobalDatafeedsWebSocketClient {
       return;
     }
 
-    if (response.MessageType === GLOBAL_DATAFEEDS_MESSAGE_TYPE.realtimeResult) {
+    if (
+      response.MessageType === GLOBAL_DATAFEEDS_MESSAGE_TYPE.realtimeResult ||
+      response.MessageType === GLOBAL_DATAFEEDS_MESSAGE_TYPE.realtimeSnapshotResult
+    ) {
       for (const listener of this.quoteListeners) {
         listener(response as GlobalDatafeedsQuoteRow);
       }

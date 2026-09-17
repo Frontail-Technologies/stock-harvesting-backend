@@ -3,8 +3,10 @@ import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../../db/client";
 import { instruments, weeklyStrongBacktestMembers, weeklyStrongBacktestRuns } from "../../db/schema";
 import { CANDLE_TIMEFRAME } from "../../shared/constants";
+import { getOrSetCache } from "../../shared/cache";
+import { env } from "../../shared/env";
 import { notFound } from "../../shared/errors";
-import { groupMetricCandlesBySymbol, readMetricCandles } from "../market-data/market-data.candles";
+import { readMetricDailyCloses } from "../market-data/market-data.candles";
 import { getDateYearsAgo } from "../market-data/market-data.dates";
 import {
   getActiveMemberInstrumentRows,
@@ -25,7 +27,11 @@ import {
   type WeeklyStrongBacktestMembershipMode,
 } from "./weekly-strong-backtest.constants";
 
-const MEMBERSHIP_CHANGES_FETCH_YEARS = 10;
+const MEMBERSHIP_CHANGES_CACHE_TTL_MS = 10 * 60_000;
+
+function getMembershipChangesFetchYears(lookback: ScannerLookbackMultiplier) {
+  return Math.ceil(SCANNER_LOOKBACK_WEEKS[lookback] / 52) + 1;
+}
 
 function formatCoverageMonth(dateStr: string) {
   return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString("en-US", {
@@ -306,11 +312,26 @@ export function computeMembershipChanges<T extends WeeklyStrongBacktestMembershi
 // preceding completed week's membership in one pass per symbol.
 export async function getWeeklyStrongBacktestMembershipChanges(input: {
   code: string;
-  weekEnding: string;
+  weekEnding?: string;
   lookback?: ScannerLookbackMultiplier;
 }): Promise<WeeklyStrongBacktestMembershipChanges> {
   const collection = await requireCollectionByCode(input.code);
   const lookback = input.lookback ?? DEFAULT_SCANNER_LOOKBACK;
+  const cacheKey = `collectionMembershipChanges:${collection.code}:${lookback}:${input.weekEnding ?? "current"}`;
+  const compute = () =>
+    computeWeeklyStrongBacktestMembershipChanges({ collection, lookback, weekEnding: input.weekEnding });
+
+  return env.NODE_ENV === "test"
+    ? compute()
+    : getOrSetCache(cacheKey, MEMBERSHIP_CHANGES_CACHE_TTL_MS, compute);
+}
+
+async function computeWeeklyStrongBacktestMembershipChanges(input: {
+  collection: Awaited<ReturnType<typeof requireCollectionByCode>>;
+  lookback: ScannerLookbackMultiplier;
+  weekEnding?: string;
+}): Promise<WeeklyStrongBacktestMembershipChanges> {
+  const { collection, lookback } = input;
   const baseResponse = {
     collection: { code: collection.code, name: collection.name },
     membershipMode: CURRENT_MEMBERSHIP as WeeklyStrongBacktestMembershipMode,
@@ -327,12 +348,16 @@ export async function getWeeklyStrongBacktestMembershipChanges(input: {
   };
   if (memberRows.length === 0) return unavailable;
 
-  const dailyCandles = await readMetricCandles({
+  const dailyCandles = await readMetricDailyCloses({
     instruments: memberRows.map((row) => ({ instrumentId: row.instrumentId, symbol: row.symbol })),
-    timeframe: CANDLE_TIMEFRAME.day,
-    from: getDateYearsAgo(MEMBERSHIP_CHANGES_FETCH_YEARS),
+    from: getDateYearsAgo(getMembershipChangesFetchYears(lookback)),
   });
-  const dailyCandlesBySymbol = groupMetricCandlesBySymbol(dailyCandles);
+  const dailyCandlesBySymbol = new Map<string, Array<{ time: string; close: number }>>();
+  for (const candle of dailyCandles) {
+    const rows = dailyCandlesBySymbol.get(candle.symbol) ?? [];
+    rows.push({ time: candle.time, close: candle.close });
+    dailyCandlesBySymbol.set(candle.symbol, rows);
+  }
 
   let weekEnding: string | null = null;
   let previousWeekEnding: string | null = null;
@@ -363,7 +388,9 @@ export async function getWeeklyStrongBacktestMembershipChanges(input: {
   }
 
   if (!weekEnding) return unavailable;
-  if (getIsoWeekRange(input.weekEnding).start !== getIsoWeekRange(weekEnding).start) return unavailable;
+  if (input.weekEnding && getIsoWeekRange(input.weekEnding).start !== getIsoWeekRange(weekEnding).start) {
+    return unavailable;
+  }
 
   const { enteredStocks, exitedStocks } = computeMembershipChanges(
     currentMembers,

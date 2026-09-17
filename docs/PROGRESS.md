@@ -1070,6 +1070,27 @@ Verification:
   (week/close/rollingMax/threshold/matched) confirmed KOTAKBANK's
   close=424.85 vs threshold=377.3575 → matched=true, and traced
   LALPATHLAB's isolated 1-week segment explicitly (see Completed above)
+- Phase 4D.2: adopted GlobalDataFeeds' delayed-entitlement message types
+  correctly. Root cause of the earlier "Function not enabled" current-day
+  capability failure: the live-stream provider was sending
+  `SubscribeRealtime`, but our account only holds the 15-minute-delayed
+  entitlement, whose WebSocket message types are `GetSnapshot` /
+  `SubscribeSnapshot` / `GetExchangeSnapshot`. Switched the stream
+  provider to `SubscribeSnapshot`; added a `GetSnapshot`-based
+  `fetchDelayedSnapshot` adapter method (new `current_price_snapshot`
+  capability) as the primary current-day-price source, batched to the
+  provider's 25-instrument limit, with the existing passive stream state
+  as fallback. `GetHistory` (canonical daily sync) was already correct
+  and untouched. Live-verified during real market hours: `GetSnapshot`
+  returned TCS/RELIANCE OHLC with an observed ~19-minute delay; a
+  controlled `GetExchangeSnapshot` diagnostic for BSE succeeded (1,627
+  instruments in one request) but was not adopted, per the task's
+  explicit "diagnose only" instruction - flagged as a future-phase
+  candidate. Admin Market Data health now reports which GDF mechanism
+  each concern uses (`mechanisms.historicalDailySync/currentPriceSnapshot/
+  liveFeed`). `npx tsc --noEmit` clean (backend + frontend); backend
+  `npx vitest run` — 815/815 pass (85 test files, 2 new files + updates
+  to 2 existing files this pass).
 
 ## Module status
 

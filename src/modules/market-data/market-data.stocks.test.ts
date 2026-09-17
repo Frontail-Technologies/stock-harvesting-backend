@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import type { DbOrTx } from "../../db/client";
+import { invalidateCacheByPrefix } from "../../shared/cache";
 import {
   buildStockFilters,
   buildStockOrderBy,
@@ -10,6 +11,10 @@ import {
   searchChartEligibleBseStocks,
   toStockListResponse,
 } from "./market-data.stocks";
+
+beforeEach(() => {
+  invalidateCacheByPrefix("searchChartEligibleBseStocks");
+});
 
 /**
  * No behavior coverage existed for this responsibility before this
@@ -203,6 +208,54 @@ describe("searchChartEligibleBseStocks query shape", () => {
 
     await searchChartEligibleBseStocks({ q: "x", limit: 7 }, fakeDb as unknown as DbOrTx);
     expect(capturedLimit).toBe(7);
+  });
+
+  it("caches repeat calls for the same q/limit - the DB is not hit twice", async () => {
+    let dbCallCount = 0;
+    const fakeDb = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: async () => {
+                dbCallCount += 1;
+                return [{ symbol: "RELIANCE" }];
+              },
+            }),
+          }),
+        }),
+      }),
+    };
+
+    const first = await searchChartEligibleBseStocks({ q: "REL", limit: 25 }, fakeDb as unknown as DbOrTx);
+    const second = await searchChartEligibleBseStocks({ q: "REL", limit: 25 }, fakeDb as unknown as DbOrTx);
+
+    expect(dbCallCount).toBe(1);
+    expect(second).toEqual(first);
+  });
+
+  it("does not share a cache entry across different q/limit values", async () => {
+    let dbCallCount = 0;
+    const fakeDb = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: async () => {
+                dbCallCount += 1;
+                return [];
+              },
+            }),
+          }),
+        }),
+      }),
+    };
+
+    await searchChartEligibleBseStocks({ q: "REL", limit: 25 }, fakeDb as unknown as DbOrTx);
+    await searchChartEligibleBseStocks({ q: "TCS", limit: 25 }, fakeDb as unknown as DbOrTx);
+    await searchChartEligibleBseStocks({ q: "REL", limit: 10 }, fakeDb as unknown as DbOrTx);
+
+    expect(dbCallCount).toBe(3);
   });
 });
 

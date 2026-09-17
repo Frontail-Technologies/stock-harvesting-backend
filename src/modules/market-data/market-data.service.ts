@@ -144,6 +144,8 @@ export async function getChartHistoryRange(input: {
 export type ChartCandlesResult = {
   candles: ReturnType<typeof toChartCandleResponse>[];
   dataThrough: string | null;
+  nextBefore?: string | null;
+  hasMore?: boolean;
 };
 
 // dataThrough is always the latest ACTUAL underlying 1D trading-day candle
@@ -158,18 +160,25 @@ export async function getChartCandles(input: {
   timeframe: CandleTimeframe;
   from?: string;
   to?: string;
+  before?: string;
+  limit?: number;
   exchange?: string;
 }): Promise<ChartCandlesResult> {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
 
   const instrument = (await getInstrumentsBySymbol([symbol], exchange)).get(symbol);
+  const sourceLimit = input.limit
+    ? input.limit * (input.timeframe === CANDLE_TIMEFRAME.day ? 1 : input.timeframe === CANDLE_TIMEFRAME.week ? 6 : 23)
+    : undefined;
   const dailyRows = instrument
     ? await readChartCandles({
         instrumentId: instrument.id,
         timeframe: CANDLE_TIMEFRAME.day,
         from: input.from,
         to: input.to,
+        before: input.before,
+        limit: sourceLimit,
       })
     : [];
 
@@ -177,9 +186,20 @@ export async function getChartCandles(input: {
     const candles = deriveChartCandlesFromDailyRows(dailyRows, input.timeframe).map((row) =>
       toChartCandleResponse(row, input.timeframe)
     );
+    const completedCandles = excludeIncompleteWeeklyCandle(candles, input.timeframe, exchange);
+    const pageCandles = input.limit ? completedCandles.slice(-input.limit) : completedCandles;
     return {
-      candles: excludeIncompleteWeeklyCandle(candles, input.timeframe, exchange),
+      candles: pageCandles,
       dataThrough: dailyRows[dailyRows.length - 1].time,
+      ...(input.limit
+        ? {
+            nextBefore:
+              pageCandles.length > 0
+                ? getCandlePageCursor(pageCandles[0].time, input.timeframe)
+                : dailyRows[0].time,
+            hasMore: dailyRows.length === sourceLimit,
+          }
+        : {}),
     };
   }
 
@@ -200,6 +220,18 @@ export async function getChartCandles(input: {
   }
 
   return { candles: [], dataThrough: null };
+}
+
+function getCandlePageCursor(time: string, timeframe: CandleTimeframe) {
+  const date = new Date(`${time}T00:00:00.000Z`);
+  if (timeframe === CANDLE_TIMEFRAME.week) {
+    date.setUTCDate(date.getUTCDate() - 4);
+    return date.toISOString().slice(0, 10);
+  }
+  if (timeframe === CANDLE_TIMEFRAME.month) {
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  }
+  return time;
 }
 
 // The 1W chart must only ever show COMPLETED weeks (see

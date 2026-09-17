@@ -98,6 +98,8 @@ export function adapterSupportsCapability(
       return Boolean(adapter.fetchExchanges);
     case "realtime_ws":
       return REALTIME_CAPABLE_PROVIDER_KEYS.has(adapter.providerKey);
+    case "current_price_snapshot":
+      return Boolean(adapter.fetchDelayedSnapshot);
     default:
       return false;
   }

@@ -1,17 +1,19 @@
-import { eq, inArray } from "drizzle-orm";
-
-import { db } from "../../db/client";
-import { adPlacements, monetizationSettings } from "../../db/schema";
 import { writeAuditLog } from "../../shared/audit/audit.service";
 import { getOrSetCache, invalidateCacheByPrefix } from "../../shared/cache";
 import {
   AD_PLACEMENTS,
-  AD_PLACEMENT_KEYS,
   MONETIZATION_MODE,
-  MONETIZATION_SETTINGS_DEFAULTS,
   type AdPlacementKey,
   type MonetizationMode,
 } from "../../shared/constants";
+import {
+  createDefaultMonetizationSettingsRow,
+  ensurePlacementsSeeded,
+  findAdPlacementRows,
+  findMonetizationSettingsRow,
+  updateAdPlacementRow,
+  upsertMonetizationSettingsRow,
+} from "./monetization.repository";
 
 const PUBLIC_CONFIG_CACHE_KEY = "monetizationConfig:public";
 const PUBLIC_CONFIG_CACHE_TTL_MS = 30_000;
@@ -38,35 +40,15 @@ export function isPlacementRenderable(
   return Boolean(publisherId && placement.enabled && placement.slotId);
 }
 
-async function ensurePlacementsSeeded() {
-  await db
-    .insert(adPlacements)
-    .values(AD_PLACEMENTS.map((placement) => ({ key: placement.key })))
-    .onConflictDoNothing();
-}
-
 export async function getMonetizationSettings() {
-  const [settings] = await db
-    .select()
-    .from(monetizationSettings)
-    .where(eq(monetizationSettings.id, MONETIZATION_SETTINGS_DEFAULTS.id));
+  const settings = await findMonetizationSettingsRow();
   if (settings) return settings;
-
-  const [created] = await db
-    .insert(monetizationSettings)
-    .values({ id: MONETIZATION_SETTINGS_DEFAULTS.id })
-    .onConflictDoNothing()
-    .returning();
-
-  return created;
+  return createDefaultMonetizationSettingsRow();
 }
 
 export async function listAdPlacements() {
   await ensurePlacementsSeeded();
-  const rows = await db
-    .select()
-    .from(adPlacements)
-    .where(inArray(adPlacements.key, AD_PLACEMENT_KEYS));
+  const rows = await findAdPlacementRows();
 
   const rowsByKey = new Map(rows.map((row) => [row.key, row]));
   // Always return in AD_PLACEMENTS' declared order, with display metadata attached - the DB row only knows key/enabled/slotId/updatedAt.
@@ -104,23 +86,7 @@ export async function updateMonetizationSettings(input: {
   mode: MonetizationMode;
   publisherId: string | null;
 }) {
-  const [settings] = await db
-    .insert(monetizationSettings)
-    .values({
-      id: MONETIZATION_SETTINGS_DEFAULTS.id,
-      mode: input.mode,
-      publisherId: input.publisherId,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: monetizationSettings.id,
-      set: {
-        mode: input.mode,
-        publisherId: input.publisherId,
-        updatedAt: new Date(),
-      },
-    })
-    .returning();
+  const settings = await upsertMonetizationSettingsRow({ mode: input.mode, publisherId: input.publisherId });
 
   await writeAuditLog({
     actorUserId: input.actorUserId,
@@ -142,15 +108,11 @@ export async function updateAdPlacement(input: {
 }) {
   await ensurePlacementsSeeded();
 
-  const [placement] = await db
-    .update(adPlacements)
-    .set({
-      enabled: input.enabled,
-      slotId: input.slotId,
-      updatedAt: new Date(),
-    })
-    .where(eq(adPlacements.key, input.key))
-    .returning();
+  const placement = await updateAdPlacementRow({
+    key: input.key,
+    enabled: input.enabled,
+    slotId: input.slotId,
+  });
 
   await writeAuditLog({
     actorUserId: input.actorUserId,

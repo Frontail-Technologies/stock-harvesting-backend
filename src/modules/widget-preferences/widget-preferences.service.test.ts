@@ -1,29 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../db/client", () => ({ db: { select: vi.fn(), insert: vi.fn(), delete: vi.fn() } }));
+vi.mock("./widget-preferences.repository", () => ({
+  findWidgetPreferencesRow: vi.fn(),
+  upsertWidgetPreferencesRow: vi.fn(),
+  deleteWidgetPreferencesRow: vi.fn(),
+}));
 
-import * as dbClientModule from "../../db/client";
+import * as repository from "./widget-preferences.repository";
 import type { WidgetPreferenceSource } from "../../db/schema";
 import { clearWidgetPreferences, getWidgetPreferences, saveWidgetPreferences } from "./widget-preferences.service";
 
-const db = vi.mocked(dbClientModule.db);
+const findWidgetPreferencesRow = vi.mocked(repository.findWidgetPreferencesRow);
+const upsertWidgetPreferencesRow = vi.mocked(repository.upsertWidgetPreferencesRow);
+const deleteWidgetPreferencesRow = vi.mocked(repository.deleteWidgetPreferencesRow);
 
-function selectResult(rows: unknown[]) {
-  const chain = {
-    from: () => chain,
-    where: () => chain,
-    limit: () => chain,
-    then: (resolve: (value: unknown[]) => void, reject: (reason?: unknown) => void) =>
-      Promise.resolve(rows).then(resolve, reject),
-  };
-  return chain as never;
-}
+beforeEach(() => vi.clearAllMocks());
 
 describe("getWidgetPreferences", () => {
-  beforeEach(() => vi.clearAllMocks());
-
   it("no saved row -> hasSavedPreference: false, distinct from an empty saved selection", async () => {
-    db.select.mockReturnValueOnce(selectResult([]) as never);
+    findWidgetPreferencesRow.mockResolvedValueOnce(undefined);
 
     const result = await getWidgetPreferences("user-1");
 
@@ -31,7 +26,7 @@ describe("getWidgetPreferences", () => {
   });
 
   it("a saved row with sources: [] is still a real, deliberate preference, not treated as unset", async () => {
-    db.select.mockReturnValueOnce(selectResult([{ sources: [] }]) as never);
+    findWidgetPreferencesRow.mockResolvedValueOnce({ sources: [] });
 
     const result = await getWidgetPreferences("user-1");
 
@@ -39,11 +34,11 @@ describe("getWidgetPreferences", () => {
   });
 
   it("returns the saved sources in their stored order", async () => {
-    const sources = [
+    const sources: WidgetPreferenceSource[] = [
       { type: "segment", id: "seg-1" },
       { type: "watchlist", id: "wl-1" },
     ];
-    db.select.mockReturnValueOnce(selectResult([{ sources }]) as never);
+    findWidgetPreferencesRow.mockResolvedValueOnce({ sources });
 
     const result = await getWidgetPreferences("user-1");
 
@@ -52,46 +47,33 @@ describe("getWidgetPreferences", () => {
 });
 
 describe("saveWidgetPreferences", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("upserts on the user's unique row via onConflictDoUpdate, not a plain insert", async () => {
+  it("delegates to the repository and passes its result through", async () => {
     const sources: WidgetPreferenceSource[] = [{ type: "segment", id: "seg-1" }];
-    const returning = vi.fn(async () => [{ sources }]);
-    const onConflictDoUpdate = vi.fn(() => ({ returning }));
-    const values = vi.fn(() => ({ onConflictDoUpdate }));
-    db.insert.mockReturnValueOnce({ values } as never);
+    upsertWidgetPreferencesRow.mockResolvedValueOnce({ sources });
 
     const result = await saveWidgetPreferences("user-1", sources);
 
-    expect(values).toHaveBeenCalledWith({ userId: "user-1", sources });
-    expect(onConflictDoUpdate).toHaveBeenCalledTimes(1);
+    expect(upsertWidgetPreferencesRow).toHaveBeenCalledWith("user-1", sources);
     expect(result).toEqual({ sources });
   });
 
-  it("saving an empty array persists it as-is (a deliberate zero-selection choice)", async () => {
-    const returning = vi.fn(async () => [{ sources: [] }]);
-    const onConflictDoUpdate = vi.fn(() => ({ returning }));
-    const values = vi.fn(() => ({ onConflictDoUpdate }));
-    db.insert.mockReturnValueOnce({ values } as never);
+  it("saving an empty array is passed through as-is (a deliberate zero-selection choice)", async () => {
+    upsertWidgetPreferencesRow.mockResolvedValueOnce({ sources: [] });
 
     const result = await saveWidgetPreferences("user-1", []);
 
-    expect(values).toHaveBeenCalledWith({ userId: "user-1", sources: [] });
+    expect(upsertWidgetPreferencesRow).toHaveBeenCalledWith("user-1", []);
     expect(result).toEqual({ sources: [] });
   });
 });
 
 describe("clearWidgetPreferences", () => {
-  beforeEach(() => vi.clearAllMocks());
-
   it("deletes the user's row, reverting them back to 'no saved preference'", async () => {
-    const where = vi.fn(async () => undefined);
-    db.delete.mockReturnValueOnce({ where } as never);
+    deleteWidgetPreferencesRow.mockResolvedValueOnce(undefined);
 
     const result = await clearWidgetPreferences("user-1");
 
-    expect(db.delete).toHaveBeenCalledTimes(1);
-    expect(where).toHaveBeenCalledTimes(1);
+    expect(deleteWidgetPreferencesRow).toHaveBeenCalledWith("user-1");
     expect(result).toEqual({ ok: true });
   });
 });

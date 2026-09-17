@@ -9,6 +9,7 @@ type CandleState = MarketStreamSymbol & {
   low: number;
   close: number;
   volume?: number;
+  lastUpdatedAt: string;
 };
 
 const candles = new Map<string, CandleState>();
@@ -46,6 +47,7 @@ export function applyTickToCandles(input: MarketStreamSymbol & {
 }) {
   const date = new Date(input.time);
   if (Number.isNaN(date.getTime())) return [];
+  const lastUpdatedAt = date.toISOString();
 
   return Object.values(CANDLE_TIMEFRAME).map((timeframe) => {
     const time = candleTime(timeframe, date);
@@ -59,6 +61,7 @@ export function applyTickToCandles(input: MarketStreamSymbol & {
           low: Math.min(existing.low, input.price),
           close: input.price,
           volume,
+          lastUpdatedAt,
         }
       : {
           exchange: input.exchange,
@@ -70,6 +73,7 @@ export function applyTickToCandles(input: MarketStreamSymbol & {
           low: input.price,
           close: input.price,
           volume,
+          lastUpdatedAt,
         };
 
     candles.set(key, next);
@@ -78,4 +82,55 @@ export function applyTickToCandles(input: MarketStreamSymbol & {
       data: next,
     };
   });
+}
+
+export function applyProviderDailyCandle(input: MarketStreamSymbol & {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}) {
+  const date = new Date(input.time);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const time = dateKey(date);
+  const state: CandleState = {
+    exchange: input.exchange,
+    symbol: input.symbol,
+    timeframe: CANDLE_TIMEFRAME.day,
+    time,
+    open: input.open,
+    high: input.high,
+    low: input.low,
+    close: input.close,
+    volume: input.volume,
+    lastUpdatedAt: date.toISOString(),
+  };
+  candles.set(stateKey(state), state);
+  return {
+    type: "market.candle.update" as const,
+    data: state,
+  };
+}
+
+export function readCurrentDayCandle(input: MarketStreamSymbol & { date: string }) {
+  const key = stateKey({
+    exchange: input.exchange,
+    symbol: input.symbol,
+    timeframe: CANDLE_TIMEFRAME.day,
+    time: input.date,
+  });
+  return candles.get(key) ?? null;
+}
+
+export function countCurrentDayCandlesInMemory(exchange?: string) {
+  let count = 0;
+  for (const candle of candles.values()) {
+    if (candle.timeframe !== CANDLE_TIMEFRAME.day) continue;
+    if (exchange && candle.exchange !== exchange) continue;
+    count += 1;
+  }
+  return count;
 }

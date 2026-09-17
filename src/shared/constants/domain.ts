@@ -155,6 +155,7 @@ export const PROVIDER_CAPABILITIES = [
   "instrument_token",
   "exchange_list",
   "realtime_ws",
+  "current_price_snapshot",
 ] as const;
 export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];
 

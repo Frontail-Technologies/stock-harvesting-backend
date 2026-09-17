@@ -9,6 +9,7 @@ import type {
   ProviderHealthStatus,
   ProviderInstrument,
   ProviderSymbolDailyCandle,
+  ProviderSymbolSnapshot,
 } from "../../data-provider.types";
 import {
   configuredProviderConnected,
@@ -22,6 +23,9 @@ import {
   GLOBAL_DATAFEEDS_INDEX_EXCHANGE,
   GLOBAL_DATAFEEDS_MESSAGE_TYPE,
   GLOBAL_DATAFEEDS_PROVIDER_NAME,
+  GLOBAL_DATAFEEDS_QUOTE_BATCH_SIZE,
+  GLOBAL_DATAFEEDS_SNAPSHOT_PERIOD,
+  GLOBAL_DATAFEEDS_SNAPSHOT_PERIODICITY,
 } from "./global-datafeeds.constants";
 import {
   toGlobalDatafeedsDailyCandle,
@@ -30,6 +34,7 @@ import {
 import type {
   GlobalDatafeedsHistoryRow,
   GlobalDatafeedsInstrumentRow,
+  GlobalDatafeedsQuoteRow,
   GlobalDatafeedsRequest,
   GlobalDatafeedsResponse,
 } from "./global-datafeeds.types";
@@ -60,6 +65,17 @@ function toEpochSeconds(dateOnly: string, endOfDay = false) {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toFiniteNumberOrNull(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function toIsoTimeFromEpochSeconds(value: unknown) {
+  const seconds = toFiniteNumberOrNull(value);
+  if (!seconds) return null;
+  return new Date(seconds * 1000).toISOString();
 }
 
 // GetHistory in particular times out intermittently against the live
@@ -282,6 +298,61 @@ export class GlobalDatafeedsDataProviderAdapter implements DataProviderAdapter {
       .map(toGlobalDatafeedsDailyCandle)
       .filter((candle): candle is ProviderDailyCandle => Boolean(candle))
       .sort((a, b) => a.time.localeCompare(b.time));
+  }
+
+  async fetchDelayedSnapshot(input: {
+    symbols: string[];
+    exchangeCode?: string;
+  }): Promise<ProviderSymbolSnapshot[]> {
+    const exchange = assertExchangeSupported(
+      input.exchangeCode ?? GLOBAL_DATAFEEDS_DEFAULT_EXCHANGE
+    );
+    const normalizedSymbols = [...new Set(input.symbols)].map((symbol) => normalizeSymbol(symbol));
+    const tokenBySymbol = new Map<string, string>();
+    for (const symbol of normalizedSymbols) {
+      tokenBySymbol.set(symbol, await this.getInstrumentToken(symbol, exchange));
+    }
+
+    const rows: ProviderSymbolSnapshot[] = [];
+    const symbolByToken = new Map([...tokenBySymbol].map(([symbol, token]) => [token, symbol]));
+    const tokens = [...symbolByToken.keys()];
+
+    for (let index = 0; index < tokens.length; index += GLOBAL_DATAFEEDS_QUOTE_BATCH_SIZE) {
+      const batch = tokens.slice(index, index + GLOBAL_DATAFEEDS_QUOTE_BATCH_SIZE);
+      const response = await requestWithRetry({
+        MessageType: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getSnapshot,
+        Exchange: exchange,
+        Periodicity: GLOBAL_DATAFEEDS_SNAPSHOT_PERIODICITY,
+        Period: GLOBAL_DATAFEEDS_SNAPSHOT_PERIOD,
+        isShortIdentifiers: "false",
+        InstrumentIdentifiers: batch.map((token) => ({ Value: token })),
+      });
+
+      for (const row of resultArray<GlobalDatafeedsQuoteRow>(response)) {
+        const token = row.InstrumentIdentifier;
+        const symbol = token ? symbolByToken.get(token) : undefined;
+        if (!symbol) continue;
+
+        const tradeTime = toIsoTimeFromEpochSeconds(row.LastTradeTime ?? row.ServerTime);
+        const open = toFiniteNumberOrNull(row.Open);
+        const high = toFiniteNumberOrNull(row.High);
+        const low = toFiniteNumberOrNull(row.Low);
+        const close = toFiniteNumberOrNull(row.Close);
+        if (!tradeTime || open === null || high === null || low === null || close === null) continue;
+
+        rows.push({
+          symbol,
+          tradeTime,
+          open,
+          high,
+          low,
+          close,
+          volume: toFiniteNumberOrNull(row.TradedQty ?? row.TotalQtyTraded),
+        });
+      }
+    }
+
+    return rows;
   }
 
   async fetchLatestDailyCandles(input: {

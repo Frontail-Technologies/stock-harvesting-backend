@@ -8,6 +8,7 @@ import { logger } from "../../shared/logger";
 import { normalizeSymbol } from "../../shared/normalize";
 import { getActiveProviderAccessToken, getEligibleProviderAdapter } from "../data-provider/data-provider.service";
 import { recordProviderFailure, recordProviderSuccess } from "../data-provider/data-provider-settings.service";
+import { enqueueCandleBootstrapJobs } from "../jobs/queues";
 import { createFallbackInstrument, getInstrumentsBySymbol, upsertInstruments } from "./market-data.instruments";
 
 // Instrument existence -> provider search -> full-sync fallback -> fallback creation -> default hydration; owns "make sure an instrument row exists" end to end. Deliberately does NOT own candle backfill/sync/refresh orchestration (still in market-data.service.ts) - this module only depends on market-data.instruments.ts and neutral data-provider services, never market-data.service.ts, avoiding an import cycle.
@@ -29,6 +30,15 @@ const DEFAULT_MARKET_SYMBOLS_BY_EXCHANGE: Record<string, readonly string[]> = {
     "AXISBANK",
   ],
 };
+
+function scheduleCandleBootstrap(exchange: string, symbols: string[]) {
+  void enqueueCandleBootstrapJobs(exchange, symbols).catch((error) => {
+    logger.warn(
+      { exchange, symbolCount: symbols.length, message: getErrorMessage(error, "Unknown error") },
+      "Failed to enqueue initial candle bootstrap",
+    );
+  });
+}
 
 export async function getOrCreateInstrument(
   symbol: string,
@@ -103,6 +113,7 @@ export async function syncProviderInstrumentSearch(query: string, exchange: stri
   }
 
   await upsertInstruments(providerInstruments, adapter.providerKey);
+  scheduleCandleBootstrap(exchange, providerInstruments.map((instrument) => instrument.symbol));
 
   return { count: providerInstruments.length };
 }
@@ -124,7 +135,12 @@ export async function syncProviderInstruments(exchange: string = DEFAULT_EXCHANG
     throw error;
   }
 
+  const existing = await getInstrumentsBySymbol(providerInstruments.map((instrument) => instrument.symbol), exchange);
   await upsertInstruments(providerInstruments, adapter.providerKey);
+  scheduleCandleBootstrap(
+    exchange,
+    providerInstruments.map((instrument) => instrument.symbol).filter((symbol) => !existing.has(symbol)),
+  );
 
   return { count: providerInstruments.length };
 }

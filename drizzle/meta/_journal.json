@@ -169,6 +169,13 @@
       "when": 1789478148337,
       "tag": "0023_thin_doctor_faustus",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789631621894,
+      "tag": "0024_green_paladin",
+      "breakpoints": true
     }
   ]
 }

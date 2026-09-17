@@ -14,6 +14,7 @@ type Bucket = {
 };
 
 const buckets = new Map<string, Bucket>();
+const SWEEP_INTERVAL_MS = 5 * 60_000;
 
 function requestKey(req: Request, keyPrefix: string) {
   const body = req.body as { email?: unknown } | undefined;
@@ -42,3 +43,13 @@ export function rateLimit(options: RateLimitOptions) {
     next();
   };
 }
+
+function sweepExpiredBuckets() {
+  const now = Date.now();
+  for (const [key, bucket] of buckets.entries()) {
+    if (bucket.resetAt <= now) buckets.delete(key);
+  }
+}
+
+const sweepInterval = setInterval(sweepExpiredBuckets, SWEEP_INTERVAL_MS);
+sweepInterval.unref();

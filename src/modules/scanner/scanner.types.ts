@@ -1,10 +1,4 @@
-export type ScannerCandle = {
-  time: string;
-  high: number;
-  close: number;
-};
-
-export type Near250WeekHighScanMatch = {
+export type Near250WeekCloseHighScanMatch = {
   matched?: boolean;
   startTime: string;
   endTime: string;

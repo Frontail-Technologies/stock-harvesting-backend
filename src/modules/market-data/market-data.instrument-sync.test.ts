@@ -32,6 +32,10 @@ vi.mock("../data-provider/data-provider-settings.service", () => ({
   recordProviderFailure: vi.fn(),
 }));
 
+vi.mock("../jobs/queues", () => ({
+  enqueueCandleBootstrapJobs: vi.fn().mockResolvedValue({ queued: 0 }),
+}));
+
 const getInstrumentsBySymbol = vi.mocked(instrumentsModule.getInstrumentsBySymbol);
 const createFallbackInstrument = vi.mocked(instrumentsModule.createFallbackInstrument);
 const upsertInstruments = vi.mocked(instrumentsModule.upsertInstruments);
@@ -127,6 +131,7 @@ describe("ensureInstrumentsForSymbols", () => {
   it("E. multiple missing symbols + provider without search capability -> full instrument sync runs exactly once, not once per missing symbol", async () => {
     getInstrumentsBySymbol
       .mockResolvedValueOnce(new Map()) // initial lookup: nothing exists
+      .mockResolvedValueOnce(new Map()) // full-sync lookup before upsert
       .mockResolvedValueOnce(
         new Map([
           ["ALPHA", { id: "i5", symbol: "ALPHA" } as never],

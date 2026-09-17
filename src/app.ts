@@ -2,32 +2,18 @@ import cors from "cors";
 import express, { type Request, type Response } from "express";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
-import { pool } from "./db/client";
-import { adminRouter } from "./modules/admin/admin.routes";
-import { aiRouter } from "./modules/ai/ai.routes";
-import { adminAuthRouter } from "./modules/auth/admin-auth.routes";
-import { authRouter } from "./modules/auth/auth.routes";
-import { drawingsRouter } from "./modules/drawings/drawings.routes";
 import { registerMarketCollectionsMetricsCollectors } from "./modules/market-collections/market-collections.metrics";
-import { marketCollectionsRouter } from "./modules/market-collections/market-collections.routes";
-import { marketDataRouter } from "./modules/market-data/market-data.routes";
-import { monetizationRouter } from "./modules/monetization/monetization.routes";
-import { priceAlertsRouter } from "./modules/price-alerts/price-alerts.routes";
-import { pushSubscriptionsRouter } from "./modules/push-subscriptions/push-subscriptions.routes";
-import { scannerRouter } from "./modules/scanner/scanner.routes";
-import { watchlistsRouter } from "./modules/watchlists/watchlists.routes";
-import { weeklyStrongBacktestRouter } from "./modules/weekly-strong-backtest/weekly-strong-backtest.routes";
-import { widgetPreferencesRouter } from "./modules/widget-preferences/widget-preferences.routes";
-import { API_ROUTES, HTTP_STATUS } from "./shared/constants";
+import { createRouter } from "./routes";
 import { corsOrigins, env } from "./shared/env";
-import { errorHandler, getErrorMessage, notFound } from "./shared/errors";
-import { sendData } from "./shared/http";
+import { errorHandler, notFound } from "./shared/errors";
 import { logger } from "./shared/logger";
 import { httpMetricsMiddleware } from "./shared/metrics/http-metrics.middleware";
 import { metricsRouter } from "./shared/metrics/metrics.routes";
 
 export function createApp() {
   const app = express();
+
+  app.set("trust proxy", env.TRUST_PROXY_HOPS);
 
   if (env.METRICS_ENABLED) {
     registerMarketCollectionsMetricsCollectors();
@@ -81,35 +67,7 @@ export function createApp() {
     }),
   );
 
-  app.get(API_ROUTES.health, async (_req, res) => {
-    const database = await checkDatabaseHealth();
-
-    sendData(
-      res,
-      {
-        ok: database.ok,
-        service: "stock-harvesting-backend",
-        timestamp: new Date().toISOString(),
-        database,
-      },
-      database.ok ? HTTP_STATUS.ok : HTTP_STATUS.serviceUnavailable,
-    );
-  });
-
-  app.use(API_ROUTES.auth, authRouter);
-  app.use(API_ROUTES.adminAuth, adminAuthRouter);
-  app.use(API_ROUTES.marketData, marketDataRouter);
-  app.use(API_ROUTES.marketCollections, marketCollectionsRouter);
-  app.use(API_ROUTES.scanner, scannerRouter);
-  app.use(API_ROUTES.scanner, drawingsRouter);
-  app.use(API_ROUTES.admin, adminRouter);
-  app.use(API_ROUTES.ai, aiRouter);
-  app.use(API_ROUTES.priceAlerts, priceAlertsRouter);
-  app.use(API_ROUTES.pushSubscriptions, pushSubscriptionsRouter);
-  app.use(API_ROUTES.watchlists, watchlistsRouter);
-  app.use(API_ROUTES.widgetPreferences, widgetPreferencesRouter);
-  app.use(API_ROUTES.monetization, monetizationRouter);
-  app.use(API_ROUTES.weeklyStrongBacktest, weeklyStrongBacktestRouter);
+  app.use(createRouter());
 
   app.use((_req, _res, next) => {
     next(notFound("Route not found"));
@@ -117,49 +75,6 @@ export function createApp() {
   app.use(errorHandler);
 
   return app;
-}
-
-const DATABASE_HEALTH_CHECK_TIMEOUT_MS = 2_000;
-
-async function checkDatabaseHealth() {
-  const startedAt = Date.now();
-
-  try {
-    await Promise.race([
-      pool.query("SELECT 1"),
-      new Promise((_resolve, reject) =>
-        setTimeout(
-          () => reject(new Error("Database health check timed out")),
-          DATABASE_HEALTH_CHECK_TIMEOUT_MS,
-        ),
-      ),
-    ]);
-
-    return {
-      ok: true,
-      latencyMs: Date.now() - startedAt,
-      pool: {
-        total: pool.totalCount,
-        idle: pool.idleCount,
-        waiting: pool.waitingCount,
-      },
-    };
-  } catch (error) {
-    logger.error(
-      { message: getErrorMessage(error, "Unknown error") },
-      "Database health check failed",
-    );
-
-    return {
-      ok: false,
-      latencyMs: Date.now() - startedAt,
-      pool: {
-        total: pool.totalCount,
-        idle: pool.idleCount,
-        waiting: pool.waitingCount,
-      },
-    };
-  }
 }
 
 function toSafeRequestLog(req: Request) {

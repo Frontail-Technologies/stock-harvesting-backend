@@ -34,6 +34,22 @@ export const addWatchlistItemBodySchema = z
   })
   .strict();
 
+export const bulkAddWatchlistItemsBodySchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            exchange: exchangeSchema,
+            symbol: z.string().trim().min(1).max(64),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(500),
+  })
+  .strict();
+
 export const watchlistRelativeStrengthQuerySchema = z
   .object({
     limit: z.coerce.number().int().positive().max(500).default(200),

@@ -3,15 +3,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../db/client", () => ({ db: { select: vi.fn() } }));
 vi.mock("./trading-calendar", () => ({ getLatestExpectedTradingDay: vi.fn() }));
 vi.mock("../jobs/background-job-runs.service", () => ({ getLastSuccessfulScheduledRefresh: vi.fn() }));
+vi.mock("../market-stream/market-stream.provider-health", () => ({ getMarketStreamProviderHealth: vi.fn() }));
+vi.mock("../market-stream/market-stream.capabilities", () => ({ getProviderCapabilityState: vi.fn() }));
 
 import * as dbClientModule from "../../db/client";
 import * as tradingCalendarModule from "./trading-calendar";
 import * as backgroundJobRunsModule from "../jobs/background-job-runs.service";
+import * as providerHealthModule from "../market-stream/market-stream.provider-health";
+import * as capabilitiesModule from "../market-stream/market-stream.capabilities";
 import { getMarketDataHealth } from "./market-data.health";
 
 const db = vi.mocked(dbClientModule.db);
 const getLatestExpectedTradingDay = vi.mocked(tradingCalendarModule.getLatestExpectedTradingDay);
 const getLastSuccessfulScheduledRefresh = vi.mocked(backgroundJobRunsModule.getLastSuccessfulScheduledRefresh);
+const getMarketStreamProviderHealth = vi.mocked(providerHealthModule.getMarketStreamProviderHealth);
+const getProviderCapabilityState = vi.mocked(capabilitiesModule.getProviderCapabilityState);
 
 function selectResult(value: number) {
   const chain = {
@@ -27,6 +33,25 @@ describe("getMarketDataHealth", () => {
     vi.clearAllMocks();
     getLatestExpectedTradingDay.mockReturnValue("2026-09-11");
     getLastSuccessfulScheduledRefresh.mockResolvedValue(new Date("2026-09-11T10:20:00.000Z"));
+    getProviderCapabilityState.mockReturnValue({
+      realtime: "unavailable",
+      currentDayCandle: "unavailable",
+      completedDailyHistory: "available",
+      reason: "Function not enabled.",
+      lastCheckedAt: "2026-09-16T08:25:46.000Z",
+      retryAfter: "2026-09-16T08:35:46.000Z",
+    });
+    getMarketStreamProviderHealth.mockReturnValue([
+      {
+        provider: "global-datafeeds",
+        connected: true,
+        exchange: "BSE",
+        lastMessageTime: "2026-09-11T09:30:00.000Z",
+        activeSubscriptions: 1,
+        currentDayCandlesInMemory: 1,
+        lastError: null,
+      },
+    ]);
   });
 
   it("computes fresh/stale/bootstrapRequired counts purely from DB queries, no provider call", async () => {
@@ -46,6 +71,34 @@ describe("getMarketDataHealth", () => {
       stale: 15,
       bootstrapRequired: 5,
       lastSuccessfulRefresh: "2026-09-11T10:20:00.000Z",
+      liveDelayedFeed: [
+        {
+          provider: "global-datafeeds",
+          connected: true,
+          exchange: "BSE",
+          lastMessageTime: "2026-09-11T09:30:00.000Z",
+          activeSubscriptions: 1,
+          currentDayCandlesInMemory: 1,
+          lastError: null,
+        },
+      ],
+      providerCapabilities: [
+        {
+          provider: "global-datafeeds",
+          exchange: "BSE",
+          realtime: "unavailable",
+          currentDayCandle: "unavailable",
+          completedDailyHistory: "available",
+          reason: "Function not enabled.",
+          lastCheckedAt: "2026-09-16T08:25:46.000Z",
+          retryAfter: "2026-09-16T08:35:46.000Z",
+        },
+      ],
+      mechanisms: {
+        historicalDailySync: "GDF GetHistory (Delayed)",
+        currentPriceSnapshot: "GDF GetSnapshot (Delayed)",
+        liveFeed: "GDF SubscribeSnapshot (Delayed)",
+      },
     });
     expect(db.select).toHaveBeenCalledTimes(4);
   });

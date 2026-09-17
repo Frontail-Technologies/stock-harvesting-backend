@@ -1,5 +1,5 @@
 export const SCANNER_RULE_KEY = {
-  near250WeekHigh: "near_250_week_high",
+  near250WeekCloseHigh: "near_250_week_high",
 } as const;
 
 export const SCANNER_LOOKBACK_MULTIPLIERS = ["1x", "3x", "5x"] as const;

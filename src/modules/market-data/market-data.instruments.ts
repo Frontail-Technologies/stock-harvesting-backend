@@ -14,12 +14,24 @@ const INSTRUMENT_UPSERT_CHUNK_SIZE = 500;
 const INSTRUMENT_STATS_UPDATE_CHUNK_SIZE = 500;
 const POSTGRES_UNIQUE_VIOLATION = "23505";
 
+export type InstrumentBySymbolRow = {
+  id: string;
+  symbol: string;
+  instrumentToken: string;
+  provider: string;
+};
+
 export async function getInstrumentsBySymbol(symbols: string[], exchange: string = DEFAULT_EXCHANGE) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
-  if (uniqueSymbols.length === 0) return new Map<string, typeof instruments.$inferSelect>();
+  if (uniqueSymbols.length === 0) return new Map<string, InstrumentBySymbolRow>();
 
   const rows = await db
-    .select()
+    .select({
+      id: instruments.id,
+      symbol: instruments.symbol,
+      instrumentToken: instruments.instrumentToken,
+      provider: instruments.provider,
+    })
     .from(instruments)
     .where(and(eq(instruments.exchange, exchange), inArray(instruments.symbol, uniqueSymbols)));
 
@@ -60,7 +72,7 @@ export async function resolveInstrumentsForSymbols(identities: InstrumentIdentit
     symbolsByExchange.set(exchange, set);
   }
 
-  const resolved = new Map<string, typeof instruments.$inferSelect>();
+  const resolved = new Map<string, InstrumentBySymbolRow>();
   if (symbolsByExchange.size === 0) return resolved;
 
   const rowsByExchange = await Promise.all(

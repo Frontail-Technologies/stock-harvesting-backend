@@ -1,10 +1,14 @@
-import { and, eq } from "drizzle-orm";
-
-import { db } from "../../db/client";
 import { scannerDrawings } from "../../db/schema";
 import { DEFAULT_EXCHANGE, type CandleTimeframe } from "../../shared/constants";
 import { forbidden, notFound } from "../../shared/errors";
 import { normalizeSymbol } from "../../shared/normalize";
+import {
+  deleteDrawingRow,
+  findDrawingById,
+  findWorkspaceDrawingRows,
+  replaceWorkspaceDrawingRows,
+  updateDrawingRow,
+} from "./drawings.repository";
 
 type DrawingInput = {
   id?: string;
@@ -20,18 +24,12 @@ export async function getWorkspaceDrawings(input: {
   timeframe: CandleTimeframe;
   exchange?: string;
 }) {
-  const exchange = input.exchange ?? DEFAULT_EXCHANGE;
-  const rows = await db
-    .select()
-    .from(scannerDrawings)
-    .where(
-      and(
-        eq(scannerDrawings.userId, input.userId),
-        eq(scannerDrawings.exchange, exchange),
-        eq(scannerDrawings.symbol, normalizeSymbol(input.symbol)),
-        eq(scannerDrawings.timeframe, input.timeframe)
-      )
-    );
+  const rows = await findWorkspaceDrawingRows({
+    userId: input.userId,
+    symbol: normalizeSymbol(input.symbol),
+    timeframe: input.timeframe,
+    exchange: input.exchange ?? DEFAULT_EXCHANGE,
+  });
 
   return rows.map(toDrawingResponse);
 }
@@ -46,33 +44,12 @@ export async function replaceWorkspaceDrawings(input: {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
 
-  await db.transaction(async (tx) => {
-    await tx
-      .delete(scannerDrawings)
-      .where(
-        and(
-          eq(scannerDrawings.userId, input.userId),
-          eq(scannerDrawings.exchange, exchange),
-          eq(scannerDrawings.symbol, symbol),
-          eq(scannerDrawings.timeframe, input.timeframe)
-        )
-      );
-
-    if (input.drawings.length > 0) {
-      await tx.insert(scannerDrawings).values(
-        input.drawings.map((drawing) => ({
-          id: drawing.id,
-          userId: input.userId,
-          exchange,
-          symbol,
-          timeframe: input.timeframe,
-          drawingType: drawing.drawingType,
-          payload: drawing.payload,
-          locked: drawing.locked,
-          hidden: drawing.hidden,
-        }))
-      );
-    }
+  await replaceWorkspaceDrawingRows({
+    userId: input.userId,
+    symbol,
+    timeframe: input.timeframe,
+    exchange,
+    drawings: input.drawings,
   });
 
   return getWorkspaceDrawings({ ...input, exchange });
@@ -83,41 +60,22 @@ export async function patchDrawing(input: {
   id: string;
   patch: Partial<DrawingInput>;
 }) {
-  const [existing] = await db
-    .select()
-    .from(scannerDrawings)
-    .where(eq(scannerDrawings.id, input.id))
-    .limit(1);
+  const existing = await findDrawingById(input.id);
 
   if (!existing) throw notFound("Drawing not found");
   if (existing.userId !== input.userId) throw forbidden("Drawing belongs to another user");
 
-  const [updated] = await db
-    .update(scannerDrawings)
-    .set({
-      drawingType: input.patch.drawingType,
-      payload: input.patch.payload,
-      locked: input.patch.locked,
-      hidden: input.patch.hidden,
-      updatedAt: new Date(),
-    })
-    .where(eq(scannerDrawings.id, input.id))
-    .returning();
-
+  const updated = await updateDrawingRow({ id: input.id, patch: input.patch });
   return toDrawingResponse(updated);
 }
 
 export async function deleteDrawing(input: { userId: string; id: string }) {
-  const [existing] = await db
-    .select()
-    .from(scannerDrawings)
-    .where(eq(scannerDrawings.id, input.id))
-    .limit(1);
+  const existing = await findDrawingById(input.id);
 
   if (!existing) throw notFound("Drawing not found");
   if (existing.userId !== input.userId) throw forbidden("Drawing belongs to another user");
 
-  await db.delete(scannerDrawings).where(eq(scannerDrawings.id, input.id));
+  await deleteDrawingRow(input.id);
   return { ok: true };
 }
 

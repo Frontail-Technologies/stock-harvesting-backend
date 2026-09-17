@@ -49,6 +49,18 @@ function getExchangeLocalParts(exchange: string, at: Date) {
   };
 }
 
+// Today's actual exchange-local calendar date, IF today is a weekday -
+// null on a weekend. Deliberately distinct from getLatestExpectedTradingDay
+// (which resolves to the latest COMPLETED trading day, falling back a day
+// before market close): this is used only to decide whether a same-day
+// PROVISIONAL candle is even meaningful to look for, never to change what
+// counts as "completed" for historical/analytical reads.
+export function getExchangeTodayIfTradingDay(exchange: string, at: Date = new Date()): string | null {
+  const local = getExchangeLocalParts(exchange, at);
+  if (local.weekday === 0 || local.weekday === 6) return null;
+  return local.date;
+}
+
 export function shiftDateString(date: string, days: number) {
   const [year, month, day] = date.split("-").map(Number);
   const utcDate = new Date(Date.UTC(year, month - 1, day));

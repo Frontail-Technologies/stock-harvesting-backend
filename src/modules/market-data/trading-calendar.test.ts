@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getExchangeTodayIfTradingDay,
   getIsoWeekRange,
   getLatestExpectedTradingDay,
   getWeekEndingFriday,
@@ -227,5 +228,27 @@ describe("isConsecutiveIsoWeek", () => {
 
   it("is false for the same week", () => {
     expect(isConsecutiveIsoWeek("2026-09-10", "2026-09-07")).toBe(false);
+  });
+});
+
+describe("getExchangeTodayIfTradingDay", () => {
+  it("returns today's exchange-local date on a weekday", () => {
+    const at = new Date("2026-09-16T10:05:00Z"); // Wednesday, 15:35 IST
+    expect(getExchangeTodayIfTradingDay("BSE", at)).toBe("2026-09-16");
+  });
+
+  it("returns null on a Saturday", () => {
+    const at = new Date("2026-09-19T10:05:00Z");
+    expect(getExchangeTodayIfTradingDay("BSE", at)).toBeNull();
+  });
+
+  it("returns null on a Sunday", () => {
+    const at = new Date("2026-09-20T10:05:00Z");
+    expect(getExchangeTodayIfTradingDay("BSE", at)).toBeNull();
+  });
+
+  it("is independent of market close time - a weekday morning still returns today's date", () => {
+    const at = new Date("2026-09-16T02:00:00Z"); // 07:30 IST, before open
+    expect(getExchangeTodayIfTradingDay("BSE", at)).toBe("2026-09-16");
   });
 });

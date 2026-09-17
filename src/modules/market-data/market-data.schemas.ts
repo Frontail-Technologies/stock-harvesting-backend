@@ -50,6 +50,8 @@ export const candleQuerySchema = z
     timeframe: candleTimeframeSchema.default(DEFAULT_CANDLE_TIMEFRAME),
     from: z.string().date().optional(),
     to: z.string().date().optional(),
+    before: z.string().date().optional(),
+    limit: z.coerce.number().int().min(100).max(1000).optional(),
     exchange: exchangeSchema,
   })
   .strict();

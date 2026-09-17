@@ -58,7 +58,9 @@ Modules should not be invented before the work that needs them.
 
 - Layering: **HTTP → orchestration → business/domain logic → data access.**
   A route handler validates and delegates; it does not contain business
-  rules or raw queries.
+  rules or raw queries. `widget-preferences` (`routes.ts` → `controller.ts`
+  → `service.ts` → `repository.ts`) is the first module realizing this in
+  full, piloted 2026-09-17 - not yet rolled out to other modules.
 - Provider infrastructure (transport, auth, request shaping for a specific
   vendor) stays separate from business/domain calculations (metrics,
   evaluators). A calculation must be testable without a live provider.

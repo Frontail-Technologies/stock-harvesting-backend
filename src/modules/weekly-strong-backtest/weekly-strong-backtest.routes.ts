@@ -32,7 +32,7 @@ weeklyStrongBacktestRouter.get(
   validate({ params: collectionCodeParamsSchema, query: membershipChangesQuerySchema }),
   asyncHandler(async (req, res) => {
     const params = req.params as { code: string };
-    const query = req.query as unknown as { weekEnding: string; lookback: ScannerLookbackMultiplier };
+    const query = req.query as unknown as { weekEnding?: string; lookback: ScannerLookbackMultiplier };
     sendData(
       res,
       await getWeeklyStrongBacktestMembershipChanges({

@@ -50,6 +50,16 @@ export type ProviderSymbolDailyCandle = ProviderDailyCandle & {
   symbol: string;
 };
 
+export type ProviderSymbolSnapshot = {
+  symbol: string;
+  tradeTime: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+};
+
 export type ProviderInstrument = {
   exchange: string;
   symbol: string;
@@ -97,4 +107,9 @@ export interface DataProviderAdapter {
     symbols?: string[];
     exchangeCode?: string;
   }): Promise<ProviderSymbolDailyCandle[]>;
+  fetchDelayedSnapshot?(input: {
+    accessToken?: string;
+    symbols: string[];
+    exchangeCode?: string;
+  }): Promise<ProviderSymbolSnapshot[]>;
 }

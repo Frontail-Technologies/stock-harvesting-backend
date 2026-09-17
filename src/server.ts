@@ -4,6 +4,7 @@ import { createApp } from "./app";
 import { pool } from "./db/client";
 import {
   closeQueues,
+  scheduleCandleBootstrapReconciliation,
   scheduleRepeatableDailyCandleSync,
   scheduleRepeatableMarketDataSync,
 } from "./modules/jobs/queues";
@@ -39,6 +40,7 @@ server.listen(env.PORT, () => {
   logger.info({ port: env.PORT }, "Backend listening");
   void scheduleRepeatableMarketDataSync();
   void scheduleRepeatableDailyCandleSync();
+  void scheduleCandleBootstrapReconciliation();
 });
 
 async function shutdown(signal: string) {

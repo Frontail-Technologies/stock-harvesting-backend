@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../../db/client";
 import { candles } from "../../db/schema";
@@ -106,15 +106,18 @@ export async function readChartCandles(input: {
   timeframe: CandleTimeframe;
   from?: string;
   to?: string;
+  before?: string;
+  limit?: number;
 }) {
   const filters = [
     eq(candles.instrumentId, input.instrumentId),
     eq(candles.timeframe, input.timeframe),
     input.from ? gte(candles.time, input.from) : undefined,
     input.to ? lte(candles.time, input.to) : undefined,
+    input.before ? lt(candles.time, input.before) : undefined,
   ].filter(Boolean);
 
-  const rows = await db
+  const query = db
     .select({
       instrumentId: candles.instrumentId,
       time: candles.time,
@@ -126,9 +129,11 @@ export async function readChartCandles(input: {
     })
     .from(candles)
     .where(and(...filters))
-    .orderBy(asc(candles.time));
+    .orderBy(input.limit ? desc(candles.time) : asc(candles.time));
 
-  return rows;
+  const rows = input.limit ? await query.limit(input.limit) : await query;
+
+  return input.limit ? rows.reverse() : rows;
 }
 
 export async function readCandleDatesInRange(input: {
@@ -176,6 +181,39 @@ export async function readScannerDailyCloses(input: {
 }
 
 export type MetricCandleInstrumentInput = { instrumentId: string; symbol: string };
+
+export type MetricDailyClose = ScannerDailyClose & { symbol: string };
+
+export async function readMetricDailyCloses(input: {
+  instruments: MetricCandleInstrumentInput[];
+  from: string;
+  to?: string;
+}): Promise<MetricDailyClose[]> {
+  if (input.instruments.length === 0) return [];
+
+  const to = input.to ?? getTodayDate();
+  const merged: MetricDailyClose[] = [];
+
+  for (let start = 0; start < input.instruments.length; start += CANDLE_READ_SYMBOL_BATCH_SIZE) {
+    const batch = input.instruments.slice(start, start + CANDLE_READ_SYMBOL_BATCH_SIZE);
+    const rows = await db
+      .select({ symbol: candles.symbol, time: candles.time, close: candles.close })
+      .from(candles)
+      .where(
+        and(
+          eq(candles.timeframe, CANDLE_TIMEFRAME.day),
+          gte(candles.time, input.from),
+          lte(candles.time, to),
+          inArray(candles.instrumentId, batch.map((instrument) => instrument.instrumentId)),
+        ),
+      )
+      .orderBy(asc(candles.symbol), asc(candles.time));
+
+    merged.push(...rows.map((row) => ({ symbol: row.symbol, time: row.time, close: Number(row.close) })));
+  }
+
+  return merged;
+}
 
 export async function readMetricCandles(input: {
   instruments: MetricCandleInstrumentInput[];

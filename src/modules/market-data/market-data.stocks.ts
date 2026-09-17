@@ -140,9 +140,21 @@ export async function readStockRows(
 // reuses the existing (instrument_id, timeframe, time) unique index on
 // candles (its leading two columns already cover this lookup) - no new
 // index needed.
+const CHART_ELIGIBLE_SEARCH_CACHE_TTL_MS = 20_000;
+
 export async function searchChartEligibleBseStocks(
   input: { q: string; limit: number },
   dbClient: DbOrTx = db
+) {
+  const cacheKey = ["searchChartEligibleBseStocks", input.q, input.limit].join(":");
+  return getOrSetCache(cacheKey, CHART_ELIGIBLE_SEARCH_CACHE_TTL_MS, () =>
+    searchChartEligibleBseStocksUncached(input, dbClient)
+  );
+}
+
+async function searchChartEligibleBseStocksUncached(
+  input: { q: string; limit: number },
+  dbClient: DbOrTx
 ) {
   const rows = await dbClient
     .select({

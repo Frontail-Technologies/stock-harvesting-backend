@@ -29,4 +29,13 @@ export const GLOBAL_DATAFEEDS_MESSAGE_TYPE = {
   lastQuoteArrayResult: "LastQuoteArrayResult",
   subscribeRealtime: "SubscribeRealtime",
   realtimeResult: "RealtimeResult",
+  getSnapshot: "GetSnapshot",
+  snapshotResult: "SnapshotResult",
+  subscribeSnapshot: "SubscribeSnapshot",
+  realtimeSnapshotResult: "RealtimeSnapshotResult",
+  getExchangeSnapshot: "GetExchangeSnapshot",
+  exchangeSnapshotResult: "ExchangeSnapshotResult",
 } as const;
+
+export const GLOBAL_DATAFEEDS_SNAPSHOT_PERIODICITY = "MINUTE";
+export const GLOBAL_DATAFEEDS_SNAPSHOT_PERIOD = 1;

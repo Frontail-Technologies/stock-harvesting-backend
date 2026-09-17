@@ -7,16 +7,26 @@ vi.mock("../../market-data/market-data.instruments", () => ({
   resolveInstrumentsForSymbols: vi.fn(),
 }));
 
-const send = vi.fn().mockResolvedValue(undefined);
+const send = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const addDebugListener = vi.hoisted(() => vi.fn(() => () => {}));
+const markProviderCapabilityUnavailable = vi.hoisted(() => vi.fn());
+const isProviderCapabilityCoolingDown = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock("../../data-provider/adapters/global-datafeeds/global-datafeeds.websocket-client", () => ({
   globalDatafeedsClient: {
     addQuoteListener: vi.fn(() => () => {}),
-    addDebugListener: vi.fn(() => () => {}),
+    addDebugListener,
     addStatusListener: vi.fn(() => () => {}),
     send: (...args: unknown[]) => send(...args),
     close: vi.fn(),
   },
+}));
+
+vi.mock("../market-stream.capabilities", () => ({
+  isFunctionNotEnabledMessage: (value: unknown) => typeof value === "string" && /function not enabled/i.test(value),
+  isProviderCapabilityCoolingDown,
+  markProviderCapabilityAvailable: vi.fn(),
+  markProviderCapabilityUnavailable,
 }));
 
 vi.mock("../market-stream.hub", () => ({
@@ -28,6 +38,7 @@ const resolveInstrumentsForSymbols = vi.mocked(instrumentsModule.resolveInstrume
 beforeEach(() => {
   vi.clearAllMocks();
   send.mockResolvedValue(undefined);
+  isProviderCapabilityCoolingDown.mockReturnValue(false);
 });
 
 describe("GlobalDatafeedsMarketStreamProvider.subscribe", () => {
@@ -51,6 +62,24 @@ describe("GlobalDatafeedsMarketStreamProvider.subscribe", () => {
       { exchange: "BSE", symbol: "TCS" },
     ]);
     expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("subscribes via SubscribeSnapshot (delayed entitlement), not SubscribeRealtime", async () => {
+    resolveInstrumentsForSymbols.mockResolvedValue(
+      new Map([["BSE:TCS", { instrumentToken: "532540", provider: "global-datafeeds" } as never]])
+    );
+
+    const provider = new GlobalDatafeedsMarketStreamProvider();
+    await provider.subscribe([{ exchange: "BSE", symbol: "TCS" }]);
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MessageType: "SubscribeSnapshot",
+        Periodicity: "MINUTE",
+        Period: 1,
+      })
+    );
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ MessageType: "SubscribeRealtime" }));
   });
 
   it("preserves the existing fallback of subscribing with the raw symbol when no instrument row is found", async () => {
@@ -94,6 +123,35 @@ describe("GlobalDatafeedsMarketStreamProvider.subscribe", () => {
     await expect(
       provider.subscribe([{ exchange: "BSE", symbol: "KOTAKBANK" }])
     ).resolves.toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("classifies Function not enabled as unavailable current-day capability", async () => {
+    new GlobalDatafeedsMarketStreamProvider();
+    const debugListener = (addDebugListener as unknown as { mock: { calls: Array<[(event: unknown) => void]> } }).mock.calls.at(-1)?.[0];
+    expect(debugListener).toBeDefined();
+
+    debugListener?.({
+      stage: "response.unmatched",
+      messageType: "RequestError",
+      payload: { Message: "Function not enabled.", MessageType: "RequestError" },
+    });
+
+    expect(markProviderCapabilityUnavailable).toHaveBeenCalledWith({
+      provider: "global-datafeeds",
+      exchange: "BSE",
+      reason: "Function not enabled.",
+    });
+  });
+
+  it("skips provider subscribe while current-day capability is cooling down", async () => {
+    isProviderCapabilityCoolingDown.mockReturnValue(true);
+    resolveInstrumentsForSymbols.mockResolvedValue(new Map([["BSE:TCS", { instrumentToken: "532540" } as never]]));
+
+    const provider = new GlobalDatafeedsMarketStreamProvider();
+    await provider.subscribe([{ exchange: "BSE", symbol: "TCS" }]);
+
+    expect(resolveInstrumentsForSymbols).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 });

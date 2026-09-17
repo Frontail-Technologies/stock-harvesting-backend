@@ -4,7 +4,15 @@ import { db } from "../../db/client";
 import { instruments } from "../../db/schema";
 import { DEFAULT_EXCHANGE } from "../../shared/constants";
 import { getLastSuccessfulScheduledRefresh } from "../jobs/background-job-runs.service";
+import { getProviderCapabilityState, type MarketStreamCapabilityState } from "../market-stream/market-stream.capabilities";
+import { getMarketStreamProviderHealth, type MarketStreamProviderHealth } from "../market-stream/market-stream.provider-health";
 import { getLatestExpectedTradingDay } from "./trading-calendar";
+
+export type MarketDataHealthMechanisms = {
+  historicalDailySync: string;
+  currentPriceSnapshot: string;
+  liveFeed: string;
+};
 
 export type MarketDataHealth = {
   exchange: string;
@@ -14,6 +22,9 @@ export type MarketDataHealth = {
   stale: number;
   bootstrapRequired: number;
   lastSuccessfulRefresh: string | null;
+  liveDelayedFeed: MarketStreamProviderHealth[];
+  providerCapabilities: Array<MarketStreamCapabilityState & { provider: string; exchange?: string }>;
+  mechanisms: MarketDataHealthMechanisms;
 };
 
 export async function getMarketDataHealth(exchange: string = DEFAULT_EXCHANGE): Promise<MarketDataHealth> {
@@ -42,5 +53,18 @@ export async function getMarketDataHealth(exchange: string = DEFAULT_EXCHANGE): 
     stale: staleRow.value,
     bootstrapRequired: bootstrapRow.value,
     lastSuccessfulRefresh: lastSuccessfulRefresh ? lastSuccessfulRefresh.toISOString() : null,
+    liveDelayedFeed: getMarketStreamProviderHealth(),
+    providerCapabilities: [
+      {
+        provider: "global-datafeeds",
+        exchange: "BSE",
+        ...getProviderCapabilityState("global-datafeeds", "BSE"),
+      },
+    ],
+    mechanisms: {
+      historicalDailySync: "GDF GetHistory (Delayed)",
+      currentPriceSnapshot: "GDF GetSnapshot (Delayed)",
+      liveFeed: "GDF SubscribeSnapshot (Delayed)",
+    },
   };
 }

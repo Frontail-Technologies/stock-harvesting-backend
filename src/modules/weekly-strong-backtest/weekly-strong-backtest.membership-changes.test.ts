@@ -8,7 +8,7 @@ vi.mock("../market-data/market-data.candles", async () => {
   const actual = await vi.importActual<typeof import("../market-data/market-data.candles")>(
     "../market-data/market-data.candles",
   );
-  return { ...actual, readMetricCandles: vi.fn() };
+  return { ...actual, readMetricDailyCloses: vi.fn() };
 });
 vi.mock("../scanner/scanner-current-signal", () => ({
   resolveScannerSignalFromDailyCloses: vi.fn(),
@@ -26,7 +26,7 @@ import {
 
 const requireCollectionByCode = vi.mocked(marketCollectionsModule.requireCollectionByCode);
 const getActiveMemberInstrumentRows = vi.mocked(marketCollectionsModule.getActiveMemberInstrumentRows);
-const readMetricCandles = vi.mocked(candlesModule.readMetricCandles);
+const readMetricDailyCloses = vi.mocked(candlesModule.readMetricDailyCloses);
 const resolveScannerSignalFromDailyCloses = vi.mocked(scannerSignalModule.resolveScannerSignalFromDailyCloses);
 
 function member(symbol: string, exchange = "NSE", instrumentId = `${exchange}:${symbol}`) {
@@ -206,7 +206,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
   it("11: previous Scanner ON, current Scanner OFF -> Stocks Out", async () => {
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
-    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
     resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: false,
       effectiveLookbackWeeks: 250,
@@ -230,7 +230,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
   it("12: previous Scanner OFF, current Scanner ON -> Stocks In", async () => {
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
-    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
     resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
@@ -251,7 +251,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
   it("D: the task's canonical example via Scanner signals - previous [A,B,C], current [B,C,D] -> IN [D], OUT [A]", async () => {
     const [a, b, c, d] = [member("A"), member("B"), member("C"), member("D")];
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a, b, c, d]) as never);
-    readMetricCandles.mockResolvedValue(
+    readMetricDailyCloses.mockResolvedValue(
       [dailyRow("A"), dailyRow("B"), dailyRow("C"), dailyRow("D")] as never
     );
     const baseSignal = {
@@ -275,7 +275,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
   it("13: uses instrumentId identity, not symbol text - a symbol rename (same instrumentId) is unchanged", async () => {
     const renamed = member("NEWNAME", "NSE", "instrument-1");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([renamed]) as never);
-    readMetricCandles.mockResolvedValue([dailyRow("NEWNAME")] as never);
+    readMetricDailyCloses.mockResolvedValue([dailyRow("NEWNAME")] as never);
     resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
@@ -293,10 +293,52 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     expect(result.exitedStocks).toEqual([]);
   });
 
+  it("weekEnding is optional - when omitted, resolves and returns the naturally-computed current week without a match check", async () => {
+    const a = member("A");
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
+    readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
+    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: true,
+      effectiveLookbackWeeks: 250,
+      currentTime: "2026-09-08",
+      currentClose: 100,
+      entryTime: "2026-09-08",
+      entryClose: 100,
+      previousWeekMatched: false,
+      previousWeekTime: "2026-09-01",
+    } as never);
+
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1" });
+
+    expect(result.available).toBe(true);
+    expect(result.weekEnding).toBe(getWeekEndingFriday("2026-09-08"));
+    expect(result.enteredStocks).toEqual([{ instrumentId: a.instrumentId, symbol: "A", name: "A", exchange: "NSE" }]);
+  });
+
+  it("a caller-supplied weekEnding that mismatches the resolved current week is still rejected (validation only skipped when omitted, not weakened)", async () => {
+    const a = member("A");
+    getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
+    readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
+    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: true,
+      effectiveLookbackWeeks: 250,
+      currentTime: "2026-09-08",
+      currentClose: 100,
+      entryTime: "2026-09-08",
+      entryClose: 100,
+      previousWeekMatched: false,
+      previousWeekTime: "2026-09-01",
+    } as never);
+
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-08-01" });
+
+    expect(result.available).toBe(false);
+  });
+
   it("no members have a currently-fresh Scanner week -> unavailable", async () => {
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
-    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
     resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: false,
       effectiveLookbackWeeks: null,
@@ -322,13 +364,13 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-09-11" });
 
     expect(result.available).toBe(false);
-    expect(readMetricCandles).not.toHaveBeenCalled();
+    expect(readMetricDailyCloses).not.toHaveBeenCalled();
   });
 
   it("no earlier week exists at all -> previousWeekEnding is null and every current member counts as entered", async () => {
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
-    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
     resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
@@ -350,7 +392,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
   it("a requested week that doesn't match the current live Scanner week is unavailable, not silently substituted", async () => {
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
-    readMetricCandles.mockResolvedValue([dailyRow("A")] as never);
+    readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
     resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,

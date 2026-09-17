@@ -235,22 +235,30 @@ describe("ensureFreshDailyCandles - queue-backed dedupe", () => {
     expect(result).toEqual({ status: "failed", changed: false, latestExpectedDate: "2026-09-11" });
   });
 
-  it("a bootstrap-required completed job never re-enqueues (no provider bootstrap is triggered)", async () => {
+  it("removes a legacy bootstrap-required job and enqueues the now-supported bootstrap", async () => {
     const queue = fakeQueue();
-    queue.getJob.mockResolvedValue(
-      fakeJob("completed", resolvedWait(undefined), {
+    const legacyJob = fakeJob("completed", resolvedWait(undefined), {
         symbol: "NEWSYMBOL",
         status: "bootstrap-required",
         insertedDaily: 0,
         failedDates: [],
-      })
+      });
+    queue.getJob.mockResolvedValue(legacyJob);
+    queue.add.mockResolvedValue(
+      fakeJob("waiting", resolvedWait({
+        symbol: "NEWSYMBOL",
+        status: "updated",
+        insertedDaily: 32,
+        failedDates: [],
+      }))
     );
     getMarketDataQueue.mockReturnValue(queue as never);
 
     const result = await ensureFreshDailyCandles({ symbol: "NEWSYMBOL", exchange: "BSE" });
 
-    expect(result).toEqual({ status: "bootstrap-required", changed: false, latestExpectedDate: "2026-09-11" });
-    expect(queue.add).not.toHaveBeenCalled();
+    expect(legacyJob.remove).toHaveBeenCalledOnce();
+    expect(queue.add).toHaveBeenCalledOnce();
+    expect(result).toEqual({ status: "updated", changed: true, latestExpectedDate: "2026-09-11" });
   });
 
   it("the expected trading date advancing changes the job key, making the symbol eligible again", async () => {

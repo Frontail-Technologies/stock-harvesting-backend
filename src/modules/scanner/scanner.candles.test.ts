@@ -17,7 +17,7 @@ import * as candlesModule from "../market-data/market-data.candles";
 import * as instrumentsModule from "../market-data/market-data.instruments";
 import { getIsoWeekRange, resolveLatestCompletedWeekEnding } from "../market-data/trading-calendar";
 import { evaluateScannerWeeklySeries } from "./rules/scanner-weekly-rule";
-import { calculateNear250WeekHighScan } from "./rules/near-250-week-high";
+import { calculateNear250WeekCloseHighScan } from "./rules/near-250-week-close-high";
 import { deriveScannerWeeklyCloses, getScannerWeeklySeriesInput } from "./scanner.candles";
 
 const readScannerDailyCloses = vi.mocked(candlesModule.readScannerDailyCloses);
@@ -331,11 +331,11 @@ describe("getScannerWeeklySeriesInput", () => {
     const result = await getScannerWeeklySeriesInput("CURRENTMATCH", "BSE");
     expect(result?.isLatestWeekFresh).toBe(true);
 
-    const scan = calculateNear250WeekHighScan(result!.segments, result!.latestSegment, result!.isLatestWeekFresh, 50);
+    const scan = calculateNear250WeekCloseHighScan(result!.segments, result!.latestSegment, result!.isLatestWeekFresh, 50);
     expect(scan?.matched).toBe(true);
   });
 
-  it("the latest week being entirely missing produces an unavailable current verdict via calculateNear250WeekHighScan too", async () => {
+  it("the latest week being entirely missing produces an unavailable current verdict via calculateNear250WeekCloseHighScan too", async () => {
     const weekCount = 60;
     readScannerDailyCloses.mockResolvedValueOnce(
       buildFullWeeks(weekCount, { skipWeekIndex: weekCount - 1 })
@@ -344,7 +344,7 @@ describe("getScannerWeeklySeriesInput", () => {
     const result = await getScannerWeeklySeriesInput("SCANUNAVAILABLE", "BSE");
     expect(result?.isLatestWeekFresh).toBe(false);
 
-    const scan = calculateNear250WeekHighScan(result!.segments, result!.latestSegment, result!.isLatestWeekFresh, 50);
+    const scan = calculateNear250WeekCloseHighScan(result!.segments, result!.latestSegment, result!.isLatestWeekFresh, 50);
     expect(scan?.matched).toBeUndefined();
   });
 
@@ -461,7 +461,7 @@ describe("deriveScannerWeeklyCloses - inherits canonical weekly bucket timestamp
     const daily = [{ time: "2026-09-01", close: 250 }]; // Mon 2026-08-31 missing
     const weekly = deriveScannerWeeklyCloses(daily);
 
-    const scan = calculateNear250WeekHighScan([weekly], weekly, true, 1);
+    const scan = calculateNear250WeekCloseHighScan([weekly], weekly, true, 1);
 
     expect(scan?.highlightTimes).toEqual(["2026-08-31"]);
     expect(scan?.highlightTimes).not.toContain("2026-09-01");

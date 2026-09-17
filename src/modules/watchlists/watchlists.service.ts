@@ -227,6 +227,51 @@ export async function addWatchlistItem(input: {
   return toWatchlistItemResponse(row);
 }
 
+export async function bulkAddWatchlistItems(input: {
+  userId: string;
+  watchlistId: string;
+  items: Array<{ exchange: string; symbol: string }>;
+}) {
+  const watchlist = await getOwnedWatchlist(input.watchlistId, input.userId);
+  const uniqueItems = Array.from(
+    new Map(
+      input.items.map((item) => {
+        const normalized = {
+          exchange: item.exchange.toUpperCase(),
+          symbol: normalizeSymbol(item.symbol),
+        };
+        return [`${normalized.exchange}:${normalized.symbol}`, normalized] as const;
+      })
+    ).values()
+  );
+
+  const inserted = await db
+    .insert(watchlistItems)
+    .values(
+      uniqueItems.map((item, position) => ({
+        watchlistId: watchlist.id,
+        exchange: item.exchange,
+        symbol: item.symbol,
+        position,
+      }))
+    )
+    .onConflictDoNothing()
+    .returning();
+
+  if (inserted.length > 0) {
+    await db
+      .update(watchlists)
+      .set({ updatedAt: new Date() })
+      .where(eq(watchlists.id, watchlist.id));
+  }
+
+  return {
+    items: inserted.map(toWatchlistItemResponse),
+    added: inserted.length,
+    skipped: input.items.length - inserted.length,
+  };
+}
+
 export async function removeWatchlistItem(input: {
   userId: string;
   watchlistId: string;

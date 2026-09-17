@@ -70,6 +70,27 @@ describe("getChartCandles - DB-only read path", () => {
     expect(getEligibleProviderAdapter).not.toHaveBeenCalled();
     expect(getActiveProviderAccessToken).not.toHaveBeenCalled();
   });
+
+  it("returns a stable cursor for progressively loading older daily candles", async () => {
+    getInstrumentsBySymbol.mockResolvedValue(new Map([["TCS", { id: "i-1" } as never]]));
+    readChartCandles.mockResolvedValue([
+      { time: "2026-09-10", open: 1, high: 2, low: 0, close: 1, volume: 10 },
+      { time: "2026-09-11", open: 1, high: 2, low: 0, close: 1, volume: 10 },
+    ] as never);
+
+    const result = await getChartCandles({
+      symbol: "TCS",
+      timeframe: "1D" as never,
+      exchange: "BSE",
+      limit: 400,
+    });
+
+    expect(readChartCandles).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 400, before: undefined })
+    );
+    expect(result.nextBefore).toBe("2026-09-10");
+    expect(result.hasMore).toBe(false);
+  });
 });
 
 describe("getChartCandles - 1W timestamp is the week-ending Friday", () => {

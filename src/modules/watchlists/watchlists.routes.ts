@@ -4,6 +4,7 @@ import { sendCreated, sendData } from "../../shared/http";
 import { asyncHandler, getAuthUserId, requireAuth, validate } from "../../shared/middleware";
 import {
   addWatchlistItemBodySchema,
+  bulkAddWatchlistItemsBodySchema,
   createWatchlistBodySchema,
   updateWatchlistBodySchema,
   watchlistIdParamsSchema,
@@ -12,6 +13,7 @@ import {
 } from "./watchlists.schemas";
 import {
   addWatchlistItem,
+  bulkAddWatchlistItems,
   createWatchlist,
   deleteWatchlist,
   getWatchlist,
@@ -103,6 +105,22 @@ watchlistsRouter.post(
       ...req.body,
     });
     sendCreated(res, { item });
+  })
+);
+
+watchlistsRouter.post(
+  "/:id/items/bulk",
+  validate({ params: watchlistIdParamsSchema, body: bulkAddWatchlistItemsBodySchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { id: string };
+    sendCreated(
+      res,
+      await bulkAddWatchlistItems({
+        userId: getAuthUserId(req),
+        watchlistId: params.id,
+        items: req.body.items,
+      })
+    );
   })
 );
 

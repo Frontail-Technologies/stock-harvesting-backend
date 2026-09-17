@@ -165,15 +165,22 @@ describe("refreshDailyCandles - gap repair", () => {
     expect(result.failedDates).toEqual(["2026-09-11"]);
   });
 
-  it("reports bootstrap-required and never calls the provider for a symbol with zero stored history", async () => {
+  it("bootstraps full history for a symbol with zero stored candles", async () => {
     readCandleHistoryRange.mockResolvedValue(null);
-    const fetchDailyCandles = vi.fn();
+    readCandleDatesInRange
+      .mockResolvedValueOnce(new Set())
+      .mockResolvedValueOnce(new Set(["2026-09-11"]));
+    const fetchDailyCandles = vi.fn().mockResolvedValue([providerCandle("2026-09-11")]);
     getEligibleProviderAdapter.mockResolvedValue({ providerKey: "eodhd", fetchDailyCandles } as never);
 
     const result = await refreshDailyCandles({ symbol: "NOHISTORY", exchange: "BSE" });
 
-    expect(result.status).toBe("bootstrap-required");
-    expect(fetchDailyCandles).not.toHaveBeenCalled();
+    expect(result.status).toBe("updated");
+    expect(result.insertedDaily).toBe(1);
+    expect(fetchDailyCandles).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "NOHISTORY", to: "2026-09-11" })
+    );
+    expect(fetchDailyCandles.mock.calls[0]?.[0].from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it("reports provider-empty when the provider returns no rows for the planned range", async () => {
@@ -212,15 +219,22 @@ describe("syncDailyCandlesForActiveInstruments", () => {
   it("produces a job summary with processed/updated/repaired/alreadyCurrent/bootstrapRequired/failed fields", async () => {
     mockActiveInstruments(["ONE"]);
     readCandleHistoryRange.mockResolvedValue(null);
+    readCandleDatesInRange
+      .mockResolvedValueOnce(new Set())
+      .mockResolvedValueOnce(new Set(["2026-09-11"]));
+    getEligibleProviderAdapter.mockResolvedValue({
+      providerKey: "eodhd",
+      fetchDailyCandles: vi.fn().mockResolvedValue([providerCandle("2026-09-11")]),
+    } as never);
 
     const summary = await syncDailyCandlesForActiveInstruments("BSE");
 
     expect(summary).toMatchObject({
       processed: 1,
-      updated: 0,
+      updated: 1,
       repaired: 0,
       alreadyCurrent: 0,
-      bootstrapRequired: 1,
+      bootstrapRequired: 0,
       failed: 0,
       failedSymbols: [],
     });

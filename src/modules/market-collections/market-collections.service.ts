@@ -556,6 +556,7 @@ export async function importCollectionCsv(input: {
   invalidateCacheByPrefix(`collectionMembers:${code}:`);
   invalidateCacheByPrefix(`collectionRelativeStrength:${code}:`);
   invalidateCacheByPrefix(`collectionWeeklyStrongStocks:${code}`);
+  invalidateCacheByPrefix(`collectionMembershipChanges:${code}`);
   invalidateCacheByPrefix(`collectionWeeklyStrongBacktest:${code}`);
   // The authoritative invalidation for the persisted snapshot (the in-process caches above are just a safety-net layer); the next read of either metric type recomputes once and re-persists.
   await invalidateCollectionSnapshots(collectionId);

@@ -1,12 +1,18 @@
-import { and, eq } from "drizzle-orm";
 import webPush from "web-push";
 
-import { db } from "../../db/client";
 import { pushSubscriptions } from "../../db/schema";
 import { env } from "../../shared/env";
 import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import type { PriceAlertCondition } from "../price-alerts/price-alerts.types";
+import {
+  deletePushSubscriptionById,
+  deletePushSubscriptionRow,
+  findPushSubscriptionByEndpoint,
+  findPushSubscriptionsByUser,
+  insertPushSubscription,
+  updatePushSubscription,
+} from "./push-subscriptions.repository";
 
 type PushSubscriptionInput = {
   endpoint: string;
@@ -40,44 +46,31 @@ export async function upsertPushSubscription(input: {
   subscription: PushSubscriptionInput;
   userAgent?: string;
 }) {
-  const [existing] = await db
-    .select()
-    .from(pushSubscriptions)
-    .where(eq(pushSubscriptions.endpoint, input.subscription.endpoint))
-    .limit(1);
+  const existing = await findPushSubscriptionByEndpoint(input.subscription.endpoint);
 
   if (existing) {
-    const [row] = await db
-      .update(pushSubscriptions)
-      .set({
-        userId: input.userId,
-        p256dh: input.subscription.keys.p256dh,
-        auth: input.subscription.keys.auth,
-        userAgent: input.userAgent,
-        updatedAt: new Date(),
-      })
-      .where(eq(pushSubscriptions.id, existing.id))
-      .returning();
-    return toPushSubscriptionResponse(row);
-  }
-
-  const [row] = await db
-    .insert(pushSubscriptions)
-    .values({
+    const row = await updatePushSubscription({
+      id: existing.id,
       userId: input.userId,
-      endpoint: input.subscription.endpoint,
       p256dh: input.subscription.keys.p256dh,
       auth: input.subscription.keys.auth,
       userAgent: input.userAgent,
-    })
-    .returning();
+    });
+    return toPushSubscriptionResponse(row);
+  }
+
+  const row = await insertPushSubscription({
+    userId: input.userId,
+    endpoint: input.subscription.endpoint,
+    p256dh: input.subscription.keys.p256dh,
+    auth: input.subscription.keys.auth,
+    userAgent: input.userAgent,
+  });
   return toPushSubscriptionResponse(row);
 }
 
 export async function deletePushSubscription(input: { userId: string; endpoint: string }) {
-  await db
-    .delete(pushSubscriptions)
-    .where(and(eq(pushSubscriptions.userId, input.userId), eq(pushSubscriptions.endpoint, input.endpoint)));
+  await deletePushSubscriptionRow(input);
   return { ok: true };
 }
 
@@ -94,10 +87,7 @@ export async function sendPriceAlertNotification(input: {
     return;
   }
 
-  const rows = await db
-    .select()
-    .from(pushSubscriptions)
-    .where(eq(pushSubscriptions.userId, input.userId));
+  const rows = await findPushSubscriptionsByUser(input.userId);
 
   const title = `${input.symbol} price alert triggered`;
   const body = `${input.symbol} is ${input.condition.toLowerCase()} ${input.targetPrice}. Current price: ${input.price}.`;
@@ -127,7 +117,7 @@ export async function sendPriceAlertNotification(input: {
           ? Number((error as { statusCode?: unknown }).statusCode)
           : null;
         if (statusCode === 404 || statusCode === 410) {
-          await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, row.id));
+          await deletePushSubscriptionById(row.id);
           return;
         }
         logger.warn(

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { toClientScanMetrics } from "./scanner.service";
 
 // API response minimization (docs/DOMAIN_BOUNDARIES.md) - locks in that
-// the scanner results API never forwards calculateNear250WeekHighScan's
+// the scanner results API never forwards calculateNear250WeekCloseHighScan's
 // raw diagnostic values (highestClose250, threshold85, etc.) to the
 // client, only the boolean the UI actually renders. A regression here
 // would make the rule's own ratio trivially recoverable from a single API

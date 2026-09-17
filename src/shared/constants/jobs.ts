@@ -7,6 +7,7 @@ export const JOB_NAMES = {
   priceRefresh: "price-refresh",
   dailyCandleSync: "daily-candle-sync",
   chartCandleEnsureFresh: "chart-candle-ensure-fresh",
+  candleBootstrapReconcile: "candle-bootstrap-reconcile",
   weeklyStrongBacktestBackfill: "weekly-strong-backtest-backfill",
   weeklyStrongBacktestHistoricalRebuild: "weekly-strong-backtest-historical-rebuild",
   collectionPrepare: "collection-prepare",

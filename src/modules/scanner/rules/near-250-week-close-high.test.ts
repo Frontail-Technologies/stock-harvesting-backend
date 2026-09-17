@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { calculateNear250WeekHighScan } from "./near-250-week-high";
+import { calculateNear250WeekCloseHighScan } from "./near-250-week-close-high";
 import { evaluateScannerWeeklySeries, type ScannerWeeklyCandle } from "./scanner-weekly-rule";
 
 function buildWeeklySeries(weeks: number, weeklyClose: (index: number) => number, offset = 0): ScannerWeeklyCandle[] {
@@ -10,11 +10,11 @@ function buildWeeklySeries(weeks: number, weeklyClose: (index: number) => number
   }));
 }
 
-describe("near-250-week-high scan (Scanner live path) - single continuous segment", () => {
+describe("near-250-week-close-high scan (Scanner live path) - single continuous segment", () => {
   it("matches when the weekly close is within 15% of its rolling weekly-close high", () => {
     const weeklyCandles = buildWeeklySeries(250, (index) => (index === 10 ? 1000 : 900));
 
-    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
+    const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result?.matched).toBe(true);
     expect(result?.highlightTimes).toContain(weeklyCandles[weeklyCandles.length - 1].time);
@@ -23,7 +23,7 @@ describe("near-250-week-high scan (Scanner live path) - single continuous segmen
   it("does not depend on daily candles at all - the qualification rule takes only weekly closes", () => {
     const weeklyCandles = buildWeeklySeries(250, (index) => (index === 10 ? 1000 : 900));
 
-    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
+    const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result?.matched).toBe(true);
   });
@@ -31,7 +31,7 @@ describe("near-250-week-high scan (Scanner live path) - single continuous segmen
   it("does not match when the weekly close is well below its rolling weekly-close high", () => {
     const weeklyCandles = buildWeeklySeries(250, (index) => (index === 10 ? 1000 : 500));
 
-    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
+    const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result?.matched).toBe(false);
   });
@@ -39,7 +39,7 @@ describe("near-250-week-high scan (Scanner live path) - single continuous segmen
   it("returns null when there isn't even a 1x (50-week) lookback tier of weekly history available", () => {
     const weeklyCandles = buildWeeklySeries(49, () => 900);
 
-    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
+    const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result).toBeNull();
   });
@@ -47,7 +47,7 @@ describe("near-250-week-high scan (Scanner live path) - single continuous segmen
   it("falls back to a smaller lookback tier for the CURRENT verdict when the full requested window isn't available", () => {
     const weeklyCandles = buildWeeklySeries(150, (index) => (index === 10 ? 1000 : 900));
 
-    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
+    const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result?.metrics.lookbackWeeks).toBe(150);
     expect(result?.matched).toBe(true);
@@ -56,7 +56,7 @@ describe("near-250-week-high scan (Scanner live path) - single continuous segmen
   it("uses the effective fallback tier for highlightTimes when the requested window is longer than the segment", () => {
     const weeklyCandles = buildWeeklySeries(150, (index) => (index === 10 ? 1000 : 900));
 
-    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 250);
+    const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 250);
 
     expect(result?.metrics.lookbackWeeks).toBe(150);
     expect(result?.matched).toBe(true);
@@ -69,7 +69,7 @@ describe("near-250-week-high scan (Scanner live path) - single continuous segmen
     // trivially its own trailing high.
     const weeklyCandles = buildWeeklySeries(weeks, (index) => 500 + index);
 
-    const result = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, 50);
+    const result = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, 50);
 
     expect(result?.highlightTimes).not.toContain(weeklyCandles[0].time);
     expect(result?.highlightTimes).not.toContain(weeklyCandles[48].time);
@@ -82,7 +82,7 @@ describe("near-250-week-high scan (Scanner live path) - single continuous segmen
     const weeklyCandles = buildWeeklySeries(250, (index) => (index % 20 === 0 ? 1000 : 800));
     const lookbackWeeks = 250;
 
-    const scan = calculateNear250WeekHighScan([weeklyCandles], weeklyCandles, true, lookbackWeeks);
+    const scan = calculateNear250WeekCloseHighScan([weeklyCandles], weeklyCandles, true, lookbackWeeks);
     const direct = evaluateScannerWeeklySeries(weeklyCandles, lookbackWeeks);
 
     const expectedHighlightTimes = direct.filter((point) => point.passes).map((point) => point.time);
@@ -95,7 +95,7 @@ describe("current qualification unavailable does not erase historical highlightT
   it("returns historical matches even when isLatestWeekFresh is false", () => {
     const historical = buildWeeklySeries(60, (index) => 500 + index);
 
-    const result = calculateNear250WeekHighScan([historical], historical, false, 50);
+    const result = calculateNear250WeekCloseHighScan([historical], historical, false, 50);
 
     expect(result).not.toBeNull();
     expect(result?.matched).toBeUndefined();
@@ -106,7 +106,7 @@ describe("current qualification unavailable does not erase historical highlightT
     const historical = buildWeeklySeries(60, (index) => 500 + index);
     const shortLatest = buildWeeklySeries(10, () => 100, 1000);
 
-    const result = calculateNear250WeekHighScan([historical, shortLatest], shortLatest, true, 50);
+    const result = calculateNear250WeekCloseHighScan([historical, shortLatest], shortLatest, true, 50);
 
     expect(result?.matched).toBeUndefined();
     expect(result?.highlightTimes.length).toBeGreaterThan(0);
@@ -118,7 +118,7 @@ describe("REQUIRED REGRESSION - TCS/LALPATHLAB class (historical bands survive a
     const olderSegment = buildWeeklySeries(220, (index) => 500 + index); // monotonically rising -> passes from index 49 onward
     const recentShortSegment = buildWeeklySeries(20, () => 100, 1000); // far short of the 50-week floor
 
-    const result = calculateNear250WeekHighScan(
+    const result = calculateNear250WeekCloseHighScan(
       [olderSegment, recentShortSegment],
       recentShortSegment,
       false, // latest completed week is invalid/partial - not fresh

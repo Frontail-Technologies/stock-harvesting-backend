@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -59,6 +60,10 @@ export const instruments = pgTable(
     exchangeActiveChangePctIdx: index(
       "instruments_exchange_active_change_pct_idx",
     ).on(table.exchange, table.active, table.latestChangePct),
+    symbolTrgmIdx: index("instruments_symbol_trgm_idx")
+      .using("gin", sql`${table.symbol} gin_trgm_ops`),
+    nameTrgmIdx: index("instruments_name_trgm_idx")
+      .using("gin", sql`${table.name} gin_trgm_ops`),
     exchangeSymbolUnique: unique().on(table.exchange, table.symbol),
     providerTokenUnique: unique().on(table.provider, table.instrumentToken),
   }),

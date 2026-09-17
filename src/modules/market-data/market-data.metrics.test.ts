@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Covers the analytical data-preparation/orchestration moved into this
  * module in Phase 9. Existing coverage (market-data.55-day-change.test.ts,
- * weekly-strong-evaluator.test.ts, near-250-week-high.test.ts) already
+ * weekly-strong-evaluator.test.ts, near-250-week-close-high.test.ts) already
  * proves the 55-day formula and the Weekly Strong evaluator's own rules -
  * this file does NOT re-test those. It proves ORCHESTRATION: which candles
  * get fetched under which conditions (empty input, seed-backfill fallback),
@@ -429,8 +429,8 @@ describe("computeWeeklyStrongStocks orchestration", () => {
 
     // Task test 4: chart yellow-band first Friday equals table In Since -
     // both are literally the same getWeekEndingFriday(highlightTimes[index])
-    // computation the chart's own calculateNear250WeekHighScan pipeline
-    // produces (see near-250-week-high.ts), reused here rather than
+    // computation the chart's own calculateNear250WeekCloseHighScan pipeline
+    // produces (see near-250-week-close-high.ts), reused here rather than
     // reimplemented, so this is true by construction; asserted directly
     // against the raw candle date to make that visible.
     it("4: table In Since equals the chart's own week-ending Friday for the same streak-start candle", async () => {
@@ -481,7 +481,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
       // series (like a false week would) - classifyScannerWeeklySeries
       // partitions on any >7-day jump between consecutive weeks into
       // SEPARATE segments (scanner-weekly-series-safety.ts), and
-      // calculateNear250WeekHighScan concatenates every segment's own
+      // calculateNear250WeekCloseHighScan concatenates every segment's own
       // passing weeks into one combined highlightTimes array. So this test
       // builds two independently full-sized (251-week) segments - both big
       // enough for the exact same 250-week tier resolveScannerInSince
@@ -538,7 +538,7 @@ describe("computeWeeklyStrongStocks orchestration", () => {
     });
 
     it("a matched signal whose latest segment uses a fallback tier reports that segment's current streak", async () => {
-      // calculateNear250WeekHighScan's own `matched` falls back to a
+      // calculateNear250WeekCloseHighScan's own `matched` falls back to a
       // smaller tier (getEffectiveScannerLookbackWeeks) when the latest
       // segment is shorter than the requested lookback, but its
       // highlightTimes evaluates every segment at the full REQUESTED

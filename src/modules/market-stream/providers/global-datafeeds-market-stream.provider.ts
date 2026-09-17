@@ -4,11 +4,21 @@ import { getErrorMessage } from "../../../shared/errors";
 import { logger } from "../../../shared/logger";
 import {
   GLOBAL_DATAFEEDS_MESSAGE_TYPE,
+  GLOBAL_DATAFEEDS_SNAPSHOT_PERIOD,
+  GLOBAL_DATAFEEDS_SNAPSHOT_PERIODICITY,
 } from "../../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
 import type { GlobalDatafeedsQuoteRow } from "../../data-provider/adapters/global-datafeeds/global-datafeeds.types";
 import { globalDatafeedsClient } from "../../data-provider/adapters/global-datafeeds/global-datafeeds.websocket-client";
 import { resolveInstrumentsForSymbols } from "../../market-data/market-data.instruments";
+import { applyProviderDailyCandle } from "../market-stream-candles";
+import {
+  isFunctionNotEnabledMessage,
+  isProviderCapabilityCoolingDown,
+  markProviderCapabilityAvailable,
+  markProviderCapabilityUnavailable,
+} from "../market-stream.capabilities";
 import { publishMarketStreamEvent } from "../market-stream.hub";
+import { updateProviderConnection, updateProviderLastMessage } from "../market-stream.provider-health";
 import { streamSymbolKey } from "../market-stream.utils";
 import type { MarketStreamSymbol } from "../market-stream.types";
 
@@ -43,6 +53,15 @@ export class GlobalDatafeedsMarketStreamProvider {
     this.handleQuote(quote);
   });
   private removeDebugListener = globalDatafeedsClient.addDebugListener((event) => {
+    const payload = event.payload as { Message?: unknown } | undefined;
+    const message = event.message ?? (typeof payload?.Message === "string" ? payload.Message : undefined);
+    if (isFunctionNotEnabledMessage(message)) {
+      markProviderCapabilityUnavailable({
+        provider: DATA_PROVIDER_KEY.globalDatafeeds,
+        exchange: "BSE",
+        reason: message ?? "Function not enabled",
+      });
+    }
     if (
       event.stage === "response.unmatched" ||
       event.stage === "request.timeout" ||
@@ -61,6 +80,12 @@ export class GlobalDatafeedsMarketStreamProvider {
     }
   });
   private removeStatusListener = globalDatafeedsClient.addStatusListener((connected, message) => {
+    updateProviderConnection({
+      provider: DATA_PROVIDER_KEY.globalDatafeeds,
+      connected,
+      exchange: "BSE",
+      message,
+    });
     publishMarketStreamEvent({
       type: "market.provider.status",
       data: {
@@ -78,6 +103,16 @@ export class GlobalDatafeedsMarketStreamProvider {
       isGlobalDatafeedsExchange(symbol.exchange)
     );
     if (requestedSymbols.length === 0) return;
+    if (isProviderCapabilityCoolingDown(DATA_PROVIDER_KEY.globalDatafeeds, "BSE")) {
+      logger.info(
+        {
+          provider: DATA_PROVIDER_KEY.globalDatafeeds,
+          requested: requestedSymbols.length,
+        },
+        "Global Datafeeds stream subscribe skipped: current-day capability unavailable"
+      );
+      return;
+    }
 
     let resolved: GlobalDatafeedsSubscription[];
     try {
@@ -164,9 +199,11 @@ export class GlobalDatafeedsMarketStreamProvider {
   ) {
     try {
       await globalDatafeedsClient.send({
-        MessageType: GLOBAL_DATAFEEDS_MESSAGE_TYPE.subscribeRealtime,
+        MessageType: GLOBAL_DATAFEEDS_MESSAGE_TYPE.subscribeSnapshot,
         Exchange: subscription.exchange,
         InstrumentIdentifier: subscription.instrumentIdentifier,
+        Periodicity: GLOBAL_DATAFEEDS_SNAPSHOT_PERIODICITY,
+        Period: GLOBAL_DATAFEEDS_SNAPSHOT_PERIOD,
         Unsubscribe: unsubscribe ? "true" : "false",
       });
     } catch (error) {
@@ -231,6 +268,11 @@ export class GlobalDatafeedsMarketStreamProvider {
 
     const time = toIsoTime(quote.LastTradeTime ?? quote.ServerTime);
     const volume = toFiniteNumber(quote.TotalQtyTraded) ?? toFiniteNumber(quote.TradedQty);
+    updateProviderLastMessage({
+      provider: DATA_PROVIDER_KEY.globalDatafeeds,
+      exchange: subscription.exchange,
+      time,
+    });
     const tick = {
       exchange: subscription.exchange,
       symbol: subscription.symbol,
@@ -243,6 +285,7 @@ export class GlobalDatafeedsMarketStreamProvider {
       type: "market.tick",
       data: tick,
     });
+    markProviderCapabilityAvailable(DATA_PROVIDER_KEY.globalDatafeeds, subscription.exchange);
     logger.debug(
       {
         exchange: subscription.exchange,
@@ -257,20 +300,17 @@ export class GlobalDatafeedsMarketStreamProvider {
     const high = toFiniteNumber(quote.High);
     const low = toFiniteNumber(quote.Low);
     if (open !== undefined && high !== undefined && low !== undefined) {
-      publishMarketStreamEvent({
-        type: "market.candle.update",
-        data: {
+      const candleEvent = applyProviderDailyCandle({
           exchange: subscription.exchange,
           symbol: subscription.symbol,
-          timeframe: "1D",
           time,
           open,
           high,
           low,
           close: price,
           volume,
-        },
       });
+      if (candleEvent) publishMarketStreamEvent(candleEvent);
     }
   }
 

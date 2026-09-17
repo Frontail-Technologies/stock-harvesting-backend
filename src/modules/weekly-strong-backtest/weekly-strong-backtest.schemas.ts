@@ -22,7 +22,8 @@ export const membershipChangesQuerySchema = z
     weekEnding: z
       .string()
       .trim()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, "weekEnding must be YYYY-MM-DD"),
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "weekEnding must be YYYY-MM-DD")
+      .optional(),
     lookback: z.enum(SCANNER_LOOKBACK_MULTIPLIERS).default(DEFAULT_SCANNER_LOOKBACK),
   })
   .strict();

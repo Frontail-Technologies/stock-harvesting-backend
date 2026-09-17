@@ -14,6 +14,8 @@ import {
   stockListQuerySchema,
   type MoveFilter,
 } from "./market-data.schemas";
+import { fetchCurrentDayDelayedCandle } from "./market-data.candle-sync";
+import { getProviderCapabilityState } from "../market-stream/market-stream.capabilities";
 import {
   ensureFreshDailyCandles,
   getChartCandles,
@@ -146,7 +148,24 @@ marketDataRouter.post(
   validate({ body: ensureFreshCandlesBodySchema }),
   asyncHandler(async (req, res) => {
     const body = req.body as { symbol: string; exchange: string };
-    sendData(res, await ensureFreshDailyCandles(body));
+    sendData(res, await ensureFreshDailyCandles({ ...body, waitForCompletion: false }));
+  })
+);
+
+marketDataRouter.get(
+  "/charts/:symbol/current-day-candle",
+  validate({ params: candleParamsSchema, query: publicCandleQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { symbol: string };
+    const query = req.query as unknown as { exchange: string };
+    const candle = await fetchCurrentDayDelayedCandle({ symbol: params.symbol, exchange: query.exchange });
+    sendData(res, {
+      candle,
+      capability:
+        query.exchange === "BSE"
+          ? getProviderCapabilityState("global-datafeeds", "BSE")
+          : null,
+    });
   })
 );
 
@@ -159,6 +178,8 @@ marketDataRouter.get(
       timeframe: CandleTimeframe;
       from?: string;
       to?: string;
+      before?: string;
+      limit?: number;
       exchange: string;
     };
     const result = await getChartCandles({
@@ -166,6 +187,8 @@ marketDataRouter.get(
       timeframe: query.timeframe,
       from: query.from,
       to: query.to,
+      before: query.before,
+      limit: query.limit,
       exchange: query.exchange,
     });
 

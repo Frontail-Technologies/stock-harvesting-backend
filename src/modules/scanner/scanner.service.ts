@@ -1,14 +1,10 @@
-import { and, desc, eq } from "drizzle-orm";
-
-import { db } from "../../db/client";
-import { scanResults } from "../../db/schema";
 import {
   CANDLE_TIMEFRAME,
   DEFAULT_EXCHANGE,
   type CandleTimeframe,
 } from "../../shared/constants";
 import { normalizeSymbol } from "../../shared/normalize";
-import { calculateNear250WeekHighScan } from "./rules/near-250-week-high";
+import { calculateNear250WeekCloseHighScan } from "./rules/near-250-week-close-high";
 import { computeSymbolBreakoutBacktest } from "./scanner.backtest";
 import { getScannerWeeklySeriesInput } from "./scanner.candles";
 import {
@@ -17,6 +13,7 @@ import {
   SCANNER_RULE_KEY,
   type ScannerLookbackMultiplier,
 } from "./scanner.constants";
+import { findScanResultRows } from "./scanner.repository";
 
 export async function listScannerResults(input: {
   symbol?: string;
@@ -28,26 +25,20 @@ export async function listScannerResults(input: {
 }) {
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
   if (input.symbol) {
-    const liveResult = await calculateCurrentNear250WeekHighResult({
+    const liveResult = await calculateCurrentNear250WeekCloseHighResult({
       ...input,
       exchange,
     });
     return liveResult ? [liveResult] : [];
   }
 
-  const filters = [
-    eq(scanResults.exchange, exchange),
-    eq(scanResults.timeframe, input.timeframe),
-    input.symbol ? eq(scanResults.symbol, normalizeSymbol(input.symbol)) : undefined,
-    input.rule ? eq(scanResults.ruleKey, input.rule) : undefined,
-  ].filter(Boolean);
-
-  const rows = await db
-    .select()
-    .from(scanResults)
-    .where(and(...filters))
-    .orderBy(desc(scanResults.createdAt))
-    .limit(input.limit);
+  const rows = await findScanResultRows({
+    exchange,
+    timeframe: input.timeframe,
+    symbol: input.symbol ? normalizeSymbol(input.symbol) : undefined,
+    rule: input.rule,
+    limit: input.limit,
+  });
 
   const savedResults = rows.map((result) => ({
     id: result.id,
@@ -77,7 +68,7 @@ export async function getScannerBacktest(input: {
   );
 }
 
-async function calculateCurrentNear250WeekHighResult(input: {
+async function calculateCurrentNear250WeekCloseHighResult(input: {
   symbol?: string;
   timeframe: CandleTimeframe;
   rule?: string;
@@ -86,7 +77,7 @@ async function calculateCurrentNear250WeekHighResult(input: {
 }) {
   if (!input.symbol) return null;
   if (input.timeframe !== CANDLE_TIMEFRAME.week) return null;
-  if (input.rule && input.rule !== SCANNER_RULE_KEY.near250WeekHigh) return null;
+  if (input.rule && input.rule !== SCANNER_RULE_KEY.near250WeekCloseHigh) return null;
 
   const symbol = normalizeSymbol(input.symbol);
   const seriesInput = await getScannerWeeklySeriesInput(symbol, input.exchange);
@@ -94,7 +85,7 @@ async function calculateCurrentNear250WeekHighResult(input: {
 
   const lookback = input.lookback ?? DEFAULT_SCANNER_LOOKBACK;
   const lookbackWeeks = SCANNER_LOOKBACK_WEEKS[lookback];
-  const scan = calculateNear250WeekHighScan(
+  const scan = calculateNear250WeekCloseHighScan(
     seriesInput.segments,
     seriesInput.latestSegment,
     seriesInput.isLatestWeekFresh,
@@ -104,8 +95,8 @@ async function calculateCurrentNear250WeekHighResult(input: {
   if (!scan) return null;
 
   return {
-    id: `${SCANNER_RULE_KEY.near250WeekHigh}:${input.exchange}:${symbol}:${lookback}:${scan.endTime}`,
-    ruleKey: SCANNER_RULE_KEY.near250WeekHigh,
+    id: `${SCANNER_RULE_KEY.near250WeekCloseHigh}:${input.exchange}:${symbol}:${lookback}:${scan.endTime}`,
+    ruleKey: SCANNER_RULE_KEY.near250WeekCloseHigh,
     exchange: input.exchange,
     symbol,
     timeframe: CANDLE_TIMEFRAME.week,
