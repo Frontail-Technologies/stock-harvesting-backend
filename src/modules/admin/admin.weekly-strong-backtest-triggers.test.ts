@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../db/client", () => ({ db: { insert: vi.fn(), update: vi.fn() } }));
+vi.mock("../../db/client", () => ({ db: { insert: vi.fn(), update: vi.fn(), select: vi.fn() } }));
 vi.mock("../../shared/audit/audit.service", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("../jobs/queues", () => ({ getMarketDataQueue: vi.fn(), addJobWithTimeout: vi.fn() }));
 vi.mock("../weekly-strong-backtest/weekly-strong-backtest.generation", () => ({
@@ -33,6 +33,19 @@ function mockUpdateChain() {
   return set;
 }
 
+function mockSelectChain() {
+  db.select.mockReturnValue({
+    from: () => ({ where: () => ({ limit: async () => [] }) }),
+  } as never);
+}
+
+function mutationStatuses(set: ReturnType<typeof mockUpdateChain>) {
+  return set.mock.calls
+    .map((call) => call[0] as { status?: string; errorMessage?: string })
+    .filter((value) => value.errorMessage !== "Job stopped reporting progress before completion")
+    .map((value) => value.status);
+}
+
 // Root cause regression (BSE 100 stuck "Generating" forever): the syncJobs row is inserted
 // "queued" before the enqueue attempt - if that enqueue hangs/fails because Redis is configured
 // but unreachable, the row must never stay "queued" forever. Outside production it falls back to
@@ -42,6 +55,7 @@ function mockUpdateChain() {
 describe("triggerWeeklyStrongBacktestBackfill: enqueue failure handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSelectChain();
     (env as { NODE_ENV: string }).NODE_ENV = "test";
   });
 
@@ -60,8 +74,7 @@ describe("triggerWeeklyStrongBacktestBackfill: enqueue failure handling", () => 
     const result = await triggerWeeklyStrongBacktestBackfill({ actorUserId: "admin-1", collectionId: "col-1" });
 
     expect(runWeeklyStrongBacktestBackfill).toHaveBeenCalledWith({ collectionId: "col-1", weeks: undefined });
-    const statuses = set.mock.calls.map((call) => (call[0] as { status?: string }).status);
-    expect(statuses).toEqual(["running", "completed"]);
+    expect(mutationStatuses(set)).toEqual(["running", "completed"]);
     expect(result).toEqual({ syncJobId: "job-1", status: "queued" });
   });
 
@@ -76,8 +89,7 @@ describe("triggerWeeklyStrongBacktestBackfill: enqueue failure handling", () => 
       triggerWeeklyStrongBacktestBackfill({ actorUserId: "admin-1", collectionId: "col-1" })
     ).rejects.toThrow("evaluator blew up");
 
-    const statuses = set.mock.calls.map((call) => (call[0] as { status?: string }).status);
-    expect(statuses).toEqual(["running", "failed"]);
+    expect(mutationStatuses(set)).toEqual(["running", "failed"]);
   });
 
   it("production: never runs the backfill inline when enqueue fails - marks the job failed with a safe error instead", async () => {
@@ -118,6 +130,7 @@ describe("triggerWeeklyStrongBacktestBackfill: enqueue failure handling", () => 
 describe("triggerWeeklyStrongBacktestHistoricalRebuild: enqueue failure handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSelectChain();
     (env as { NODE_ENV: string }).NODE_ENV = "test";
   });
 
@@ -141,8 +154,7 @@ describe("triggerWeeklyStrongBacktestHistoricalRebuild: enqueue failure handling
     });
 
     expect(runWeeklyStrongBacktestHistoricalRebuild).toHaveBeenCalledWith({ collectionId: "col-1" });
-    const statuses = set.mock.calls.map((call) => (call[0] as { status?: string }).status);
-    expect(statuses).toEqual(["running", "completed"]);
+    expect(mutationStatuses(set)).toEqual(["running", "completed"]);
     expect(result).toEqual({ syncJobId: "job-2", status: "queued" });
   });
 

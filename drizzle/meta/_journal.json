@@ -176,6 +176,13 @@
       "when": 1789631621894,
       "tag": "0024_green_paladin",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789816207945,
+      "tag": "0025_wild_zaran",
+      "breakpoints": true
     }
   ]
 }

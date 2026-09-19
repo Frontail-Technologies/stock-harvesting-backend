@@ -26,7 +26,7 @@ vi.mock("./market-data.candle-sync", () => ({
 }));
 
 vi.mock("./market-data.instrument-sync", () => ({
-  hydrateDefaultMarketInstruments: vi.fn(),
+  hydrateMarketInstruments: vi.fn(),
   syncProviderInstrumentSearch: vi.fn(),
 }));
 
@@ -42,7 +42,7 @@ import { listStocks } from "./market-data.stocks";
 
 const safeProviderAction = vi.mocked(candleSyncModule.safeProviderAction);
 const syncLatestDailyCandlesForSymbols = vi.mocked(candleSyncModule.syncLatestDailyCandlesForSymbols);
-const hydrateDefaultMarketInstruments = vi.mocked(instrumentSyncModule.hydrateDefaultMarketInstruments);
+const hydrateMarketInstruments = vi.mocked(instrumentSyncModule.hydrateMarketInstruments);
 const syncProviderInstrumentSearch = vi.mocked(instrumentSyncModule.syncProviderInstrumentSearch);
 const refreshLatestInstrumentStats = vi.mocked(instrumentsModule.refreshLatestInstrumentStats);
 
@@ -126,7 +126,7 @@ describe("listStocks hydration orchestration", () => {
     const result = await listStocks({ page: 1, limit: 25, exchange: `NSE_A_${Date.now()}` });
 
     expect(result.stocks.length).toBeGreaterThan(0);
-    expect(hydrateDefaultMarketInstruments).not.toHaveBeenCalled();
+    expect(hydrateMarketInstruments).not.toHaveBeenCalled();
     expect(syncProviderInstrumentSearch).not.toHaveBeenCalled();
     expect(syncLatestDailyCandlesForSymbols).not.toHaveBeenCalled();
   });
@@ -135,12 +135,12 @@ describe("listStocks hydration orchestration", () => {
     installFakeDb([
       { symbol: "A", name: "A Co", exchange: "NSE", close: "10", open: "9", volume: "100", changePct: "1" },
     ]);
-    hydrateDefaultMarketInstruments.mockResolvedValue({ count: 1 } as never);
+    hydrateMarketInstruments.mockResolvedValue({ count: 1 } as never);
 
     const exchange = `NSE_B_${Date.now()}`;
     await listStocks({ page: 1, limit: 25, exchange });
 
-    expect(hydrateDefaultMarketInstruments).toHaveBeenCalledWith(exchange);
+    expect(hydrateMarketInstruments).toHaveBeenCalledWith(exchange);
   });
 
   it("C. a search query with zero local matches triggers provider instrument search", async () => {
@@ -201,7 +201,7 @@ describe("listStocks hydration orchestration", () => {
     installFakeDb([
       { symbol: "A", name: "A Co", exchange: "NSE", close: "10", open: "9", volume: "100", changePct: "1" },
     ]);
-    hydrateDefaultMarketInstruments.mockRejectedValue(new Error("provider unavailable"));
+    hydrateMarketInstruments.mockRejectedValue(new Error("provider unavailable"));
 
     const exchange = `NSE_E_${Date.now()}`;
     await expect(listStocks({ page: 1, limit: 25, exchange })).resolves.toBeDefined();

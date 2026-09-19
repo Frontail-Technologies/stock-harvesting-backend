@@ -39,7 +39,7 @@ export type MarketCandleUpdateEvent = {
 export type MarketProviderStatusEvent = {
   type: "market.provider.status";
   data: {
-      provider: "eodhd" | "kite" | "global-datafeeds" | "internal";
+      provider: "eodhd" | "global-datafeeds" | "internal";
     connected: boolean;
     exchange?: string;
     message?: string;

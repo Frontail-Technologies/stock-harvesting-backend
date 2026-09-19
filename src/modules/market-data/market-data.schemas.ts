@@ -3,9 +3,8 @@ import { z } from "zod";
 import { DEFAULT_CANDLE_TIMEFRAME, DEFAULT_EXCHANGE } from "../../shared/constants";
 import { candleTimeframeSchema } from "../../shared/validation/market.schemas";
 import { GLOBAL_DATAFEEDS_INDEX_EXCHANGE } from "../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
-import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 
-// Open rather than a closed enum - the exchange list is dynamic (see listSupportedExchanges, ~70 EODHD exchanges plus NSE); bad codes fail gracefully downstream instead of needing this schema to know the full valid set.
+// Open rather than a closed enum - the exchange list is dynamic (see listSupportedExchanges); bad codes fail gracefully downstream instead of needing this schema to know the full valid set.
 export const exchangeSchema = z
   .string()
   .trim()
@@ -78,11 +77,11 @@ export const historyRangeQuerySchema = z
   })
   .strict();
 
-// Closed whitelist, unlike the general exchangeSchema above - only a handful of *index* exchanges exist, and an unrecognized one would silently return an empty ranking, so it's worth rejecting up front.
+// Closed whitelist, unlike the general exchangeSchema above - only real *index* exchanges exist, and an unrecognized one would silently return an empty ranking, so it's worth rejecting up front.
 export const indexRelativeStrengthQuerySchema = z
   .object({
     limit: z.coerce.number().int().positive().max(500).default(150),
-    exchange: z.enum([NSE_INDEX_EXCHANGE, GLOBAL_DATAFEEDS_INDEX_EXCHANGE]).default(NSE_INDEX_EXCHANGE),
+    exchange: z.enum([GLOBAL_DATAFEEDS_INDEX_EXCHANGE]).default(GLOBAL_DATAFEEDS_INDEX_EXCHANGE),
   })
   .strict();
 

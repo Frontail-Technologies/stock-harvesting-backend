@@ -34,6 +34,6 @@ describe("hasActiveInstruments", () => {
   it("accepts an optional provider filter without changing the exchange/active semantics", async () => {
     db.select.mockReturnValueOnce(selectResult([{ id: "1" }]));
 
-    await expect(hasActiveInstruments("NSE", "zerodha")).resolves.toBe(true);
+    await expect(hasActiveInstruments("BSE", "global-datafeeds")).resolves.toBe(true);
   });
 });

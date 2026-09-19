@@ -18,7 +18,7 @@ export type ProviderHealthStatus = Pick<
 
 // Local/DB-derived provider status only - resolves without ANY external
 // provider request. `connected`/`status` are DB-derived for OAuth providers
-// (Zerodha's stored connection row + token expiry); for non-OAuth providers
+// (a stored connection row + token expiry - no provider uses this today); for non-OAuth providers
 // they mirror `providerConfigured` (there is no connection concept - real
 // reachability comes from the separate health check). See getProviderHealth
 // for the external `adapter.checkConnection()` path.

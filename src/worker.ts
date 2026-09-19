@@ -1,5 +1,5 @@
 import { Worker, type Job } from "bullmq";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, pool } from "./db/client";
 import { syncJobs } from "./db/schema";
 import {
@@ -7,11 +7,21 @@ import {
   syncProviderInstruments,
 } from "./modules/market-data/market-data.service";
 import {
+  backfillIndexCandles,
   refreshDailyCandles,
   findActiveSymbolsWithoutDailyCandles,
   syncDailyCandlesForActiveInstruments,
 } from "./modules/market-data/market-data.candle-sync";
+import { syncSectorClassifications } from "./modules/market-data/sector-classification.service";
 import { enqueueCandleBootstrapJobs, getRedisConnectionOptions } from "./modules/jobs/queues";
+import { scheduleProductionMarketDataJobs } from "./modules/jobs/schedule-production-jobs";
+import {
+  finishLedgerCoverage,
+  MarketDataLedgerRunNotClaimableError,
+  startMarketDataLedgerReconciliation,
+} from "./modules/jobs/market-data-job-ledger";
+import { isInstrumentSyncExchange, isProductionExchange } from "./modules/market-data/market-data.universe";
+import { getExchangeTodayIfTradingDay, getLatestExpectedTradingDay } from "./modules/market-data/trading-calendar";
 import {
   emitJobProgress,
   failBackgroundJobRun,
@@ -24,8 +34,8 @@ import { prepareCollectionData } from "./modules/market-collections/market-colle
 import {
   runWeeklyStrongBacktestBackfill,
   runWeeklyStrongBacktestHistoricalRebuild,
-  syncWeeklyStrongBacktestIncremental,
 } from "./modules/weekly-strong-backtest/weekly-strong-backtest.generation";
+import { reconcileWeeklyStrongBacktests } from "./modules/weekly-strong-backtest/weekly-strong-backtest.reconciliation";
 import { BACKGROUND_JOB_TYPES, JOB_NAMES, JOB_STATUS, QUEUE_NAMES, type BackgroundJobType } from "./shared/constants";
 import { env } from "./shared/env";
 import { getErrorMessage, serializeError } from "./shared/errors";
@@ -64,10 +74,17 @@ function jobLogContext(job: Job | undefined) {
 
 async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
   const syncJobId = job.data.syncJobId as string | undefined;
+  let initialPayload: Record<string, unknown> = {};
   if (syncJobId) {
+    const [syncJob] = await db.select({ payload: syncJobs.payload }).from(syncJobs).where(eq(syncJobs.id, syncJobId)).limit(1);
+    initialPayload = syncJob?.payload ?? {};
     await db
       .update(syncJobs)
-      .set({ status: JOB_STATUS.running, updatedAt: new Date() })
+      .set({
+        status: JOB_STATUS.running,
+        payload: sql`jsonb_set(${syncJobs.payload}, '{progress}', '5'::jsonb, true)`,
+        updatedAt: new Date(),
+      })
       .where(eq(syncJobs.id, syncJobId));
   }
 
@@ -83,7 +100,7 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
         .update(syncJobs)
         .set({
           status: JOB_STATUS.completed,
-          payload: result as Record<string, unknown>,
+          payload: { ...initialPayload, ...(result as Record<string, unknown>), progress: 100 },
           updatedAt: new Date(),
         })
         .where(eq(syncJobs.id, syncJobId));
@@ -113,13 +130,43 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
   }
 }
 
-async function runTrackedDailyCandleSync(exchange: string | undefined, jobType: BackgroundJobType) {
-  const runId = await startBackgroundJobRun(jobType);
+async function runTrackedDailyCandleSync(
+  exchange: string,
+  jobType: BackgroundJobType,
+  job: Job,
+  options?: { ledgerRunId?: string; tradingDate?: string; symbols?: string[] },
+) {
+  const scheduledTradingDate = options?.tradingDate
+    ?? getExchangeTodayIfTradingDay(exchange)
+    ?? getLatestExpectedTradingDay(exchange);
+  const coverageTradingDate = options?.tradingDate ?? getLatestExpectedTradingDay(exchange);
+  let claimed: string;
+  try {
+    claimed = await startBackgroundJobRun(jobType, {
+      exchange,
+      bullmqJobId: job.id,
+      ledgerRunId: options?.ledgerRunId,
+      tradingDate: scheduledTradingDate,
+    });
+  } catch (error) {
+    if (error instanceof MarketDataLedgerRunNotClaimableError) {
+      logger.info({ exchange, jobType, tradingDate: scheduledTradingDate }, "Skipped a terminal market-data ledger run");
+      return { skipped: true, reason: "ledger-run-terminal" };
+    }
+    throw error;
+  }
+  const runId = claimed;
   try {
     const summary = await syncDailyCandlesForActiveInstruments(exchange, (progress) => {
       void emitJobProgress({ runId, jobType, ...progress });
-    });
+    }, options?.symbols, jobType === BACKGROUND_JOB_TYPES.dailyCandleCatchUp ? coverageTradingDate : undefined);
     await finishBackgroundJobRunFromSummary(runId, jobType, summary);
+    await finishLedgerCoverage({
+      runId,
+      exchange,
+      tradingDate: coverageTradingDate,
+      coverageExemptSymbols: summary.providerEmptySymbols,
+    });
     return summary;
   } catch (error) {
     await failBackgroundJobRun(runId, jobType, getErrorMessage(error, "Job failed"));
@@ -150,18 +197,32 @@ function recordJobOutcome(
   }
 }
 
+function skippedNonProductionExchange(job: Job, exchange: string) {
+  logger.info(
+    { ...jobLogContext(job), exchange },
+    "Skipped job for an exchange outside the production universe",
+  );
+  return { skipped: true, exchange };
+}
+
 const worker = new Worker(
   QUEUE_NAMES.marketData,
   async (job) => {
     const exchange =
       typeof job.data.exchange === "string" ? job.data.exchange : undefined;
 
+    // A job left in the queue for an exchange that is no longer part of the
+    // production universe (e.g. retired NSE) is dropped, never executed.
     if (job.name === JOB_NAMES.instrumentSync) {
+      if (!exchange) throw new Error("instrumentSync job missing exchange");
+      if (!(await isInstrumentSyncExchange(exchange))) return skippedNonProductionExchange(job, exchange);
       return runTrackedJob(job, async () => {
         const result = await syncProviderInstruments(exchange);
+        // A newly discovered exchange may only now have active instruments.
+        void scheduleProductionMarketDataJobs();
         await refreshAllLatestInstrumentPrices(exchange);
         if (exchange) {
-          await syncWeeklyStrongBacktestIncremental(exchange).catch((error) => {
+          await reconcileWeeklyStrongBacktests(exchange).catch((error) => {
             logger.error(
               { exchange, message: getErrorMessage(error, "Unknown error") },
               "Weekly Strong backtest incremental sync failed",
@@ -173,17 +234,46 @@ const worker = new Worker(
     }
 
     if (job.name === JOB_NAMES.priceRefresh) {
+      if (!exchange) throw new Error("priceRefresh job missing exchange");
+      if (!(await isProductionExchange(exchange))) return skippedNonProductionExchange(job, exchange);
       return runTrackedJob(job, () =>
         refreshAllLatestInstrumentPrices(exchange),
       );
     }
 
+    if (job.name === JOB_NAMES.sectorClassificationSync) {
+      return runTrackedJob(job, () => syncSectorClassifications());
+    }
+
+    if (job.name === JOB_NAMES.indexCandleBackfill) {
+      return runTrackedJob(job, () => backfillIndexCandles(exchange));
+    }
+
     if (job.name === JOB_NAMES.dailyCandleSync) {
+      if (!exchange) throw new Error("dailyCandleSync job missing exchange");
+      if (!(await isProductionExchange(exchange))) return skippedNonProductionExchange(job, exchange);
       const jobType =
         typeof job.data.jobType === "string"
           ? (job.data.jobType as BackgroundJobType)
           : BACKGROUND_JOB_TYPES.dailyCandlePostMarket;
-      return runTrackedJob(job, () => runTrackedDailyCandleSync(exchange, jobType));
+      return runTrackedJob(job, () => runTrackedDailyCandleSync(exchange, jobType, job));
+    }
+
+    if (job.name === JOB_NAMES.marketDataCatchUp) {
+      if (!exchange) throw new Error("marketDataCatchUp job missing exchange");
+      if (!(await isProductionExchange(exchange))) return skippedNonProductionExchange(job, exchange);
+      const tradingDate = typeof job.data.tradingDate === "string" ? job.data.tradingDate : undefined;
+      const ledgerRunId = typeof job.data.ledgerRunId === "string" ? job.data.ledgerRunId : undefined;
+      const symbols = Array.isArray(job.data.symbols)
+        ? job.data.symbols.filter((value: unknown): value is string => typeof value === "string")
+        : undefined;
+      if (!tradingDate || !ledgerRunId) throw new Error("marketDataCatchUp job missing ledger identity");
+      return runTrackedJob(job, () => runTrackedDailyCandleSync(
+        exchange,
+        BACKGROUND_JOB_TYPES.dailyCandleCatchUp,
+        job,
+        { tradingDate, ledgerRunId, symbols },
+      ));
     }
 
     if (job.name === JOB_NAMES.chartCandleEnsureFresh) {
@@ -194,8 +284,10 @@ const worker = new Worker(
     }
 
     if (job.name === JOB_NAMES.candleBootstrapReconcile) {
+      if (!exchange) throw new Error("candleBootstrapReconcile job missing exchange");
+      if (!(await isProductionExchange(exchange))) return skippedNonProductionExchange(job, exchange);
       return runTrackedJob(job, async () => {
-        const targetExchange = exchange ?? "BSE";
+        const targetExchange = exchange;
         const symbols = await findActiveSymbolsWithoutDailyCandles(targetExchange);
         return enqueueCandleBootstrapJobs(targetExchange, symbols);
       });
@@ -212,9 +304,11 @@ const worker = new Worker(
         throw new Error(
           "weeklyStrongBacktestBackfill job missing collectionId",
         );
-      return runTrackedJob(job, () =>
-        runWeeklyStrongBacktestBackfill({ collectionId, weeks }),
-      );
+      return runTrackedJob(job, async () => {
+        const result = await runWeeklyStrongBacktestBackfill({ collectionId, weeks });
+        if (job.data.automatic === true && exchange) await reconcileWeeklyStrongBacktests(exchange);
+        return result;
+      });
     }
 
     if (job.name === JOB_NAMES.weeklyStrongBacktestHistoricalRebuild) {
@@ -226,9 +320,11 @@ const worker = new Worker(
         throw new Error(
           "weeklyStrongBacktestHistoricalRebuild job missing collectionId",
         );
-      return runTrackedJob(job, () =>
-        runWeeklyStrongBacktestHistoricalRebuild({ collectionId }),
-      );
+      return runTrackedJob(job, async () => {
+        const result = await runWeeklyStrongBacktestHistoricalRebuild({ collectionId });
+        if (job.data.automatic === true && exchange) await reconcileWeeklyStrongBacktests(exchange);
+        return result;
+      });
     }
 
     if (job.name === JOB_NAMES.collectionPrepare) {
@@ -264,6 +360,7 @@ async function heartbeat() {
 }
 
 void heartbeat();
+startMarketDataLedgerReconciliation();
 const heartbeatTimer = setInterval(() => void heartbeat(), WORKER_HEARTBEAT_INTERVAL_MS);
 
 logger.info({ startedAt: workerStartedAt, queue: QUEUE_NAMES.marketData }, "Market data worker started");

@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { SUPPORTED_AI_MODEL_CODES, SUPPORTED_COUNTRY_CODES, USER_PLANS, USER_ROLES } from "../../shared/constants";
 import { GLOBAL_DATAFEEDS_INDEX_EXCHANGE } from "../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
-import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 import { exchangeSchema } from "../market-data/market-data.schemas";
 
 export const adminUserSortFields = [
@@ -36,22 +35,16 @@ export const adminUsersExportQuerySchema = z
   })
   .strict();
 
-export const providerConnectBodySchema = z
-  .object({
-    requestToken: z.string().min(1),
-  })
-  .strict();
-
 export const providerSyncBodySchema = z
   .object({
     exchange: exchangeSchema,
   })
   .strict();
 
-// Same closed whitelist as indexRelativeStrengthQuerySchema — only a handful of real index exchanges, so reject anything else up front.
+// Same closed whitelist as indexRelativeStrengthQuerySchema — only real index exchanges, so reject anything else up front.
 export const indexCandleBackfillBodySchema = z
   .object({
-    exchange: z.enum([NSE_INDEX_EXCHANGE, GLOBAL_DATAFEEDS_INDEX_EXCHANGE]).default(NSE_INDEX_EXCHANGE),
+    exchange: z.enum([GLOBAL_DATAFEEDS_INDEX_EXCHANGE]).default(GLOBAL_DATAFEEDS_INDEX_EXCHANGE),
   })
   .strict();
 
@@ -92,6 +85,19 @@ export const backfillCandlesBodySchema = z
 export const refreshDailyCandlesBodySchema = z
   .object({
     symbol: z.string().trim().min(1).max(64),
+  })
+  .strict();
+
+export const adminAnalyticsQuerySchema = z
+  .object({
+    period: z.enum(["all", "today", "7d", "30d", "90d"]).default("all"),
+  })
+  .strict();
+
+export const marketDataLedgerActionBodySchema = z
+  .object({
+    exchange: exchangeSchema,
+    tradingDate: z.string().date(),
   })
   .strict();
 

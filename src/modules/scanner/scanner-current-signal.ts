@@ -77,6 +77,25 @@ export function resolveCurrentScannerSignal(
   };
 }
 
+// Same chain as resolveScannerSignalFromDailyCloses, except the still-forming
+// current week is kept as the latest weekly candle (its close is the latest
+// daily close so far) instead of being dropped - so "current" is where the
+// stock stands right now and "previous" is the last COMPLETED week. Freshness
+// is unchanged: a symbol whose latest daily row is older than the last completed
+// week still resolves to no signal. When no current-week row exists yet, the
+// latest weekly candle is simply the last completed week.
+export function resolveLiveScannerSignalFromDailyCloses(
+  dailyCloses: ScannerDailyClose[],
+  exchange: string,
+  requestedLookbackWeeks: number
+): CurrentScannerSignal {
+  const weeklyCloses = deriveScannerWeeklyCloses(dailyCloses);
+  if (weeklyCloses.length === 0) return EMPTY_SIGNAL;
+
+  const { latestSegment, isLatestWeekFresh } = classifyScannerWeeklySeries(weeklyCloses, exchange);
+  return resolveCurrentScannerSignal(latestSegment, isLatestWeekFresh, requestedLookbackWeeks);
+}
+
 export function resolveScannerSignalFromDailyCloses(
   dailyCloses: ScannerDailyClose[],
   exchange: string,

@@ -11,10 +11,10 @@ vi.mock("../market-data/market-data.candles", async () => {
   return { ...actual, readMetricDailyCloses: vi.fn() };
 });
 vi.mock("../scanner/scanner-current-signal", () => ({
-  resolveScannerSignalFromDailyCloses: vi.fn(),
+  resolveLiveScannerSignalFromDailyCloses: vi.fn(),
 }));
 
-import { getWeekEndingFriday } from "../market-data/trading-calendar";
+import { getWeekEndingFriday, resolveLatestCompletedWeekEnding } from "../market-data/trading-calendar";
 import * as marketCollectionsModule from "../market-collections/market-collections.service";
 import * as candlesModule from "../market-data/market-data.candles";
 import * as scannerSignalModule from "../scanner/scanner-current-signal";
@@ -27,7 +27,7 @@ import {
 const requireCollectionByCode = vi.mocked(marketCollectionsModule.requireCollectionByCode);
 const getActiveMemberInstrumentRows = vi.mocked(marketCollectionsModule.getActiveMemberInstrumentRows);
 const readMetricDailyCloses = vi.mocked(candlesModule.readMetricDailyCloses);
-const resolveScannerSignalFromDailyCloses = vi.mocked(scannerSignalModule.resolveScannerSignalFromDailyCloses);
+const resolveLiveScannerSignalFromDailyCloses = vi.mocked(scannerSignalModule.resolveLiveScannerSignalFromDailyCloses);
 
 function member(symbol: string, exchange = "NSE", instrumentId = `${exchange}:${symbol}`) {
   return { instrumentId, symbol, name: symbol, exchange };
@@ -207,7 +207,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
     readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
-    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: false,
       effectiveLookbackWeeks: 250,
       currentTime: "2026-09-08",
@@ -231,7 +231,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
     readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
-    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
       currentTime: "2026-09-08",
@@ -260,7 +260,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
       currentClose: 100,
       previousWeekTime: "2026-09-01",
     };
-    resolveScannerSignalFromDailyCloses
+    resolveLiveScannerSignalFromDailyCloses
       .mockReturnValueOnce({ ...baseSignal, matched: false, entryTime: null, entryClose: null, previousWeekMatched: true } as never) // A: out
       .mockReturnValueOnce({ ...baseSignal, matched: true, entryTime: "2026-09-08", entryClose: 100, previousWeekMatched: true } as never) // B: unchanged
       .mockReturnValueOnce({ ...baseSignal, matched: true, entryTime: "2026-09-08", entryClose: 100, previousWeekMatched: true } as never) // C: unchanged
@@ -276,7 +276,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const renamed = member("NEWNAME", "NSE", "instrument-1");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([renamed]) as never);
     readMetricDailyCloses.mockResolvedValue([dailyRow("NEWNAME")] as never);
-    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
       currentTime: "2026-09-08",
@@ -297,7 +297,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
     readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
-    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
       currentTime: "2026-09-08",
@@ -319,7 +319,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
     readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
-    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
       currentTime: "2026-09-08",
@@ -339,7 +339,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
     readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
-    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: false,
       effectiveLookbackWeeks: null,
       currentTime: null,
@@ -371,7 +371,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
     readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
-    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
       currentTime: "2026-09-08",
@@ -393,7 +393,7 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const a = member("A");
     getActiveMemberInstrumentRows.mockResolvedValue(scannerMembers([a]) as never);
     readMetricDailyCloses.mockResolvedValue([dailyRow("A")] as never);
-    resolveScannerSignalFromDailyCloses.mockReturnValueOnce({
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
       matched: true,
       effectiveLookbackWeeks: 250,
       currentTime: "2026-09-08",
@@ -407,5 +407,98 @@ describe("getWeeklyStrongBacktestMembershipChanges - Scanner-qualified membershi
     const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1", weekEnding: "2026-08-01" });
 
     expect(result.available).toBe(false);
+  });
+});
+
+describe("getWeeklyStrongBacktestMembershipChanges - in-progress (live) week", () => {
+  const shiftDays = (date: string, days: number) => {
+    const shifted = new Date(`${date}T00:00:00.000Z`);
+    shifted.setUTCDate(shifted.getUTCDate() + days);
+    return shifted.toISOString().slice(0, 10);
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requireCollectionByCode.mockResolvedValue({
+      id: "col-1",
+      code: "SEG1",
+      name: "Segment One",
+      exchange: "BSE",
+    } as never);
+    getActiveMemberInstrumentRows.mockResolvedValue([
+      { instrumentId: "BSE:A", symbol: "A", name: "A", exchange: "BSE" },
+    ] as never);
+  });
+
+  it("a stock that qualifies mid-week is listed as In before the week completes, flagged inProgress with the latest daily date", async () => {
+    const lastCompletedFriday = resolveLatestCompletedWeekEnding("BSE");
+    const midWeek = shiftDays(lastCompletedFriday, 5); // Wednesday of the forming week
+    readMetricDailyCloses.mockResolvedValue([
+      { symbol: "A", time: shiftDays(lastCompletedFriday, 0), close: 100 },
+      { symbol: "A", time: midWeek, close: 120 },
+    ] as never);
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: true,
+      effectiveLookbackWeeks: 250,
+      currentTime: midWeek,
+      currentClose: 120,
+      entryTime: midWeek,
+      entryClose: 120,
+      previousWeekMatched: false,
+      previousWeekTime: lastCompletedFriday,
+    } as never);
+
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1" });
+
+    expect(result.available).toBe(true);
+    expect(result.inProgress).toBe(true);
+    expect(result.weekEnding).toBe(getWeekEndingFriday(midWeek));
+    expect(result.previousWeekEnding).toBe(lastCompletedFriday);
+    expect(result.asOf).toBe(midWeek);
+    expect(result.enteredStocks.map((stock) => stock.symbol)).toEqual(["A"]);
+    expect(result.exitedStocks).toEqual([]);
+  });
+
+  it("a stock that stops qualifying mid-week is listed as Out immediately", async () => {
+    const lastCompletedFriday = resolveLatestCompletedWeekEnding("BSE");
+    const midWeek = shiftDays(lastCompletedFriday, 5);
+    readMetricDailyCloses.mockResolvedValue([{ symbol: "A", time: midWeek, close: 80 }] as never);
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: false,
+      effectiveLookbackWeeks: 250,
+      currentTime: midWeek,
+      currentClose: 80,
+      entryTime: null,
+      entryClose: null,
+      previousWeekMatched: true,
+      previousWeekTime: lastCompletedFriday,
+    } as never);
+
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1" });
+
+    expect(result.inProgress).toBe(true);
+    expect(result.exitedStocks.map((stock) => stock.symbol)).toEqual(["A"]);
+    expect(result.enteredStocks).toEqual([]);
+  });
+
+  it("is not flagged inProgress when the latest reading is already a completed week", async () => {
+    const lastCompletedFriday = resolveLatestCompletedWeekEnding("BSE");
+    const priorFriday = shiftDays(lastCompletedFriday, -7);
+    readMetricDailyCloses.mockResolvedValue([{ symbol: "A", time: lastCompletedFriday, close: 100 }] as never);
+    resolveLiveScannerSignalFromDailyCloses.mockReturnValueOnce({
+      matched: true,
+      effectiveLookbackWeeks: 250,
+      currentTime: lastCompletedFriday,
+      currentClose: 100,
+      entryTime: lastCompletedFriday,
+      entryClose: 100,
+      previousWeekMatched: false,
+      previousWeekTime: priorFriday,
+    } as never);
+
+    const result = await getWeeklyStrongBacktestMembershipChanges({ code: "SEG1" });
+
+    expect(result.inProgress).toBe(false);
+    expect(result.weekEnding).toBe(lastCompletedFriday);
   });
 });

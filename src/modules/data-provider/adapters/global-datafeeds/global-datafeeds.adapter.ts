@@ -40,7 +40,7 @@ import type {
 } from "./global-datafeeds.types";
 import { globalDatafeedsClient } from "./global-datafeeds.websocket-client";
 
-function configuredExchanges() {
+export function configuredExchanges() {
   return env.GLOBAL_DATAFEEDS_EXCHANGES.split(",")
     .map((exchange) => exchange.trim().toUpperCase())
     .filter(Boolean);

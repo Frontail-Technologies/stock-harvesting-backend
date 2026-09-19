@@ -27,15 +27,21 @@ future cleanup should move toward. It is not a redesign.
 **Jobs**
 - BullMQ — one queue (`market-data`), job types defined in
   `src/shared/constants/jobs.ts`, consumed by `src/worker.ts`. Repeatable
-  jobs are scheduled per supported exchange.
+  jobs are scheduled only for exchanges in the production universe
+  (`market-data.universe.ts`: active instruments whose provider is the
+  exchange's routed provider, and that provider is enabled/configured);
+  stale schedulers for other exchanges are removed.
 
 **Market data providers**
 - GlobalDataFeeds — BSE equities, BSE indices, WebSocket-based (instrument
   sync, historical/latest candles). A separate REST client
   (GlobalDataFeeds Fundamentals) provides sector/industry classification.
-- EODHD — still present, used as a fallback provider outside NSE/BSE.
-- Zerodha — still present, used for NSE. Scheduled for removal (see
-  `DECISIONS.md`, `ROADMAP.md`).
+- EODHD — still present, used as a provider outside NSE/BSE.
+- Zerodha — retired 2026-09-19 (adapter, Kite stream, OAuth connect flow
+  and env vars removed; see `DECISIONS.md`). NSE/NSE_IDX have no provider.
+  GlobalDataFeeds delayed APIs are the sole production market-data source:
+  GetHistory (canonical daily candles), GetSnapshot (current-day
+  provisional candle), SubscribeSnapshot (passive current-day updates).
 
 **Major existing modules** (`src/modules/`)
 - `admin` — admin API surface: users, settings, jobs, sync triggers.
@@ -73,5 +79,7 @@ Modules should not be invented before the work that needs them.
   modules (collections, candles, metrics). `exchange + symbol` string
   identity is used today in several read paths and should be reduced
   systematically, not replaced in one pass.
-- BSE is the target market. NSE-specific and Zerodha-specific code paths
-  are legacy, kept only until explicitly removed per the roadmap.
+- BSE is the target market. Zerodha is retired and there is no static
+  exchange or stock list: the instrument universe is `activeUniverseFilter`
+  (`market-data.universe.ts`). The only NSE leftover is the symbol validator
+  used by collection import.

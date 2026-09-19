@@ -1,12 +1,13 @@
-import { and, count, eq, gte, isNull, lt } from "drizzle-orm";
+import { and, count, gte, isNull, lt } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import { instruments } from "../../db/schema";
-import { DEFAULT_EXCHANGE } from "../../shared/constants";
+import { DATA_PROVIDER_KEY } from "../../shared/constants";
 import { getLastSuccessfulScheduledRefresh } from "../jobs/background-job-runs.service";
 import { getProviderCapabilityState, type MarketStreamCapabilityState } from "../market-stream/market-stream.capabilities";
 import { getMarketStreamProviderHealth, type MarketStreamProviderHealth } from "../market-stream/market-stream.provider-health";
 import { getLatestExpectedTradingDay } from "./trading-calendar";
+import { activeUniverseFilter, listProductionExchanges, productionProviderKeyForExchange } from "./market-data.universe";
 
 export type MarketDataHealthMechanisms = {
   historicalDailySync: string;
@@ -16,7 +17,8 @@ export type MarketDataHealthMechanisms = {
 
 export type MarketDataHealth = {
   exchange: string;
-  latestExpectedTradingDate: string;
+  exchanges: string[];
+  latestExpectedTradingDate: string | null;
   activeSymbols: number;
   fresh: number;
   stale: number;
@@ -27,22 +29,21 @@ export type MarketDataHealth = {
   mechanisms: MarketDataHealthMechanisms;
 };
 
-export async function getMarketDataHealth(exchange: string = DEFAULT_EXCHANGE): Promise<MarketDataHealth> {
+async function countExchangeUniverse(exchange: string) {
   const latestExpectedTradingDate = getLatestExpectedTradingDay(exchange);
-  const activeFilter = and(eq(instruments.exchange, exchange), eq(instruments.active, true));
+  const universe = activeUniverseFilter(exchange);
 
-  const [[activeRow], [freshRow], [staleRow], [bootstrapRow], lastSuccessfulRefresh] = await Promise.all([
-    db.select({ value: count() }).from(instruments).where(activeFilter),
+  const [[activeRow], [freshRow], [staleRow], [bootstrapRow]] = await Promise.all([
+    db.select({ value: count() }).from(instruments).where(universe),
     db
       .select({ value: count() })
       .from(instruments)
-      .where(and(activeFilter, gte(instruments.latestPriceAt, latestExpectedTradingDate))),
+      .where(and(universe, gte(instruments.latestPriceAt, latestExpectedTradingDate))),
     db
       .select({ value: count() })
       .from(instruments)
-      .where(and(activeFilter, lt(instruments.latestPriceAt, latestExpectedTradingDate))),
-    db.select({ value: count() }).from(instruments).where(and(activeFilter, isNull(instruments.latestPriceAt))),
-    getLastSuccessfulScheduledRefresh(),
+      .where(and(universe, lt(instruments.latestPriceAt, latestExpectedTradingDate))),
+    db.select({ value: count() }).from(instruments).where(and(universe, isNull(instruments.latestPriceAt))),
   ]);
 
   return {
@@ -52,15 +53,40 @@ export async function getMarketDataHealth(exchange: string = DEFAULT_EXCHANGE): 
     fresh: freshRow.value,
     stale: staleRow.value,
     bootstrapRequired: bootstrapRow.value,
+  };
+}
+
+// Every count comes from the same production universe (activeUniverseFilter)
+// the scheduler syncs. With no exchange given, it covers every production
+// exchange - never a hardcoded default exchange.
+export async function getMarketDataHealth(exchange?: string): Promise<MarketDataHealth> {
+  const exchanges = exchange ? [exchange] : await listProductionExchanges();
+  const [perExchange, lastSuccessfulRefresh] = await Promise.all([
+    Promise.all(exchanges.map((code) => countExchangeUniverse(code))),
+    getLastSuccessfulScheduledRefresh(),
+  ]);
+
+  const expectedDates = perExchange.map((entry) => entry.latestExpectedTradingDate).sort();
+  const sum = (pick: (entry: (typeof perExchange)[number]) => number) =>
+    perExchange.reduce((total, entry) => total + pick(entry), 0);
+
+  return {
+    exchange: exchanges.length === 1 ? exchanges[0] : "ALL",
+    exchanges,
+    latestExpectedTradingDate: expectedDates[0] ?? null,
+    activeSymbols: sum((entry) => entry.activeSymbols),
+    fresh: sum((entry) => entry.fresh),
+    stale: sum((entry) => entry.stale),
+    bootstrapRequired: sum((entry) => entry.bootstrapRequired),
     lastSuccessfulRefresh: lastSuccessfulRefresh ? lastSuccessfulRefresh.toISOString() : null,
     liveDelayedFeed: getMarketStreamProviderHealth(),
-    providerCapabilities: [
-      {
-        provider: "global-datafeeds",
-        exchange: "BSE",
-        ...getProviderCapabilityState("global-datafeeds", "BSE"),
-      },
-    ],
+    providerCapabilities: exchanges
+      .filter((code) => productionProviderKeyForExchange(code) === DATA_PROVIDER_KEY.globalDatafeeds)
+      .map((code) => ({
+        provider: DATA_PROVIDER_KEY.globalDatafeeds,
+        exchange: code,
+        ...getProviderCapabilityState(DATA_PROVIDER_KEY.globalDatafeeds, code),
+      })),
     mechanisms: {
       historicalDailySync: "GDF GetHistory (Delayed)",
       currentPriceSnapshot: "GDF GetSnapshot (Delayed)",

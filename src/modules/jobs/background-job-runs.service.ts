@@ -13,16 +13,22 @@ import { logger } from "../../shared/logger";
 import type { DailyCandleSyncFailureDetail, DailyCandleSyncSummary } from "../market-data/market-data.candle-sync";
 import { getLatestExpectedTradingDay } from "../market-data/trading-calendar";
 import { publishRealtimeEvent } from "./realtime-events";
+import { claimMarketDataLedgerRun } from "./market-data-job-ledger";
 
 const FAILED_SYMBOLS_METADATA_CAP = 25;
 const RECENT_JOB_RUNS_DEFAULT_LIMIT = 25;
 
-export async function startBackgroundJobRun(jobType: BackgroundJobType) {
+export async function startBackgroundJobRun(
+  jobType: BackgroundJobType,
+  ledger?: { exchange: string; bullmqJobId?: string; ledgerRunId?: string; tradingDate?: string },
+) {
   const startedAt = new Date();
-  const [row] = await db
-    .insert(backgroundJobRuns)
-    .values({ jobType, status: BACKGROUND_JOB_RUN_STATUS.running, startedAt })
-    .returning({ id: backgroundJobRuns.id });
+  const row = ledger
+    ? { id: (await claimMarketDataLedgerRun({ jobType, ...ledger })).runId }
+    : (await db
+        .insert(backgroundJobRuns)
+        .values({ jobType, status: BACKGROUND_JOB_RUN_STATUS.running, startedAt })
+        .returning({ id: backgroundJobRuns.id }))[0];
 
   void publishRealtimeEvent({
     kind: "admin",
@@ -65,7 +71,11 @@ export async function finishBackgroundJobRunFromSummary(id: string, jobType: Bac
       bootstrapRequiredCount: summary.bootstrapRequired,
       failedCount: summary.failed,
       errorSummary: summary.failed > 0 ? `${summary.failed} symbol(s) failed to sync` : null,
-      metadata: { failedSymbols: summary.failedDetails.slice(0, FAILED_SYMBOLS_METADATA_CAP) },
+      metadata: {
+        failedSymbols: summary.failedDetails.slice(0, FAILED_SYMBOLS_METADATA_CAP),
+        coverageExemptSymbols: summary.providerEmptySymbols,
+      },
+      updatedAt: finishedAt,
     })
     .where(eq(backgroundJobRuns.id, id));
 
@@ -91,7 +101,7 @@ export async function failBackgroundJobRun(id: string, jobType: BackgroundJobTyp
   const finishedAt = new Date();
   await db
     .update(backgroundJobRuns)
-    .set({ status: BACKGROUND_JOB_RUN_STATUS.failed, finishedAt, errorSummary: errorMessage })
+    .set({ status: BACKGROUND_JOB_RUN_STATUS.failed, finishedAt, errorSummary: errorMessage, updatedAt: finishedAt })
     .where(eq(backgroundJobRuns.id, id));
 
   void publishRealtimeEvent({

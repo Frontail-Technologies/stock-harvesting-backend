@@ -17,13 +17,12 @@ import { getProviderPriority, isProviderEnabled } from "./data-provider-settings
 // behavior) rather than silently disabling every provider.
 describe("data-provider-settings fail-safe behavior (no reachable DB)", () => {
   it("isProviderEnabled resolves true instead of throwing when the settings table can't be read", async () => {
-    await expect(isProviderEnabled("zerodha")).resolves.toBe(true);
     await expect(isProviderEnabled("global-datafeeds")).resolves.toBe(true);
     await expect(isProviderEnabled("eodhd")).resolves.toBe(true);
     await expect(isProviderEnabled("some-unknown-key")).resolves.toBe(true);
   });
 
   it("getProviderPriority resolves a default instead of throwing when the settings table can't be read", async () => {
-    await expect(getProviderPriority("zerodha")).resolves.toBe(100);
+    await expect(getProviderPriority("global-datafeeds")).resolves.toBe(100);
   });
 });

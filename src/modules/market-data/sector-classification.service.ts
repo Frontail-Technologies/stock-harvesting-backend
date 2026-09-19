@@ -39,8 +39,8 @@ type ClassificationRow = {
 // one call (confirmed live: ~300-750 rows per sector) — so the whole ~22-way
 // sector taxonomy covers every classified company in ~22 requests, nowhere
 // close to the 900/hour rate limit. Matching back onto our own `instruments`
-// rows is by normalized symbol only — we don't have ISIN on our side (Zerodha's
-// raw instrument dump doesn't include it), and neither company nor exchange
+// rows is by normalized symbol only — we don't have ISIN on our side (the
+// provider instrument dumps we store don't include it), and neither company nor exchange
 // codes overlap directly with our schema.
 //
 // The DB side runs as a single bulk `UPDATE ... FROM (VALUES ...)` per chunk
@@ -101,9 +101,8 @@ async function bulkUpdateClassification(rows: ClassificationRow[]) {
     // US/Toronto/Stuttgart-listed tickers). Applying it without this filter
     // silently mislabels those rows with Tata Consultancy Services' sector.
     //
-    // RETURNING id/exchange so the BSE-specific matches (not NSE — the same
-    // symbol can legitimately match both, for dual-listed companies) can be
-    // fed into the auto-collection below without a second query.
+    // RETURNING id/exchange so the matched instruments can be fed into the
+    // auto-collection below without a second query.
     const result = await db.execute<{ id: string; exchange: string }>(sql`
       UPDATE instruments AS i
       SET
@@ -113,7 +112,7 @@ async function bulkUpdateClassification(rows: ClassificationRow[]) {
         industry_code = v.industry_code,
         classification_synced_at = now()
       FROM (VALUES ${values}) AS v(symbol, sector, sector_code, industry, industry_code)
-      WHERE i.symbol = v.symbol AND i.exchange IN ('NSE', 'BSE')
+      WHERE i.symbol = v.symbol AND i.exchange = ${AUTO_COLLECTION_EXCHANGE}
       RETURNING i.id AS id, i.exchange AS exchange
     `);
 

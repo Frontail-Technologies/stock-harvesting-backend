@@ -86,19 +86,15 @@ describe("buildStockOrderBy", () => {
 });
 
 describe("buildStockFilters", () => {
-  it("applies NSE-only symbol-pattern filters (provider=zerodha, normal-equity regex, debt/non-eq exclusions) only for exchange=NSE", () => {
-    const nseCondition = buildStockFilters({ exchange: "NSE" });
-    const nseText = renderText(nseCondition);
-    const nseParams = paramValues(nseCondition);
-    expect(nseParams).toContain("provider");
-    expect(nseParams).toContain("zerodha");
-    expect(nseText.match(/~/g)?.length).toBe(3); // 3 regex predicates
+  it("scopes the universe to the exchange's production provider - retired NSE matches nothing, and no symbol-pattern filters remain", () => {
+    const bse = buildStockFilters({ exchange: "BSE" });
+    expect(paramValues(bse)).toContain("global-datafeeds");
+    expect(renderText(bse).match(/~/g)).toBeNull();
 
-    const bseCondition = buildStockFilters({ exchange: "BSE" });
-    const bseText = renderText(bseCondition);
-    const bseParams = paramValues(bseCondition);
-    expect(bseParams).not.toContain("provider");
-    expect(bseText.match(/~/g)).toBeNull();
+    const nse = buildStockFilters({ exchange: "NSE" });
+    expect(paramValues(nse)).not.toContain("zerodha");
+    expect(paramValues(nse)).not.toContain("global-datafeeds");
+    expect(renderText(nse).match(/~/g)).toBeNull();
   });
 
   it("omits the latestClose > 0 filter when includeUnpriced is true, includes it otherwise", () => {

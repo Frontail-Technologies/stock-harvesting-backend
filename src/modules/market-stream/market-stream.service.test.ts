@@ -3,9 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const eodhdSubscribe = vi.hoisted(() => vi.fn());
 const eodhdUnsubscribe = vi.hoisted(() => vi.fn());
 const eodhdClose = vi.hoisted(() => vi.fn());
-const kiteSubscribe = vi.hoisted(() => vi.fn());
-const kiteUnsubscribe = vi.hoisted(() => vi.fn());
-const kiteClose = vi.hoisted(() => vi.fn());
 const gdfSubscribe = vi.hoisted(() => vi.fn());
 const gdfUnsubscribe = vi.hoisted(() => vi.fn());
 const gdfClose = vi.hoisted(() => vi.fn());
@@ -20,14 +17,6 @@ vi.mock("./providers/eodhd-market-stream.provider", () => ({
     subscribe = eodhdSubscribe;
     unsubscribe = eodhdUnsubscribe;
     close = eodhdClose;
-  },
-}));
-
-vi.mock("./providers/kite-market-stream.provider", () => ({
-  KiteMarketStreamProvider: class {
-    subscribe = kiteSubscribe;
-    unsubscribe = kiteUnsubscribe;
-    close = kiteClose;
   },
 }));
 

@@ -10,6 +10,24 @@ Each entry stays until explicitly superseded by a new dated entry.
 - 2026-09-12 — BSE is the target market.
 - 2026-09-12 — Zerodha should be removed.
 - 2026-09-12 — NSE-specific functionality should be removed.
+- 2026-09-19 — Zerodha market-data integration retired. GlobalDataFeeds
+  delayed APIs are the sole production market-data source (GetHistory =
+  canonical daily candles, GetSnapshot = current-day provisional candle,
+  SubscribeSnapshot = passive current-day updates). Removed: Zerodha
+  adapter, Kite market-stream provider, OAuth connect-url/connect admin
+  endpoints and callback page, NSE/NSE_IDX provider routing,
+  `ZERODHA_*` and `DATA_PROVIDER` env vars. NSE and NSE_IDX now resolve
+  to no provider (never a fallback) and are never advertised. DB columns
+  and historical rows (`instruments.provider = 'zerodha'`,
+  `data_provider_settings`/`data_provider_connections` rows) are retained
+  untouched - no destructive migration. `instruments.instrument_token` is
+  provider-generic (GlobalDataFeeds uses it too) and stays.
+- 2026-09-19 — The production instrument universe is one definition:
+  active instruments stamped with their exchange's routed provider
+  (`activeUniverseFilter`), on an exchange whose provider is enabled and
+  configured. No hardcoded exchange or stock lists; legacy rows stay as
+  history and never match. Instrument discovery additionally covers
+  GlobalDataFeeds-configured exchanges so a new exchange can be populated.
 - 2026-09-12 — Fewer DB tables/schemas are preferred over more.
 - 2026-09-12 — Drizzle is the default DB access approach.
 - 2026-09-12 — Zero explanatory comments in touched production code

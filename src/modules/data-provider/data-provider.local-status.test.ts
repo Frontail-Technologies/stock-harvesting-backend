@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 //     adapter.checkConnection()
 //   - getProviderHealth is the only path that does, and it stays bounded and
 //     per-provider isolated
-//   - Zerodha's OAuth/DB-derived connection semantics are unchanged
+//   - the generic stored-connection (OAuth-style) status semantics are unchanged
 
 const h = vi.hoisted(() => {
   type FakeAdapter = {
@@ -37,7 +37,7 @@ const h = vi.hoisted(() => {
   });
 
   return {
-    zerodha: makeAdapter("zerodha", true, false),
+    oauthProvider: makeAdapter("oauth-provider", true, false),
     globalDatafeeds: makeAdapter("global-datafeeds", false, true),
     eodhd: makeAdapter("eodhd", false, true),
     selectMock: vi.fn(),
@@ -46,7 +46,7 @@ const h = vi.hoisted(() => {
 });
 
 const adaptersByKey: Record<string, unknown> = {
-  zerodha: h.zerodha,
+  "oauth-provider": h.oauthProvider,
   "global-datafeeds": h.globalDatafeeds,
   eodhd: h.eodhd,
 };
@@ -57,11 +57,10 @@ vi.mock("../../db/client", () => ({
 
 vi.mock("./data-provider.registry", () => ({
   getDataProviderAdapterByProvider: vi.fn((key: string) => adaptersByKey[key] ?? null),
-  listDataProviderAdapters: vi.fn(() => [h.zerodha, h.globalDatafeeds, h.eodhd]),
+  listDataProviderAdapters: vi.fn(() => [h.oauthProvider, h.globalDatafeeds, h.eodhd]),
   adapterSupportsCapability: vi.fn(),
   getCandidateProviderKeysForExchange: vi.fn(() => []),
-  getConnectableDataProviderAdapter: vi.fn(() => h.zerodha),
-  getDataProviderAdapterForExchange: vi.fn(() => h.zerodha),
+  getDataProviderAdapterForExchange: vi.fn(() => h.oauthProvider),
   getEodhdDataProviderAdapter: vi.fn(() => h.eodhd),
 }));
 
@@ -110,7 +109,7 @@ const HEALTHY = { connected: true, status: "connected", errorMessage: null } as 
 
 beforeEach(() => {
   vi.clearAllMocks();
-  h.zerodha.isConfigured.mockReturnValue(true);
+  h.oauthProvider.isConfigured.mockReturnValue(true);
   h.globalDatafeeds.isConfigured.mockReturnValue(true);
   h.eodhd.isConfigured.mockReturnValue(true);
   h.globalDatafeeds.checkConnection?.mockResolvedValue(HEALTHY);
@@ -151,7 +150,7 @@ describe("getProviderStatus - local/DB only", () => {
     expect(recordProviderFailure).not.toHaveBeenCalled();
   });
 
-  it("preserves Zerodha's DB-derived connected state", async () => {
+  it("preserves a stored-connection provider's DB-derived connected state", async () => {
     h.selectMock.mockReturnValue(
       selectChain([
         {
@@ -164,15 +163,15 @@ describe("getProviderStatus - local/DB only", () => {
       ])
     );
 
-    const result = await getProviderStatus("zerodha");
+    const result = await getProviderStatus("oauth-provider");
 
     expect(result.connected).toBe(true);
     expect(result.status).toBe("connected");
     expect(result.lastSyncedAt).toBe(new Date("2026-01-02T00:00:00Z").toISOString());
-    expect(h.zerodha.checkConnection).toBeUndefined();
+    expect(h.oauthProvider.checkConnection).toBeUndefined();
   });
 
-  it("preserves Zerodha's expired-token semantics (DB read + write-back, still no external call)", async () => {
+  it("preserves stored-connection expired-token semantics (DB read + write-back, still no external call)", async () => {
     h.selectMock.mockReturnValue(
       selectChain([
         {
@@ -185,7 +184,7 @@ describe("getProviderStatus - local/DB only", () => {
       ])
     );
 
-    const result = await getProviderStatus("zerodha");
+    const result = await getProviderStatus("oauth-provider");
 
     expect(result.status).toBe("expired");
     expect(result.connected).toBe(false);
@@ -203,7 +202,7 @@ describe("getAllProviderLocalStatuses - local/DB only", () => {
     expect(providers.map((p) => p.provider).sort()).toEqual([
       "eodhd",
       "global-datafeeds",
-      "zerodha",
+      "oauth-provider",
     ]);
     expect(h.globalDatafeeds.checkConnection).not.toHaveBeenCalled();
     expect(h.eodhd.checkConnection).not.toHaveBeenCalled();
@@ -224,7 +223,7 @@ describe("getAllProviderLocalStatuses - local/DB only", () => {
       requiresConnection: false,
     });
     expect(byKey.get("eodhd")?.enabled).toBe(false);
-    expect(byKey.get("zerodha")?.requiresConnection).toBe(true);
+    expect(byKey.get("oauth-provider")?.requiresConnection).toBe(true);
   });
 });
 

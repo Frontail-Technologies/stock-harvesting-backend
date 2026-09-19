@@ -28,6 +28,7 @@ function baseSummary(overrides: Partial<DailyCandleSyncSummary> = {}): DailyCand
     alreadyCurrent: 0,
     bootstrapRequired: 0,
     providerEmpty: 0,
+    providerEmptySymbols: [],
     failed: 0,
     failedSymbols: [],
     failedDetails: [],
@@ -126,7 +127,10 @@ describe("finishBackgroundJobRunFromSummary", () => {
       expect.objectContaining({
         status: "partial",
         failedCount: 1,
-        metadata: { failedSymbols: [{ instrumentId: "i1", symbol: "BAD", reason: "provider error" }] },
+        metadata: {
+          failedSymbols: [{ instrumentId: "i1", symbol: "BAD", reason: "provider error" }],
+          coverageExemptSymbols: [],
+        },
       })
     );
     expect(publishRealtimeEvent).toHaveBeenCalledWith(

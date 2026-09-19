@@ -65,6 +65,7 @@ describe("getMarketDataHealth", () => {
 
     expect(health).toEqual({
       exchange: "BSE",
+      exchanges: ["BSE"],
       latestExpectedTradingDate: "2026-09-11",
       activeSymbols: 500,
       fresh: 480,

@@ -6,6 +6,29 @@ whenever a module's audit/cleanup/test/verification state changes.
 Current focus: Phase 4D — WebSocket Live Market-Data Observability
 Status: Done
 
+Universe cleanup (2026-09-19): removed `SUPPORTED_EXCHANGES` and the static
+default stock lists; added `market-data.universe.ts` as the single production
+universe (scheduler, daily/price sync, bootstrap reconcile, health counts,
+index ranking and stock lists all use it); scheduler prunes stale Redis
+schedulers; worker drops jobs for non-production exchanges; health with no
+exchange aggregates all production exchanges.
+
+Zerodha cleanup (2026-09-19):
+- Zerodha market-data integration retired. GlobalDataFeeds delayed APIs are
+  the sole production market-data source.
+- Removed: Zerodha adapter, Kite market-stream provider (+ test), OAuth
+  connect-url/connect admin endpoints, NSE/NSE_IDX provider routing,
+  Zerodha-only latest-candle branch, NSE symbol/provider stock filters,
+  `ZERODHA_*` and `DATA_PROVIDER` env vars, Zerodha seed row.
+- NSE/NSE_IDX resolve to no provider (`RETIRED_EXCHANGE_CODES`) and are never
+  advertised; index defaults moved from NSE_IDX to BSE_IDX.
+- Retained: DB tables/columns and historical rows (no migration); generic
+  stored-connection status scaffolding in `data-provider.service.ts`
+  (`requiresConnection`, access-token lookup) with no active implementer;
+  the NSE symbol validator used by collection import.
+- GDF GetHistory/GetSnapshot/SubscribeSnapshot behavior, scheduler timings,
+  candle persistence and backtest logic untouched.
+
 Completed (Phase 4D):
 - Audited first: no Socket.IO, no Redis pub/sub, no admin-scoped WS channel
   existed. A raw `ws`-based gateway (`market-stream` module, `/ws/market`)

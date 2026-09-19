@@ -35,7 +35,7 @@ is a decision, not a habit — record it in `DECISIONS.md` if it ever happens.
     when Drizzle cannot express something cleanly, or there is a measured
     performance reason — not a style preference.
 12. BSE is the target market.
-13. Zerodha is intended to be removed.
+13. Zerodha is retired (removed 2026-09-19); do not reintroduce it.
 14. NSE-specific product behaviour is intended to be removed.
 15. Do not run full-universe (5,000+ stock) operations during normal
     development/testing unless explicitly required. Use small controlled

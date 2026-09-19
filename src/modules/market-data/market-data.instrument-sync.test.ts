@@ -147,12 +147,12 @@ describe("ensureInstrumentsForSymbols", () => {
     ]);
 
     getEligibleProviderAdapter.mockImplementation(async (input: { capability: string }) => {
-      // No searchInstruments on this adapter - matches e.g. Zerodha for NSE.
+      // No searchInstruments on this adapter - an adapter without a search API.
       if (input.capability === "instrument_search") {
-        return { providerKey: "zerodha" } as never;
+        return { providerKey: "search-less-provider" } as never;
       }
       if (input.capability === "instrument_sync") {
-        return { providerKey: "zerodha", fetchInstruments } as never;
+        return { providerKey: "search-less-provider", fetchInstruments } as never;
       }
       return undefined as never;
     });

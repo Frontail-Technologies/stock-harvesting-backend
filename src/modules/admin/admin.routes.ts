@@ -25,6 +25,7 @@ import {
   validate,
 } from "../../shared/middleware";
 import {
+  adminAnalyticsQuerySchema,
   adminUsersExportQuerySchema,
   adminUsersQuerySchema,
   backfillCandlesBodySchema,
@@ -42,9 +43,9 @@ import {
   importCollectionCsvBodySchema,
   indexCandleBackfillBodySchema,
   replaceCollectionVersionBodySchema,
-  providerConnectBodySchema,
   providerSyncBodySchema,
   refreshDailyCandlesBodySchema,
+  marketDataLedgerActionBodySchema,
   updateAiSettingsBodySchema,
   updateAiKeyBodySchema,
   updateCollectionBodySchema,
@@ -54,14 +55,12 @@ import {
   userIdParamsSchema,
 } from "./admin.schemas";
 import {
-  completeProviderConnection,
   createAdminUser,
-  createProviderConnectUrl,
   deleteUser,
   exportAdminUsersCsv,
   getAdminDataProviderSettings,
+  getAdminAnalytics,
   getAdminProviderHealth,
-  getAdminProviderStatus,
   getAdminProviderStatuses,
   getBrandingSettings,
   getWeeklyStrongBacktestHistoricalStatus,
@@ -85,6 +84,12 @@ import { listRecentBackgroundJobRuns } from "../jobs/background-job-runs.service
 import { getScheduledDailyCandleSyncStatuses } from "../jobs/scheduled-job-status.service";
 import { getMarketDataWorkerStatuses } from "../jobs/worker-status.service";
 import { getMarketDataHealth } from "../market-data/market-data.health";
+import {
+  createAndQueueCatchUp,
+  getMarketDataOperations,
+  refreshMarketDataBacktests,
+  reconcileMarketDataJobLedger,
+} from "../jobs/market-data-job-ledger";
 import { triggerCollectionPreparation } from "../market-collections/market-collection-preparation.service";
 import {
   bulkDeleteMarketCollections,
@@ -207,10 +212,6 @@ adminRouter.delete(
   })
 );
 
-adminRouter.get("/data-provider/status", asyncHandler(async (_req, res) => {
-  sendData(res, await getAdminProviderStatus());
-}));
-
 adminRouter.get("/data-provider/statuses", asyncHandler(async (_req, res) => {
   sendData(res, await getAdminProviderStatuses());
 }));
@@ -242,23 +243,6 @@ adminRouter.put(
       ...(req.body as { enabled?: boolean; priority?: number; disabledReason?: string | null }),
     });
     sendData(res, { provider });
-  })
-);
-
-adminRouter.post("/data-provider/connect-url", asyncHandler(async (req, res) => {
-  sendData(res, await createProviderConnectUrl(getAuthUserId(req)));
-}));
-
-adminRouter.post(
-  "/data-provider/connect",
-  validate({ body: providerConnectBodySchema }),
-  asyncHandler(async (req, res) => {
-    const body = req.body as { requestToken: string };
-    const result = await completeProviderConnection({
-      actorUserId: getAuthUserId(req),
-      requestToken: body.requestToken,
-    });
-    sendData(res, result);
   })
 );
 
@@ -353,9 +337,44 @@ adminRouter.get("/market-data/schedules", asyncHandler(async (_req, res) => {
   sendData(res, { schedules: await getScheduledDailyCandleSyncStatuses() });
 }));
 
+adminRouter.get("/market-data/operations", asyncHandler(async (_req, res) => {
+  sendData(res, await getMarketDataOperations());
+}));
+
+adminRouter.post("/market-data/reconcile", asyncHandler(async (_req, res) => {
+  sendData(res, await reconcileMarketDataJobLedger());
+}));
+
+adminRouter.post(
+  "/market-data/catch-up",
+  validate({ body: marketDataLedgerActionBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { exchange: string; tradingDate: string };
+    sendAccepted(res, { runId: await createAndQueueCatchUp(body.exchange, body.tradingDate, undefined, { force: true }) });
+  }),
+);
+
+adminRouter.post(
+  "/market-data/refresh-backtests",
+  validate({ body: marketDataLedgerActionBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { exchange: string; tradingDate: string };
+    sendData(res, await refreshMarketDataBacktests(body.exchange, body.tradingDate));
+  }),
+);
+
 adminRouter.get("/jobs", asyncHandler(async (_req, res) => {
   sendData(res, { jobs: await listJobs() });
 }));
+
+adminRouter.get(
+  "/analytics",
+  validate({ query: adminAnalyticsQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as Parameters<typeof getAdminAnalytics>[0];
+    sendData(res, await getAdminAnalytics(query));
+  })
+);
 
 adminRouter.get("/branding", asyncHandler(async (_req, res) => {
   sendData(res, { branding: await getBrandingSettings() });

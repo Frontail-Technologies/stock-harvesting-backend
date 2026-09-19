@@ -6,21 +6,19 @@ import {
   getCandidateProviderKeysForExchange,
   getDataProviderAdapterByProvider,
   getProviderCapabilities,
+  listDataProviderAdapters,
 } from "./data-provider.registry";
 
-// Ground-truth capability matrix confirmed by direct code audit (see the
-// plan): Zerodha is REST-only for candles/instruments and does not
-// implement searchInstruments/getInstrumentToken/fetchExchanges/
-// checkConnection; GlobalDataFeeds and EODHD implement every optional
-// method. These tests fail loudly if a future adapter change silently
-// drifts from that matrix without the routing layer being told.
+// Ground-truth capability matrix confirmed by direct code audit:
+// GlobalDataFeeds and EODHD implement every optional method. These tests
+// fail loudly if a future adapter change silently drifts from that matrix
+// without the routing layer being told.
 describe("adapterSupportsCapability - real adapter instances", () => {
-  const zerodha = getDataProviderAdapterByProvider(DATA_PROVIDER_KEY.zerodha)!;
   const globalDatafeeds = getDataProviderAdapterByProvider(DATA_PROVIDER_KEY.globalDatafeeds)!;
   const eodhd = getDataProviderAdapterByProvider(DATA_PROVIDER_KEY.eodhd)!;
 
   it("every adapter supports the always-on capabilities", () => {
-    for (const adapter of [zerodha, globalDatafeeds, eodhd]) {
+    for (const adapter of [globalDatafeeds, eodhd]) {
       expect(adapterSupportsCapability(adapter, "instrument_sync")).toBe(true);
       expect(adapterSupportsCapability(adapter, "historical_daily_candles")).toBe(true);
       expect(adapterSupportsCapability(adapter, "latest_daily_candles")).toBe(true);
@@ -28,10 +26,12 @@ describe("adapterSupportsCapability - real adapter instances", () => {
     }
   });
 
-  it("Zerodha does not support instrument_search, instrument_token, or exchange_list", () => {
-    expect(adapterSupportsCapability(zerodha, "instrument_search")).toBe(false);
-    expect(adapterSupportsCapability(zerodha, "instrument_token")).toBe(false);
-    expect(adapterSupportsCapability(zerodha, "exchange_list")).toBe(false);
+  it("Zerodha is retired - no adapter is registered for it", () => {
+    expect(getDataProviderAdapterByProvider("zerodha")).toBeNull();
+    expect(listDataProviderAdapters().map((adapter) => adapter.providerKey)).toEqual([
+      DATA_PROVIDER_KEY.eodhd,
+      DATA_PROVIDER_KEY.globalDatafeeds,
+    ]);
   });
 
   it("GlobalDataFeeds and EODHD support instrument_search, instrument_token, and exchange_list", () => {
@@ -43,16 +43,17 @@ describe("adapterSupportsCapability - real adapter instances", () => {
   });
 
   it("getProviderCapabilities matches adapterSupportsCapability for every capability", () => {
-    const capabilities = getProviderCapabilities(zerodha);
+    const capabilities = getProviderCapabilities(globalDatafeeds);
     expect(capabilities).toContain("historical_daily_candles");
-    expect(capabilities).not.toContain("instrument_search");
+    expect(capabilities).toContain("current_price_snapshot");
+    expect(capabilities).toContain("instrument_search");
   });
 });
 
 describe("getCandidateProviderKeysForExchange - today's routing table", () => {
-  it("routes NSE and NSE_IDX to Zerodha only", () => {
-    expect(getCandidateProviderKeysForExchange("NSE")).toEqual([DATA_PROVIDER_KEY.zerodha]);
-    expect(getCandidateProviderKeysForExchange("NSE_IDX")).toEqual([DATA_PROVIDER_KEY.zerodha]);
+  it("resolves retired NSE and NSE_IDX to no provider at all (never a fallback provider)", () => {
+    expect(getCandidateProviderKeysForExchange("NSE")).toEqual([]);
+    expect(getCandidateProviderKeysForExchange("NSE_IDX")).toEqual([]);
   });
 
   it("routes BSE and BSE_IDX to Global DataFeeds only", () => {
@@ -69,8 +70,8 @@ describe("getCandidateProviderKeysForExchange - today's routing table", () => {
     expect(getCandidateProviderKeysForExchange("LSE")).toEqual([DATA_PROVIDER_KEY.eodhd]);
   });
 
-  it("always returns exactly one candidate today - there is no existing multi-provider fallback to preserve", () => {
-    for (const exchange of ["NSE", "BSE", "US", "TSE", "ASX"]) {
+  it("always returns exactly one candidate for a live exchange - there is no multi-provider fallback", () => {
+    for (const exchange of ["BSE", "BSE_IDX", "US", "TSE", "ASX"]) {
       expect(getCandidateProviderKeysForExchange(exchange)).toHaveLength(1);
     }
   });

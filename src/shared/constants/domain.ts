@@ -36,17 +36,6 @@ export const PLAN_USAGE_LIMITS: Record<
 
 export const DEFAULT_EXCHANGE = "US" as const;
 
-export const SUPPORTED_EXCHANGES = [
-  { code: "US", label: "United States" },
-  { code: "NSE", label: "India (NSE)" },
-  { code: "BSE", label: "India (BSE)" },
-  { code: "BSE_IDX", label: "India (BSE Indices)" },
-] as const;
-export type SupportedExchangeCode = (typeof SUPPORTED_EXCHANGES)[number]["code"];
-export const SUPPORTED_EXCHANGE_CODES = SUPPORTED_EXCHANGES.map(
-  (exchange) => exchange.code
-) as SupportedExchangeCode[];
-
 // Closed, deliberately small allow-list - every market collection in this codebase is India/BSE today; add a new entry only when there is real backend support for that country, since the Dashboard's country selector reads this transitively via /api/market-collections.
 export const SUPPORTED_COUNTRIES = [{ code: "IN", label: "India" }] as const;
 export type SupportedCountryCode = (typeof SUPPORTED_COUNTRIES)[number]["code"];
@@ -91,14 +80,25 @@ export const JOB_STATUS = {
 
 export const SCAN_RUN_STATUSES = JOB_STATUSES;
 
-export const BACKGROUND_JOB_RUN_STATUSES = ["running", "completed", "partial", "failed"] as const;
+export const BACKGROUND_JOB_RUN_STATUSES = [
+  "pending",
+  "queued",
+  "running",
+  "completed",
+  "partial",
+  "failed",
+  "missed",
+] as const;
 export type BackgroundJobRunStatus = (typeof BACKGROUND_JOB_RUN_STATUSES)[number];
 
 export const BACKGROUND_JOB_RUN_STATUS = {
+  pending: "pending",
+  queued: "queued",
   running: "running",
   completed: "completed",
   partial: "partial",
   failed: "failed",
+  missed: "missed",
 } as const satisfies Record<BackgroundJobRunStatus, BackgroundJobRunStatus>;
 
 export const COLLECTION_PREPARATION_STATUSES = [
@@ -142,7 +142,6 @@ export const AUTH_PROVIDER = {
 
 export const DATA_PROVIDER_KEY = {
   eodhd: "eodhd",
-  zerodha: "zerodha",
   globalDatafeeds: "global-datafeeds",
 } as const;
 
@@ -165,7 +164,6 @@ export const DATA_PROVIDER_SETTINGS_SEEDS: ReadonlyArray<{
   displayName: string;
   priority: number;
 }> = [
-  { key: DATA_PROVIDER_KEY.zerodha, displayName: "Zerodha Kite", priority: 1 },
   { key: DATA_PROVIDER_KEY.globalDatafeeds, displayName: "Global DataFeeds", priority: 1 },
   { key: DATA_PROVIDER_KEY.eodhd, displayName: "EODHD", priority: 100 },
 ];

@@ -3,12 +3,13 @@ import { and, asc, count, desc, eq, gt, gte, ilike, lt, lte, not, or, sql } from
 import { db, type DbOrTx } from "../../db/client";
 import { candles, instruments } from "../../db/schema";
 import { getOrSetCache } from "../../shared/cache";
-import { CANDLE_TIMEFRAME, DATA_PROVIDER_KEY, DEFAULT_EXCHANGE } from "../../shared/constants";
+import { CANDLE_TIMEFRAME, DEFAULT_EXCHANGE } from "../../shared/constants";
 import { normalizeSymbol } from "../../shared/normalize";
 import type { MoveFilter } from "./market-data.schemas";
 import { safeProviderAction, syncLatestDailyCandlesForSymbols } from "./market-data.candle-sync";
-import { hydrateDefaultMarketInstruments, syncProviderInstrumentSearch } from "./market-data.instrument-sync";
+import { hydrateMarketInstruments, syncProviderInstrumentSearch } from "./market-data.instrument-sync";
 import { refreshLatestInstrumentStats } from "./market-data.instruments";
+import { activeUniverseFilter } from "./market-data.universe";
 
 // Complete stock-list/search ownership: query construction, filtering,
 // sorting, pagination, response-row shaping, AND the on-demand provider
@@ -23,12 +24,6 @@ export type StockSortField = "symbol" | "name" | "close" | "changePct" | "volume
 export type StockSortDirection = "asc" | "desc";
 
 export const NSE_NORMAL_EQUITY_SYMBOL_PATTERN = "^[A-Z][A-Z0-9&-]*$";
-// Bond/NCD "New" series tickers (e.g. "AAFS27A-N0", "826TN25-N3") all end in
-// -N<digits> regardless of what precedes it - the previous pattern required
-// the symbol to also start with a digit, so letter-prefixed debt series
-// tickers slipped through the exclusion entirely.
-const NSE_DEBT_SERIES_SYMBOL_PATTERN = "-N[0-9]+$";
-const NSE_NON_EQ_SERIES_SYMBOL_PATTERN = "-(BE|BZ|SM|ST|SZ|E[0-9]+)$";
 
 export function buildStockFilters(input: {
   q?: string;
@@ -38,17 +33,12 @@ export function buildStockFilters(input: {
   includeUnpriced?: boolean;
 }) {
   const filters = [
-    eq(instruments.exchange, input.exchange),
-    eq(instruments.active, true),
+    activeUniverseFilter(input.exchange),
     // Excludes Morningstar-style fund identifiers (e.g. "0P0001Y872") that
     // the provider's instrument search occasionally returns alongside real
     // tradeable tickers - no genuine stock symbol starts with a digit.
     not(ilike(instruments.symbol, "0%")),
     input.includeUnpriced ? undefined : gt(instruments.latestClose, "0"),
-    input.exchange === "NSE" ? eq(instruments.provider, DATA_PROVIDER_KEY.zerodha) : undefined,
-    input.exchange === "NSE" ? sql`${instruments.symbol} ~ ${NSE_NORMAL_EQUITY_SYMBOL_PATTERN}` : undefined,
-    input.exchange === "NSE" ? not(sql`${instruments.symbol} ~ ${NSE_DEBT_SERIES_SYMBOL_PATTERN}`) : undefined,
-    input.exchange === "NSE" ? not(sql`${instruments.symbol} ~ ${NSE_NON_EQ_SERIES_SYMBOL_PATTERN}`) : undefined,
     input.q
       ? or(ilike(instruments.symbol, `%${normalizeSymbol(input.q)}%`), ilike(instruments.name, `%${input.q.trim()}%`))
       : undefined,
@@ -169,8 +159,7 @@ async function searchChartEligibleBseStocksUncached(
     .from(instruments)
     .where(
       and(
-        eq(instruments.exchange, "BSE"),
-        eq(instruments.active, true),
+        activeUniverseFilter("BSE"),
         not(ilike(instruments.symbol, "0%")),
         or(
           ilike(instruments.symbol, `%${normalizeSymbol(input.q)}%`),
@@ -309,7 +298,7 @@ async function listStocksUncached(input: {
 
   if (!input.q?.trim() && hydratedTotal < MIN_FULL_MARKET_INSTRUMENTS) {
     await safeProviderAction("market-data.full-instrument-hydration", () =>
-      hydrateDefaultMarketInstruments(exchange)
+      hydrateMarketInstruments(exchange)
     );
     rows = await readStockRows(queryInput);
     total = await countStockRows(queryInput);
@@ -333,8 +322,8 @@ async function listStocksUncached(input: {
         syncProviderInstrumentSearch(input.q ?? "", exchange)
       );
     } else {
-      await safeProviderAction("market-data.default-instrument-hydration", () =>
-        hydrateDefaultMarketInstruments(exchange)
+      await safeProviderAction("market-data.instrument-hydration", () =>
+        hydrateMarketInstruments(exchange)
       );
       rows = await readStockRows(queryInput);
       total = await countStockRows(queryInput);

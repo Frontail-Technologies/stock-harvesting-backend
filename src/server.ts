@@ -2,12 +2,9 @@ import { createServer } from "http";
 
 import { createApp } from "./app";
 import { pool } from "./db/client";
-import {
-  closeQueues,
-  scheduleCandleBootstrapReconciliation,
-  scheduleRepeatableDailyCandleSync,
-  scheduleRepeatableMarketDataSync,
-} from "./modules/jobs/queues";
+import { closeQueues } from "./modules/jobs/queues";
+import { scheduleProductionMarketDataJobs } from "./modules/jobs/schedule-production-jobs";
+import { startMarketDataLedgerReconciliation } from "./modules/jobs/market-data-job-ledger";
 import { closeRealtimeEvents, subscribeRealtimeEvents } from "./modules/jobs/realtime-events";
 import { startWorkerStatusChangeMonitor } from "./modules/jobs/worker-status.service";
 import {
@@ -38,9 +35,8 @@ const stopWorkerStatusMonitor = startWorkerStatusChangeMonitor();
 
 server.listen(env.PORT, () => {
   logger.info({ port: env.PORT }, "Backend listening");
-  void scheduleRepeatableMarketDataSync();
-  void scheduleRepeatableDailyCandleSync();
-  void scheduleCandleBootstrapReconciliation();
+  void scheduleProductionMarketDataJobs();
+  startMarketDataLedgerReconciliation();
 });
 
 async function shutdown(signal: string) {

@@ -4,12 +4,11 @@ import { db } from "../../db/client";
 import { dataProviderConnections } from "../../db/schema";
 import { getOrSetCache, invalidateCacheByPrefix } from "../../shared/cache";
 import { DATA_PROVIDER_KEY, PROVIDER_STATUS, type ProviderCapability } from "../../shared/constants";
-import { badRequest, notFound } from "../../shared/errors";
-import { decryptField, encryptField } from "../security/encryption";
+import { notFound } from "../../shared/errors";
+import { decryptField } from "../security/encryption";
 import {
   adapterSupportsCapability,
   getCandidateProviderKeysForExchange,
-  getConnectableDataProviderAdapter,
   getDataProviderAdapterByProvider,
   getDataProviderAdapterForExchange,
   getEodhdDataProviderAdapter,
@@ -79,8 +78,8 @@ export async function checkConnectionWithTimeout(
 }
 
 // isConfigured() alone (env-key presence) is enough for non-OAuth providers,
-// but Zerodha requiresConnection - a present API key doesn't mean there's a
-// live, unexpired access token, so a real usability check needs the same
+// but a provider that requiresConnection (none today) needs more: a present
+// API key doesn't mean there's a live, unexpired access token, so a real usability check needs the same
 // connection-state read getProviderStatus already does. Cached briefly so
 // this doesn't add a DB round trip to every single NSE candle request on
 // top of the one getActiveProviderAccessToken already does downstream.
@@ -151,7 +150,7 @@ export function getDataProviderAdapter() {
 
 // This is the same live/real connectivity check the admin "Data Providers"
 // page's per-provider status panels use (checkConnection() ping for
-// non-OAuth providers, stored OAuth connection state for Zerodha) - it's
+// non-OAuth providers, stored OAuth connection state otherwise) - it's
 // the most accurate signal this codebase has for "is this provider
 // actually working right now." Feeding it into the throttled
 // recordProviderSuccess/recordProviderFailure health tracker means the
@@ -183,10 +182,10 @@ async function recordStatusHealth(
 // `connected`/`status` mirror `providerConfigured` because there is no
 // connection concept to check without going to the network - real
 // reachability is getProviderHealth's job, queried independently by the UI.
-// For an OAuth provider (Zerodha) it reads the stored connection row and token
-// expiry exactly as before, including the expired-token write-back.
+// For an OAuth-style provider (none active today) it reads the stored connection
+// row and token expiry, including the expired-token write-back.
 export async function getProviderStatus(
-  provider: string = DATA_PROVIDER_KEY.zerodha
+  provider: string = DATA_PROVIDER_KEY.globalDatafeeds
 ): Promise<ProviderConnectionStatus> {
   const adapter = getDataProviderAdapterByProvider(provider);
   if (!adapter) throw notFound("Data provider not found");
@@ -323,43 +322,6 @@ export async function getProviderHealth(provider: string): Promise<ProviderHealt
   recordProviderHealthObservation(adapter.providerKey, health);
 
   return { provider: adapter.providerKey, ...health };
-}
-
-export function getProviderConnectUrl() {
-  return getConnectableDataProviderAdapter().getConnectUrl();
-}
-
-export async function saveProviderToken(input: {
-  requestToken: string;
-  provider?: string;
-}) {
-  const adapter = input.provider
-    ? getDataProviderAdapterByProvider(input.provider)
-    : getConnectableDataProviderAdapter();
-
-  if (!adapter) throw notFound("Data provider not found");
-  if (!adapter.requiresConnection) {
-    throw badRequest("Selected data provider uses server-side API credentials");
-  }
-
-  const tokenData = await adapter.exchangeRequestToken(input.requestToken);
-
-  const [connection] = await db
-    .insert(dataProviderConnections)
-    .values({
-      provider: adapter.providerKey,
-      status: PROVIDER_STATUS.connected,
-      encryptedAccessToken: encryptField(tokenData.accessToken),
-      encryptedRefreshToken: tokenData.refreshToken
-        ? encryptField(tokenData.refreshToken)
-        : null,
-      encryptedAccountId: tokenData.accountId ? encryptField(tokenData.accountId) : null,
-      expiresAt: tokenData.expiresAt,
-    })
-    .returning();
-
-  invalidateCacheByPrefix("providerEligibility");
-  return connection;
 }
 
 export async function getActiveProviderAccessToken(provider: string) {

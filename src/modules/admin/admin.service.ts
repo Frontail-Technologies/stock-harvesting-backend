@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import {
@@ -34,10 +34,8 @@ import {
 } from "../weekly-strong-backtest/weekly-strong-backtest.generation";
 import {
   getAllProviderLocalStatuses,
-  getProviderConnectUrl,
   getProviderHealth,
   getProviderStatus,
-  saveProviderToken,
 } from "../data-provider/data-provider.service";
 import {
   getDataProviderAdapterByProvider,
@@ -300,10 +298,6 @@ export async function deleteUser(input: { actorUserId: string; userId: string })
   return { id: deleted.id };
 }
 
-export async function getAdminProviderStatus() {
-  return getProviderStatus();
-}
-
 // Local/DB-derived only - no external provider request (see
 // getAllProviderLocalStatuses). Kept a thin passthrough so the route layer
 // doesn't reach across modules.
@@ -348,7 +342,9 @@ export async function getAdminDataProviderSettings() {
   ]);
   const statusByProvider = new Map(statuses.map((entry) => [entry.provider, entry.status]));
 
+  // A retired provider's settings row (e.g. the old zerodha one) is kept in the DB but has no adapter, so it is never listed.
   return settingsRows
+    .filter((row) => getDataProviderAdapterByProvider(row.key) !== null)
     .map((row) => {
       const adapter = getDataProviderAdapterByProvider(row.key);
       const status = statusByProvider.get(row.key);
@@ -411,28 +407,35 @@ export async function updateAdminDataProviderSettings(input: {
   return updated;
 }
 
-export async function createProviderConnectUrl(actorUserId: string) {
-  const url = getProviderConnectUrl();
-  await writeAuditLog({
-    actorUserId,
-    action: "data_provider.connect_url_created",
-    targetType: "data_provider",
-  });
-  return { url };
+async function failStaleSyncJobs() {
+  const staleBefore = new Date(Date.now() - 60 * 60 * 1000);
+  await db.update(syncJobs).set({
+    status: JOB_STATUS.failed,
+    errorMessage: "Job stopped reporting progress before completion",
+    updatedAt: new Date(),
+  }).where(and(
+    inArray(syncJobs.status, [JOB_STATUS.queued, JOB_STATUS.running]),
+    lt(syncJobs.updatedAt, staleBefore),
+  ));
 }
 
-export async function completeProviderConnection(input: {
-  actorUserId?: string;
-  requestToken: string;
-}) {
-  const connection = await saveProviderToken({ requestToken: input.requestToken });
-  await writeAuditLog({
-    actorUserId: input.actorUserId ?? null,
-    action: "data_provider.connected",
-    targetType: "data_provider",
-    targetId: connection.id,
-  });
-  return { connected: true };
+async function assertNoActiveSyncJob(type: string, identityKey?: string, identityValue?: string) {
+  await failStaleSyncJobs();
+  const conditions = [eq(syncJobs.type, type), inArray(syncJobs.status, [JOB_STATUS.queued, JOB_STATUS.running])];
+  if (identityKey && identityValue) conditions.push(sql`${syncJobs.payload} ->> ${identityKey} = ${identityValue}`);
+  const [activeJob] = await db.select({ id: syncJobs.id }).from(syncJobs).where(and(...conditions)).limit(1);
+  if (activeJob) conflict("This job is already queued or running");
+}
+
+async function assertBacktestCooldown(type: string, collectionId: string) {
+  const cooldownStartedAt = new Date(Date.now() - 10 * 60 * 1000);
+  const [recentJob] = await db.select({ id: syncJobs.id }).from(syncJobs).where(and(
+    eq(syncJobs.type, type),
+    eq(syncJobs.status, JOB_STATUS.completed),
+    gte(syncJobs.updatedAt, cooldownStartedAt),
+    sql`${syncJobs.payload} ->> 'collectionId' = ${collectionId}`,
+  )).limit(1);
+  if (recentJob) conflict("This backtest completed recently. Please wait 10 minutes before running it again");
 }
 
 export async function triggerInstrumentSync(input: {
@@ -445,22 +448,31 @@ export async function triggerInstrumentSync(input: {
     .values({
       type: SYNC_JOB_TYPES.instrumentSync,
       status: queue ? JOB_STATUS.queued : JOB_STATUS.running,
-      payload: { exchange: input.exchange },
+      payload: { exchange: input.exchange, progress: 0 },
     })
     .returning();
 
   if (queue) {
-    await queue.add(JOB_NAMES.instrumentSync, {
-      syncJobId: job.id,
-      exchange: input.exchange,
-    });
+    try {
+      await addJobWithTimeout(queue, JOB_NAMES.instrumentSync, {
+        syncJobId: job.id,
+        exchange: input.exchange,
+      });
+    } catch (error) {
+      await db.update(syncJobs).set({
+        status: JOB_STATUS.failed,
+        errorMessage: getErrorMessage(error, "Could not queue instrument sync"),
+        updatedAt: new Date(),
+      }).where(eq(syncJobs.id, job.id));
+      throw error;
+    }
   } else {
     try {
       const result = await syncProviderInstruments(input.exchange);
       await refreshAllLatestInstrumentPrices(input.exchange);
       await db
         .update(syncJobs)
-        .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
+        .set({ status: JOB_STATUS.completed, payload: { ...result, progress: 100 }, updatedAt: new Date() })
         .where(eq(syncJobs.id, job.id));
     } catch (error) {
       logger.error(
@@ -496,20 +508,29 @@ export async function triggerInstrumentSync(input: {
 
 // Runs inline (not via the queue-branch pattern above) — ~22 sequential HTTP requests plus a few bulk UPDATEs finish in seconds, so there's no queue worker registered for this job type.
 export async function triggerSectorClassificationSync(input: { actorUserId: string }) {
+  await assertNoActiveSyncJob(SYNC_JOB_TYPES.sectorClassificationSync);
+  const queue = getMarketDataQueue();
   const [job] = await db
     .insert(syncJobs)
     .values({
       type: SYNC_JOB_TYPES.sectorClassificationSync,
-      status: JOB_STATUS.running,
-      payload: {},
+      status: queue ? JOB_STATUS.queued : JOB_STATUS.running,
+      payload: { progress: 0 },
     })
     .returning();
 
-  try {
+  if (queue) {
+    try {
+      await addJobWithTimeout(queue, JOB_NAMES.sectorClassificationSync, { syncJobId: job.id });
+    } catch (error) {
+      await db.update(syncJobs).set({ status: JOB_STATUS.failed, errorMessage: getErrorMessage(error, "Could not queue sector sync"), updatedAt: new Date() }).where(eq(syncJobs.id, job.id));
+      throw error;
+    }
+  } else try {
     const result = await syncSectorClassifications();
     await db
       .update(syncJobs)
-      .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
+      .set({ status: JOB_STATUS.completed, payload: { ...result, progress: 100 }, updatedAt: new Date() })
       .where(eq(syncJobs.id, job.id));
   } catch (error) {
     logger.error(
@@ -545,20 +566,30 @@ export async function triggerIndexCandleBackfill(input: {
   actorUserId: string;
   exchange?: string;
 }) {
+  await assertNoActiveSyncJob(SYNC_JOB_TYPES.indexCandleBackfill, "exchange", input.exchange);
+  await assertNoActiveSyncJob(SYNC_JOB_TYPES.instrumentSync, "exchange", input.exchange);
+  const queue = getMarketDataQueue();
   const [job] = await db
     .insert(syncJobs)
     .values({
       type: SYNC_JOB_TYPES.indexCandleBackfill,
-      status: JOB_STATUS.running,
-      payload: { exchange: input.exchange },
+      status: queue ? JOB_STATUS.queued : JOB_STATUS.running,
+      payload: { exchange: input.exchange, progress: 0 },
     })
     .returning();
 
-  try {
+  if (queue) {
+    try {
+      await addJobWithTimeout(queue, JOB_NAMES.indexCandleBackfill, { syncJobId: job.id, exchange: input.exchange });
+    } catch (error) {
+      await db.update(syncJobs).set({ status: JOB_STATUS.failed, errorMessage: getErrorMessage(error, "Could not queue index backfill"), updatedAt: new Date() }).where(eq(syncJobs.id, job.id));
+      throw error;
+    }
+  } else try {
     const result = await backfillIndexCandles(input.exchange);
     await db
       .update(syncJobs)
-      .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
+      .set({ status: JOB_STATUS.completed, payload: { ...result, progress: 100 }, updatedAt: new Date() })
       .where(eq(syncJobs.id, job.id));
   } catch (error) {
     logger.error(
@@ -589,32 +620,42 @@ export async function triggerIndexCandleBackfill(input: {
   return job;
 }
 
-// Refreshes latestClose/latestChangePct/latestVolume for every known instrument without the heavier "Sync NSE" metadata resync — a standalone catch-up since gainers/decliners filtering needs these columns populated market-wide.
+// Refreshes latestClose/latestChangePct/latestVolume for every known instrument without the heavier instrument-metadata resync — a standalone catch-up since gainers/decliners filtering needs these columns populated market-wide.
 export async function triggerPriceRefresh(input: {
   actorUserId: string;
   exchange: string;
 }) {
+  await assertNoActiveSyncJob(SYNC_JOB_TYPES.priceRefresh, "exchange", input.exchange);
   const queue = getMarketDataQueue();
   const [job] = await db
     .insert(syncJobs)
     .values({
       type: SYNC_JOB_TYPES.priceRefresh,
       status: queue ? JOB_STATUS.queued : JOB_STATUS.running,
-      payload: { exchange: input.exchange },
+      payload: { exchange: input.exchange, progress: 0 },
     })
     .returning();
 
   if (queue) {
-    await queue.add(JOB_NAMES.priceRefresh, {
-      syncJobId: job.id,
-      exchange: input.exchange,
-    });
+    try {
+      await addJobWithTimeout(queue, JOB_NAMES.priceRefresh, {
+        syncJobId: job.id,
+        exchange: input.exchange,
+      });
+    } catch (error) {
+      await db.update(syncJobs).set({
+        status: JOB_STATUS.failed,
+        errorMessage: getErrorMessage(error, "Could not queue price refresh"),
+        updatedAt: new Date(),
+      }).where(eq(syncJobs.id, job.id));
+      throw error;
+    }
   } else {
     try {
       const result = await refreshAllLatestInstrumentPrices(input.exchange);
       await db
         .update(syncJobs)
-        .set({ status: JOB_STATUS.completed, payload: result, updatedAt: new Date() })
+        .set({ status: JOB_STATUS.completed, payload: { ...result, progress: 100 }, updatedAt: new Date() })
         .where(eq(syncJobs.id, job.id));
     } catch (error) {
       logger.error(
@@ -678,7 +719,78 @@ export async function triggerDailyCandleRefresh(input: { actorUserId: string; sy
 }
 
 export async function listJobs() {
+  await failStaleSyncJobs();
   return db.select().from(syncJobs).orderBy(desc(syncJobs.createdAt)).limit(50);
+}
+
+export async function getAdminAnalytics(input: { period: "all" | "today" | "7d" | "30d" | "90d" }) {
+  const days = input.period === "today" ? 1 : input.period === "7d" ? 7 : input.period === "30d" ? 30 : input.period === "90d" ? 90 : null;
+  const today = sql`(now() at time zone 'Asia/Kolkata')::date`;
+  const userFilter = days === null
+    ? sql`true`
+    : sql`(created_at at time zone 'Asia/Kolkata')::date >= ${today} - ${days - 1} * interval '1 day'`;
+  const jobFilter = days === null
+    ? sql`true`
+    : sql`(created_at at time zone 'Asia/Kolkata')::date >= ${today} - ${days - 1} * interval '1 day'`;
+  const userSeriesStart = days === null
+    ? sql`COALESCE((SELECT min(created_at at time zone 'Asia/Kolkata')::date FROM users), ${today})`
+    : sql`${today} - ${days - 1} * interval '1 day'`;
+  const jobSeriesStart = days === null
+    ? sql`COALESCE(LEAST((SELECT min(created_at at time zone 'Asia/Kolkata')::date FROM sync_jobs), (SELECT min(created_at at time zone 'Asia/Kolkata')::date FROM background_job_runs)), (SELECT min(created_at at time zone 'Asia/Kolkata')::date FROM sync_jobs), (SELECT min(created_at at time zone 'Asia/Kolkata')::date FROM background_job_runs), ${today})`
+    : sql`${today} - ${days - 1} * interval '1 day'`;
+  const [summaryResult, growthResult, plansResult, jobsResult, readinessResult] = await Promise.all([
+    db.execute(sql`
+      SELECT
+        (SELECT count(*) FROM users) AS total_users,
+        (SELECT count(*) FROM users WHERE email_verified_at IS NOT NULL) AS verified_users,
+        (SELECT count(*) FROM users WHERE ${userFilter}) AS new_users_30d,
+        (SELECT count(*) FROM market_collections WHERE active = true) AS active_segments,
+        (SELECT count(*) FROM market_collection_members WHERE active = true) AS total_members,
+        (SELECT count(*) FROM sync_jobs WHERE status IN ('queued', 'running')) +
+          (SELECT count(*) FROM background_job_runs WHERE status IN ('pending', 'queued', 'running')) AS active_jobs
+    `),
+    db.execute(sql`
+      WITH days AS (SELECT generate_series(${userSeriesStart}, ${today}, interval '1 day')::date AS day)
+      SELECT days.day::text, count(users.id)::int AS users
+      FROM days LEFT JOIN users ON (users.created_at at time zone 'Asia/Kolkata')::date = days.day
+      GROUP BY days.day ORDER BY days.day
+    `),
+    db.execute(sql`SELECT plan::text AS name, count(*)::int AS value FROM users WHERE ${userFilter} GROUP BY plan ORDER BY value DESC`),
+    db.execute(sql`
+      WITH days AS (SELECT generate_series(${jobSeriesStart}, ${today}, interval '1 day')::date AS day),
+      jobs AS (
+        SELECT (created_at at time zone 'Asia/Kolkata')::date AS day, status::text AS status FROM sync_jobs WHERE ${jobFilter}
+        UNION ALL
+        SELECT (created_at at time zone 'Asia/Kolkata')::date AS day, status::text AS status FROM background_job_runs WHERE ${jobFilter}
+      )
+      SELECT days.day::text,
+        count(*) FILTER (WHERE jobs.status = 'completed')::int AS successful,
+        count(*) FILTER (WHERE jobs.status IN ('partial', 'failed', 'missed'))::int AS failed
+      FROM days LEFT JOIN jobs ON jobs.day = days.day
+      GROUP BY days.day ORDER BY days.day
+    `),
+    db.execute(sql`SELECT preparation_status::text AS name, count(*)::int AS value FROM market_collections GROUP BY preparation_status ORDER BY value DESC`),
+  ]);
+  const summary = summaryResult.rows[0] ?? {};
+  const number = (value: unknown) => Number(value ?? 0);
+  const jobRows = jobsResult.rows.map((row) => ({ day: String(row.day), successful: number(row.successful), failed: number(row.failed) }));
+  const successfulJobs = jobRows.reduce((sum, row) => sum + row.successful, 0);
+  const failedJobs = jobRows.reduce((sum, row) => sum + row.failed, 0);
+  return {
+    summary: {
+      totalUsers: number(summary.total_users),
+      verifiedUsers: number(summary.verified_users),
+      newUsers30d: number(summary.new_users_30d),
+      activeSegments: number(summary.active_segments),
+      totalMembers: number(summary.total_members),
+      activeJobs: number(summary.active_jobs),
+      jobSuccessRate: successfulJobs + failedJobs > 0 ? Math.round((successfulJobs / (successfulJobs + failedJobs)) * 100) : 100,
+    },
+    userGrowth: growthResult.rows.map((row) => ({ day: String(row.day), users: number(row.users) })),
+    plans: plansResult.rows.map((row) => ({ name: String(row.name), value: number(row.value) })),
+    jobs: jobRows,
+    segmentReadiness: readinessResult.rows.map((row) => ({ name: String(row.name), value: number(row.value) })),
+  };
 }
 
 export async function getBrandingSettings() {
@@ -748,6 +860,8 @@ export async function triggerWeeklyStrongBacktestBackfill(input: {
   collectionId: string;
   weeks?: number;
 }) {
+  await assertNoActiveSyncJob(SYNC_JOB_TYPES.weeklyStrongBacktestBackfill, "collectionId", input.collectionId);
+  await assertBacktestCooldown(SYNC_JOB_TYPES.weeklyStrongBacktestBackfill, input.collectionId);
   const queue = getMarketDataQueue();
   const [job] = await db
     .insert(syncJobs)
@@ -844,6 +958,8 @@ export async function triggerWeeklyStrongBacktestHistoricalRebuild(input: {
   actorUserId: string;
   collectionId: string;
 }) {
+  await assertNoActiveSyncJob(SYNC_JOB_TYPES.weeklyStrongBacktestHistoricalRebuild, "collectionId", input.collectionId);
+  await assertBacktestCooldown(SYNC_JOB_TYPES.weeklyStrongBacktestHistoricalRebuild, input.collectionId);
   const queue = getMarketDataQueue();
   const [job] = await db
     .insert(syncJobs)

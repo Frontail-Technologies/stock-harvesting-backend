@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../../db/client";
 import { instruments, marketCollections } from "../../db/schema";
@@ -8,9 +8,8 @@ import { logger } from "../../shared/logger";
 import { normalizeSymbol } from "../../shared/normalize";
 import { getActiveProviderAccessToken, getEligibleProviderAdapter, markProviderConnectionExpired } from "../data-provider/data-provider.service";
 import { recordProviderFailure, recordProviderSuccess } from "../data-provider/data-provider-settings.service";
-import { NSE_INDEX_EXCHANGE } from "../data-provider/adapters/zerodha-data-provider.adapter";
 import { GLOBAL_DATAFEEDS_INDEX_EXCHANGE } from "../data-provider/adapters/global-datafeeds/global-datafeeds.constants";
-import type { DataProviderAdapter, ProviderDailyCandle, ProviderSymbolDailyCandle } from "../data-provider/data-provider.types";
+import type { ProviderDailyCandle, ProviderSymbolDailyCandle } from "../data-provider/data-provider.types";
 import { aggregateMonthlyCandles, aggregateWeeklyCandles } from "./candle-aggregation";
 import {
   COMPLETED_CHART_BACKFILL_COOLDOWN_MS,
@@ -23,9 +22,9 @@ import {
   upsertCandles,
   type CandleUpsertInput,
 } from "./market-data.candles";
-import { getInstrumentsBySymbol, refreshLatestInstrumentStats, type InstrumentBySymbolRow } from "./market-data.instruments";
+import { getInstrumentsBySymbol, refreshLatestInstrumentStats } from "./market-data.instruments";
 import { ensureInstrumentsForSymbols, getOrCreateInstrument } from "./market-data.instrument-sync";
-import { getDateDaysAgo, getDefaultChartHistoryFromDate, getTodayDate } from "./market-data.dates";
+import { getDefaultChartHistoryFromDate } from "./market-data.dates";
 import { planDailyCandleSync } from "./market-data.candle-sync-plan";
 import { getExchangeTodayIfTradingDay, getLatestExpectedTradingDay } from "./trading-calendar";
 import { applyProviderDailyCandle, readCurrentDayCandle } from "../market-stream/market-stream-candles";
@@ -33,6 +32,7 @@ import { publishMarketStreamEvent } from "../market-stream/market-stream.hub";
 import { isProviderCapabilityCoolingDown } from "../market-stream/market-stream.capabilities";
 import { ensureMarketStreamSymbols } from "../market-stream/market-stream.service";
 import { deleteDashboardSnapshots } from "./dashboard-snapshot-store";
+import { activeUniverseFilter, productionProviderKeyForExchange } from "./market-data.universe";
 import {
   candleBackfillDurationSeconds,
   candleBackfillsTotal,
@@ -220,7 +220,7 @@ const INDEX_CANDLE_BACKFILL_CONCURRENCY = 4;
 // bootstrap path. Idempotent per symbol (replaceCandlesAtomically), failure
 // isolated per symbol, bounded concurrency. `deps` is a test seam only.
 export async function backfillIndexCandles(
-  exchange: string = NSE_INDEX_EXCHANGE,
+  exchange: string = GLOBAL_DATAFEEDS_INDEX_EXCHANGE,
   deps: {
     backfill?: (input: { symbol: string; from: string; to: string; exchange: string }) => Promise<unknown>;
     concurrency?: number;
@@ -232,7 +232,7 @@ export async function backfillIndexCandles(
   const indexInstruments = await db
     .select({ symbol: instruments.symbol })
     .from(instruments)
-    .where(and(eq(instruments.exchange, exchange), eq(instruments.active, true)));
+    .where(activeUniverseFilter(exchange));
 
   const from = getDefaultChartHistoryFromDate();
   const to = new Date().toISOString().slice(0, 10);
@@ -289,48 +289,6 @@ async function runWithConcurrency<T>(
   );
 }
 
-async function fetchLatestDailyCandlesFromStoredInstruments(input: {
-  adapter: DataProviderAdapter;
-  accessToken?: string;
-  exchange: string;
-  symbols: string[];
-  instrumentsBySymbol: Map<string, InstrumentBySymbolRow>;
-}) {
-  const adapter = input.adapter;
-  const from = getDateDaysAgo(14);
-  const to = getTodayDate();
-  const latestCandles: ProviderSymbolDailyCandle[] = [];
-
-  await runWithConcurrency(input.symbols, 8, async (symbol) => {
-    const instrument = input.instrumentsBySymbol.get(symbol);
-    if (!instrument?.instrumentToken) return;
-
-    try {
-      const dailyCandles = await adapter.fetchDailyCandles({
-        accessToken: input.accessToken,
-        instrumentToken: instrument.instrumentToken,
-        symbol,
-        from,
-        to,
-        exchangeCode: input.exchange,
-      });
-      const latest = dailyCandles[dailyCandles.length - 1];
-      if (latest) latestCandles.push({ ...latest, symbol });
-    } catch (error) {
-      logger.debug(
-        {
-          exchange: input.exchange,
-          symbol,
-          message: getErrorMessage(error, "Unknown provider error"),
-        },
-        "Latest candle sync skipped symbol"
-      );
-    }
-  });
-
-  return latestCandles;
-}
-
 const failedLatestCandleSyncAtBySymbol = new Map<string, number>();
 
 function shouldRetryLatestCandleSync(symbol: string) {
@@ -361,20 +319,11 @@ export async function syncLatestDailyCandlesForSymbols(
   const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
   let latestCandles: ProviderSymbolDailyCandle[];
   try {
-    latestCandles =
-      adapter.providerKey === DATA_PROVIDER_KEY.zerodha
-        ? await fetchLatestDailyCandlesFromStoredInstruments({
-            adapter,
-            accessToken,
-            exchange,
-            symbols: symbolsToSync,
-            instrumentsBySymbol,
-          })
-        : await adapter.fetchLatestDailyCandles({
-            accessToken,
-            symbols: symbolsToSync,
-            exchangeCode: exchange,
-          });
+    latestCandles = await adapter.fetchLatestDailyCandles({
+      accessToken,
+      symbols: symbolsToSync,
+      exchangeCode: exchange,
+    });
     void recordProviderSuccess(adapter.providerKey);
   } catch (error) {
     void recordProviderFailure(adapter.providerKey, error);
@@ -556,7 +505,6 @@ const FULL_PRICE_REFRESH_CHUNK_SIZE = 200;
 
 // Mirrors the frontend's INDEX_EXCHANGE_BY_EQUITY_EXCHANGE - which index snapshot to invalidate alongside an equity exchange's own; an imprecise mapping is harmless.
 const INDEX_EXCHANGE_BY_EQUITY_EXCHANGE: Record<string, string> = {
-  NSE: NSE_INDEX_EXCHANGE,
   BSE: GLOBAL_DATAFEEDS_INDEX_EXCHANGE,
 };
 
@@ -576,14 +524,14 @@ async function invalidateDashboardSnapshotsForExchange(exchange: string) {
 }
 
 // Unlike listStocks' lazy per-page hydration, this walks every active instrument for the exchange so gainers/decliners stay complete table-wide.
-export async function refreshAllLatestInstrumentPrices(exchange: string = DEFAULT_EXCHANGE) {
+export async function refreshAllLatestInstrumentPrices(exchange: string) {
   const startedAt = Date.now();
 
   try {
     const rows = await db
       .select({ symbol: instruments.symbol })
       .from(instruments)
-      .where(and(eq(instruments.exchange, exchange), eq(instruments.active, true)));
+      .where(activeUniverseFilter(exchange));
 
     const symbols = rows.map((row) => row.symbol);
     let refreshed = 0;
@@ -642,7 +590,7 @@ export type DailyCandleSyncResult = {
 // range planning (planDailyCandleSync) and the write path (backfillDailyCandles)
 // stay identical between both callers, no separate formulas.
 export async function refreshDailyCandles(
-  input: { symbol: string; exchange?: string },
+  input: { symbol: string; exchange?: string; targetDate?: string },
   dbClient: DbOrTx = db
 ): Promise<DailyCandleSyncResult> {
   const symbol = normalizeSymbol(input.symbol);
@@ -658,10 +606,14 @@ export async function refreshDailyCandles(
     timeframe: CANDLE_TIMEFRAME.day,
   });
   const latestStoredDate = history?.to ?? null;
-  const latestExpectedTradingDate = getLatestExpectedTradingDay(exchange);
+  const latestExpectedTradingDate = input.targetDate ?? getLatestExpectedTradingDay(exchange);
   const plan = planDailyCandleSync({ latestStoredDate, latestExpectedTradingDate });
-  const syncFrom = plan.kind === "bootstrap-required" ? getDefaultChartHistoryFromDate() : plan.from;
-  const syncTo = plan.kind === "bootstrap-required" ? latestExpectedTradingDate : plan.to;
+  const syncFrom = input.targetDate
+    ? input.targetDate
+    : plan.kind === "bootstrap-required" ? getDefaultChartHistoryFromDate() : plan.from;
+  const syncTo = input.targetDate
+    ? input.targetDate
+    : plan.kind === "bootstrap-required" ? latestExpectedTradingDate : plan.to;
 
   const datesBefore = await readCandleDatesInRange({
     instrumentId: instrument.id,
@@ -714,6 +666,7 @@ export type DailyCandleSyncSummary = {
   alreadyCurrent: number;
   bootstrapRequired: number;
   providerEmpty: number;
+  providerEmptySymbols: string[];
   failed: number;
   failedSymbols: string[];
   failedDetails: DailyCandleSyncFailureDetail[];
@@ -734,13 +687,22 @@ export type DailyCandleSyncProgress = {
 };
 
 export async function syncDailyCandlesForActiveInstruments(
-  exchange: string = DEFAULT_EXCHANGE,
-  onProgress?: (progress: DailyCandleSyncProgress) => void
+  exchange: string,
+  onProgress?: (progress: DailyCandleSyncProgress) => void,
+  symbols?: string[],
+  targetDate?: string,
 ): Promise<DailyCandleSyncSummary> {
+  const normalizedSymbols = symbols
+    ? [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))]
+    : null;
   const rows = await db
     .select({ symbol: instruments.symbol })
     .from(instruments)
-    .where(and(eq(instruments.exchange, exchange), eq(instruments.active, true)));
+    .where(
+      normalizedSymbols
+        ? and(activeUniverseFilter(exchange), inArray(instruments.symbol, normalizedSymbols))
+        : activeUniverseFilter(exchange),
+    );
 
   const summary: DailyCandleSyncSummary = {
     processed: 0,
@@ -749,6 +711,7 @@ export async function syncDailyCandlesForActiveInstruments(
     alreadyCurrent: 0,
     bootstrapRequired: 0,
     providerEmpty: 0,
+    providerEmptySymbols: [],
     failed: 0,
     failedSymbols: [],
     failedDetails: [],
@@ -757,12 +720,15 @@ export async function syncDailyCandlesForActiveInstruments(
   await runWithConcurrency(rows, DAILY_CANDLE_SYNC_CONCURRENCY, async (row) => {
     summary.processed += 1;
     try {
-      const result = await refreshDailyCandles({ symbol: row.symbol, exchange });
+      const result = await refreshDailyCandles({ symbol: row.symbol, exchange, targetDate });
       if (result.status === "updated") summary.updated += 1;
       else if (result.status === "repaired") summary.repaired += 1;
       else if (result.status === "already-current") summary.alreadyCurrent += 1;
       else if (result.status === "bootstrap-required") summary.bootstrapRequired += 1;
-      else if (result.status === "provider-empty") summary.providerEmpty += 1;
+      else if (result.status === "provider-empty") {
+        summary.providerEmpty += 1;
+        summary.providerEmptySymbols.push(row.symbol);
+      }
       else {
         summary.failed += 1;
         summary.failedSymbols.push(row.symbol);
@@ -811,14 +777,18 @@ export async function syncDailyCandlesForActiveInstruments(
 }
 
 export async function findActiveSymbolsWithoutDailyCandles(
-  exchange: string = DEFAULT_EXCHANGE,
+  exchange: string,
   limit = 100,
 ) {
+  const providerKey = productionProviderKeyForExchange(exchange);
+  if (!providerKey) return [];
+
   const result = await db.execute<{ symbol: string }>(sql`
     SELECT i.symbol
     FROM instruments i
     WHERE i.exchange = ${exchange}
       AND i.active = true
+      AND i.provider = ${providerKey}
       AND NOT EXISTS (
         SELECT 1
         FROM candles c

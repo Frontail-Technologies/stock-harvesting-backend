@@ -12,8 +12,8 @@ import {
   getActiveMemberInstrumentRows,
   requireCollectionByCode,
 } from "../market-collections/market-collections.service";
-import { getIsoWeekRange, getWeekEndingFriday } from "../market-data/trading-calendar";
-import { resolveScannerSignalFromDailyCloses } from "../scanner/scanner-current-signal";
+import { getIsoWeekRange, getWeekEndingFriday, resolveLatestCompletedWeekEnding } from "../market-data/trading-calendar";
+import { resolveLiveScannerSignalFromDailyCloses } from "../scanner/scanner-current-signal";
 import {
   DEFAULT_SCANNER_LOOKBACK,
   SCANNER_LOOKBACK_WEEKS,
@@ -27,7 +27,7 @@ import {
   type WeeklyStrongBacktestMembershipMode,
 } from "./weekly-strong-backtest.constants";
 
-const MEMBERSHIP_CHANGES_CACHE_TTL_MS = 10 * 60_000;
+const MEMBERSHIP_CHANGES_CACHE_TTL_MS = 2 * 60_000;
 
 function getMembershipChangesFetchYears(lookback: ScannerLookbackMultiplier) {
   return Math.ceil(SCANNER_LOOKBACK_WEEKS[lookback] / 52) + 1;
@@ -265,6 +265,11 @@ export type WeeklyStrongBacktestMembershipChanges = {
   available: boolean;
   weekEnding: string | null;
   previousWeekEnding: string | null;
+  // True while weekEnding is a week that hasn't finished yet: the diff is the
+  // stock's position right now against the last completed week.
+  inProgress: boolean;
+  // Latest daily candle date behind the current-week reading.
+  asOf: string | null;
   enteredStocks: WeeklyStrongBacktestMembershipChangeMember[];
   exitedStocks: WeeklyStrongBacktestMembershipChangeMember[];
 };
@@ -309,7 +314,9 @@ export function computeMembershipChanges<T extends WeeklyStrongBacktestMembershi
 // instrumentId diff, agnostic to which evaluator produced its inputs) and
 // resolveScannerSignalFromDailyCloses (the same Scanner chain the chart and
 // Stock Harvest table use) for both the current AND the immediately
-// preceding completed week's membership in one pass per symbol.
+// preceding completed week's membership in one pass per symbol. The current
+// week is the in-progress one (resolveLiveScannerSignalFromDailyCloses), so
+// stocks show up as soon as they enter or leave, not only once the week ends.
 export async function getWeeklyStrongBacktestMembershipChanges(input: {
   code: string;
   weekEnding?: string;
@@ -343,6 +350,8 @@ async function computeWeeklyStrongBacktestMembershipChanges(input: {
     available: false,
     weekEnding: null,
     previousWeekEnding: null,
+    inProgress: false,
+    asOf: null,
     enteredStocks: [],
     exitedStocks: [],
   };
@@ -361,6 +370,7 @@ async function computeWeeklyStrongBacktestMembershipChanges(input: {
 
   let weekEnding: string | null = null;
   let previousWeekEnding: string | null = null;
+  let asOf: string | null = null;
   const currentMembers: WeeklyStrongBacktestMembershipChangeMember[] = [];
   const previousMembers: WeeklyStrongBacktestMembershipChangeMember[] = [];
 
@@ -368,7 +378,10 @@ async function computeWeeklyStrongBacktestMembershipChanges(input: {
     const dailyRows = dailyCandlesBySymbol.get(member.symbol) ?? [];
     if (dailyRows.length === 0) continue;
 
-    const signal = resolveScannerSignalFromDailyCloses(
+    const lastDailyTime = dailyRows[dailyRows.length - 1].time;
+    if (!asOf || lastDailyTime > asOf) asOf = lastDailyTime;
+
+    const signal = resolveLiveScannerSignalFromDailyCloses(
       dailyRows.map((row) => ({ time: row.time, close: row.close })),
       collection.exchange,
       SCANNER_LOOKBACK_WEEKS[lookback],
@@ -402,6 +415,8 @@ async function computeWeeklyStrongBacktestMembershipChanges(input: {
     available: true,
     weekEnding,
     previousWeekEnding,
+    inProgress: weekEnding > resolveLatestCompletedWeekEnding(collection.exchange),
+    asOf,
     enteredStocks,
     exitedStocks,
   };

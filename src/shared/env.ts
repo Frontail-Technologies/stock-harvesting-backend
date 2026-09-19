@@ -46,15 +46,9 @@ const envSchema = z.object({
   SMTP_USER: z.string().trim().min(1).optional(),
   SMTP_PASSWORD: z.string().min(1).optional(),
   SMTP_FROM: z.string().trim().min(1).optional(),
-  DATA_PROVIDER: z
-    .enum(["eodhd", "zerodha", "global-datafeeds"])
-    .default("eodhd"),
   EODHD_API_TOKEN: z.string().optional(),
   EODHD_EXPIRES_AT: z.string().optional(),
   EODHD_EXCHANGE_CODE: z.string().trim().min(1).default("US"),
-  ZERODHA_API_KEY: z.string().optional(),
-  ZERODHA_API_SECRET: z.string().optional(),
-  ZERODHA_REDIRECT_URL: z.string().url().optional(),
   GLOBAL_DATAFEEDS_ENABLED: z.coerce.boolean().default(false),
   GLOBAL_DATAFEEDS_API_KEY: z.string().optional(),
   GLOBAL_DATAFEEDS_EXPIRES_AT: z.string().optional(),

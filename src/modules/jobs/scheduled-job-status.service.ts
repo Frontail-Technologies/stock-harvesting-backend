@@ -7,7 +7,7 @@ export type ScheduledJobStatus = {
   nextRunAt: string | null;
   lastRun: {
     status: string;
-    startedAt: string;
+    startedAt: string | null;
     finishedAt: string | null;
     processedCount: number;
     updatedCount: number;
@@ -23,6 +23,7 @@ function schedulerIdMatchesJobType(id: string | null | undefined, jobType: Backg
     daily_candle_post_market: "post-market",
     daily_candle_retry: "retry",
     daily_candle_evening: "evening",
+    daily_candle_catch_up: "",
     chart_ensure_fresh: "",
   };
   const suffix = suffixByJobType[jobType];
@@ -45,7 +46,7 @@ export async function getScheduledDailyCandleSyncStatuses(): Promise<ScheduledJo
       lastRun: run
         ? {
             status: run.status,
-            startedAt: run.startedAt.toISOString(),
+            startedAt: run.startedAt?.toISOString() ?? null,
             finishedAt: run.finishedAt ? run.finishedAt.toISOString() : null,
             processedCount: run.processedCount,
             updatedCount: run.updatedCount,
