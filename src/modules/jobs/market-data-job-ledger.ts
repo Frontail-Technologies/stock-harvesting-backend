@@ -180,6 +180,19 @@ export async function getHistoricalCoverage(exchange: string, tradingDate: strin
   };
 }
 
+const LIVE_BULLMQ_STATES = new Set(["waiting", "active", "delayed", "prioritized", "waiting-children"]);
+
+// True while BullMQ still holds the job in a state where it will run (or is running) - jobs are removed
+// on completion/failure, so a missing job means nothing is going to process the ledger row.
+export async function hasLiveCatchUpJob(
+  queue: { getJob: (jobId: string) => Promise<{ getState: () => Promise<string> } | undefined | null> },
+  jobId: string,
+) {
+  const job = await queue.getJob(jobId);
+  if (!job) return false;
+  return LIVE_BULLMQ_STATES.has(await job.getState());
+}
+
 export async function createAndQueueCatchUp(
   exchange: string,
   tradingDate: string,
@@ -224,14 +237,21 @@ export async function createAndQueueCatchUp(
     BACKGROUND_JOB_RUN_STATUS.partial,
     BACKGROUND_JOB_RUN_STATUS.missed,
   ]);
+  const bullmqJobId = `market-data-catch-up:${exchange}:${tradingDate}`;
   if (!ledger && !retryableStatuses.has(existing.status)) {
-    return existing.id;
+    // A run marked queued/running is only really in progress while its BullMQ job exists. If the job is
+    // gone (queue cleared, Redis restarted) the run is orphaned and would stay "queued" forever, so it
+    // is enqueued again instead of being skipped.
+    const mayBeOrphaned =
+      existing.status === BACKGROUND_JOB_RUN_STATUS.queued || existing.status === BACKGROUND_JOB_RUN_STATUS.running;
+    if (!mayBeOrphaned) return existing.id;
+    const orphanCheckQueue = getMarketDataQueue();
+    if (!orphanCheckQueue || (await hasLiveCatchUpJob(orphanCheckQueue, bullmqJobId))) return existing.id;
   }
   if (!ledger && "attemptCount" in existing && existing.attemptCount >= 3 && !options?.force) return existing.id;
 
   const queue = getMarketDataQueue();
   if (!queue) return existing.id;
-  const bullmqJobId = `market-data-catch-up:${exchange}:${tradingDate}`;
   try {
     await addJobWithTimeout(
       queue,
