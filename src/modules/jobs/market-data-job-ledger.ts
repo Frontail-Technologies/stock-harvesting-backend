@@ -384,27 +384,36 @@ export async function listMarketDataLedger(limit = 50) {
     .limit(limit);
 }
 
+const RECENT_DATES_LOOKBACK_DAYS = 14;
+
+export function recentDatesLookbackStart(tradingDate: string, days = RECENT_DATES_LOOKBACK_DAYS) {
+  const start = new Date(`${tradingDate}T00:00:00.000Z`);
+  start.setUTCDate(start.getUTCDate() - days);
+  return start.toISOString().slice(0, 10);
+}
+
+// The last few trading dates that have candles for an exchange. It is bounded by time so TimescaleDB
+// only reads the newest chunks; the previous form (DISTINCT over every candle of ~5,900 instruments,
+// listed as bind parameters) scanned the whole hypertable and hit the 30 s query timeout.
+export function recentCandleDatesCondition(exchange: string, tradingDate: string) {
+  return sql`${and(
+    eq(candles.exchange, exchange),
+    eq(candles.timeframe, CANDLE_TIMEFRAME.day),
+    gte(candles.time, recentDatesLookbackStart(tradingDate)),
+    lte(candles.time, tradingDate),
+  )}`;
+}
+
 export async function getMarketDataOperations(at: Date = new Date()) {
   const exchanges = await listProductionExchanges();
   const coverageGroups = await Promise.all(exchanges.map(async (exchange) => {
     const tradingDate = getLatestExpectedTradingDay(exchange, at);
-    const universe = await db
-      .select({ instrumentId: instruments.id })
-      .from(instruments)
-      .where(activeUniverseFilter(exchange));
-    const ids = universe.map((row) => row.instrumentId);
-    const recentDates = ids.length === 0
-      ? []
-      : await db
-          .selectDistinct({ date: candles.time })
-          .from(candles)
-          .where(and(
-            inArray(candles.instrumentId, ids),
-            eq(candles.timeframe, CANDLE_TIMEFRAME.day),
-            lte(candles.time, tradingDate),
-          ))
-          .orderBy(desc(candles.time))
-          .limit(4);
+    const recentDates = await db
+      .selectDistinct({ date: candles.time })
+      .from(candles)
+      .where(recentCandleDatesCondition(exchange, tradingDate))
+      .orderBy(desc(candles.time))
+      .limit(4);
     const dates = [...new Set([tradingDate, ...recentDates.map((row) => row.date)])];
     return Promise.all(dates.map((date) => getHistoricalCoverage(exchange, date)));
   }));
