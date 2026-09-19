@@ -95,6 +95,19 @@ describe("buildLatestCandleStatsQuery - batch", () => {
   });
 });
 
+describe("buildLatestCandleStatsQuery - time bound", () => {
+  const since = new Date("2026-08-01T00:00:00.000Z");
+
+  it.each([[["TCS"]], [["TCS", "INFY"]]])("bounds the candle scan by time when `since` is given (%j)", (symbols) => {
+    const bounded = render(buildLatestCandleStatsQuery(symbols, "BSE", since));
+    const unbounded = render(buildLatestCandleStatsQuery(symbols, "BSE"));
+
+    expect(bounded.sql).toMatch(/AND c\.time >= \$\d+/);
+    expect(unbounded.sql).not.toMatch(/c\.time >=/);
+    expect(bounded.params.some((param) => param instanceof Date && param.getTime() === since.getTime())).toBe(true);
+  });
+});
+
 describe("refreshLatestInstrumentStats", () => {
   it("BSE single symbol: latest two candles produce close, open, volume and change%", async () => {
     const { db, calls } = fakeDb({ TCS: TCS_CANDLES });
@@ -120,7 +133,8 @@ describe("refreshLatestInstrumentStats", () => {
 
     await refreshLatestInstrumentStats("BSE_IDX", ["1000EQ"], db);
 
-    expect(selects(calls)).toHaveLength(1);
+    // time-bounded read, then one unbounded retry for the symbol with no recent candles
+    expect(selects(calls)).toHaveLength(2);
     expect(updates(calls)).toHaveLength(0);
   });
 
@@ -149,7 +163,9 @@ describe("refreshLatestInstrumentStats", () => {
 
     await refreshLatestInstrumentStats("BSE", ["TCS", "NOCANDLES"], db);
 
-    expect(selects(calls)).toHaveLength(1);
+    expect(selects(calls)).toHaveLength(2);
+    expect(selects(calls)[1].params).toContain("NOCANDLES");
+    expect(selects(calls)[1].params).not.toContain("TCS");
     const updateParams = updates(calls)[0].params;
     expect(updateParams).toContain("TCS");
     expect(updateParams).not.toContain("NOCANDLES");

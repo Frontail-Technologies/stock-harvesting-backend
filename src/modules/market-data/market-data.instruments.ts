@@ -413,7 +413,11 @@ export async function upsertInstruments(input: InstrumentUpsertInput[], provider
 // (exchange, symbol) unique key. Filtering candles by exchange + symbol has had
 // no index since migration 0020 dropped candles_exchange_symbol_timeframe_time_unique,
 // which made every lookup scan the whole hypertable.
-export function buildLatestCandleStatsQuery(symbols: string[], exchange: string) {
+// `since` bounds the scan by time so the planner only touches recent chunks of
+// the hypertable instead of every chunk; getLatestStockStats retries unbounded
+// for symbols that have fewer than two candles inside the window.
+export function buildLatestCandleStatsQuery(symbols: string[], exchange: string, since?: Date) {
+  const sinceFilter = since ? sql`AND c.time >= ${since}` : sql``;
   if (symbols.length === 1) {
     const [symbol] = symbols;
     return sql`
@@ -423,6 +427,7 @@ export function buildLatestCandleStatsQuery(symbols: string[], exchange: string)
           SELECT i.id FROM instruments i WHERE i.exchange = ${exchange} AND i.symbol = ${symbol}
         )
         AND c.timeframe = ${CANDLE_TIMEFRAME.day}
+        ${sinceFilter}
       ORDER BY c.time DESC
       LIMIT 2
     `;
@@ -436,6 +441,7 @@ export function buildLatestCandleStatsQuery(symbols: string[], exchange: string)
       FROM candles c
       WHERE c.instrument_id = i.id
         AND c.timeframe = ${CANDLE_TIMEFRAME.day}
+        ${sinceFilter}
       ORDER BY c.time DESC
       LIMIT 2
     ) ranked
@@ -453,6 +459,8 @@ type LatestStockStatsRow = {
   time: string;
 };
 
+const LATEST_STATS_WINDOW_DAYS = 45;
+
 async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT_EXCHANGE, dbClient: DbOrTx = db) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeSymbol))].filter(Boolean);
   const stats = new Map<
@@ -463,7 +471,16 @@ async function getLatestStockStats(symbols: string[], exchange: string = DEFAULT
   if (uniqueSymbols.length === 0) return stats;
 
   const startedAt = Date.now();
-  const result = await dbClient.execute<LatestStockStatsRow>(buildLatestCandleStatsQuery(uniqueSymbols, exchange));
+  const since = new Date(Date.now() - LATEST_STATS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const result = await dbClient.execute<LatestStockStatsRow>(buildLatestCandleStatsQuery(uniqueSymbols, exchange, since));
+  const countBySymbol = new Map<string, number>();
+  for (const row of result.rows) countBySymbol.set(row.symbol, (countBySymbol.get(row.symbol) ?? 0) + 1);
+  const sparseSymbols = uniqueSymbols.filter((symbol) => (countBySymbol.get(symbol) ?? 0) < 2);
+  if (sparseSymbols.length > 0) {
+    const fallback = await dbClient.execute<LatestStockStatsRow>(buildLatestCandleStatsQuery(sparseSymbols, exchange));
+    const sparse = new Set(sparseSymbols);
+    result.rows = [...result.rows.filter((row) => !sparse.has(row.symbol)), ...fallback.rows];
+  }
   logger.debug(
     {
       exchange,

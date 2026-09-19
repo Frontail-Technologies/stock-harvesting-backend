@@ -4,7 +4,7 @@ import { db } from "../../db/client";
 import { marketCollections, weeklyStrongBacktestRuns } from "../../db/schema";
 import { COLLECTION_PREPARATION_STATUS, JOB_NAMES } from "../../shared/constants";
 import { env } from "../../shared/env";
-import { getErrorMessage } from "../../shared/errors";
+import { getErrorMessage, serializeError } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import { addJobWithTimeout, getMarketDataQueue } from "../jobs/queues";
 import { findSymbolsNeedingHistoryBackfill, groupMetricCandlesBySymbol } from "../market-data/market-data.candles";
@@ -188,6 +188,7 @@ export async function prepareCollectionData(
             symbol,
             exchange: collection.exchange,
             message: getErrorMessage(error, "Unknown backfill error"),
+            error: serializeError(error),
           },
           "Collection preparation: candle backfill failed for one symbol"
         );
