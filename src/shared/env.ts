@@ -16,6 +16,9 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   DATABASE_URL: z.string().min(1),
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
+  // How many market-data jobs one worker process runs at once. 1 keeps jobs strictly sequential; 2 lets a
+  // long job (instrument sync) run alongside a manual Refresh candles instead of blocking it.
+  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
   DB_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   DB_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),

@@ -839,3 +839,12 @@ Each entry stays until explicitly superseded by a new dated entry.
   restarted worker waits up to one TTL for a crashed predecessor's lease. Scripts and tests
   that never start the broker keep the old direct socket (stop the worker before running
   them). `GLOBAL_DATAFEEDS_SESSION_MODE=direct` restores per-process sockets.
+
+- 2026-09-20 — The market-data worker ran strictly one job at a time (BullMQ's default), so a long
+  scheduled instrument sync (45-80 minutes for BSE) blocked a manual Refresh candles catch-up
+  behind it. `WORKER_CONCURRENCY` (default 1, max 4) sets `concurrency` on the BullMQ Worker.
+  Production uses 2. This is safe with the single GDF session because every GDF request carries
+  its own tag and replies are matched by it; the database has lock headroom
+  (`max_locks_per_transaction` raised to 2560) and each process' pool is capped by
+  `DB_POOL_MAX`. Duplicate work is still prevented by deterministic job ids (for example
+  `market-data-catch-up:<exchange>:<date>`).

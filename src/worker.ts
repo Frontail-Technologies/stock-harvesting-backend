@@ -352,7 +352,7 @@ const worker = new Worker(
 
     throw new Error(`Unsupported job: ${job.name}`);
   },
-  { connection },
+  { connection, concurrency: env.WORKER_CONCURRENCY },
 );
 
 const workerStartedAt = new Date().toISOString();
