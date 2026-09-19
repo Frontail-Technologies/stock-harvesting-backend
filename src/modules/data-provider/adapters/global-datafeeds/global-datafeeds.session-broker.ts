@@ -3,7 +3,7 @@ import Redis from "ioredis";
 
 import { HTTP_STATUS } from "../../../../shared/constants";
 import { env } from "../../../../shared/env";
-import { AppError, ERROR_CODES, getErrorMessage } from "../../../../shared/errors";
+import { AppError, ERROR_CODES, ProviderRateLimitedError, getErrorMessage } from "../../../../shared/errors";
 import { logger } from "../../../../shared/logger";
 import type {
   GlobalDatafeedsQuoteRow,
@@ -47,7 +47,7 @@ export type RpcRequestMessage = {
 
 export type RpcResponseMessage =
   | { id: string; ok: true; response?: GlobalDatafeedsResponse }
-  | { id: string; ok: false; error: { message: string; status?: number } };
+  | { id: string; ok: false; error: { message: string; status?: number; rateLimitedForMs?: number } };
 
 type PendingRpc = {
   resolve: (message: RpcResponseMessage) => void;
@@ -245,7 +245,8 @@ export class GdfSessionBroker {
     if (!result.ok) throw this.toError(result.error);
   }
 
-  private toError(error: { message: string; status?: number }) {
+  private toError(error: { message: string; status?: number; rateLimitedForMs?: number }) {
+    if (error.rateLimitedForMs !== undefined) return new ProviderRateLimitedError("Global Datafeeds", error.rateLimitedForMs);
     return error.status
       ? new AppError(error.status, ERROR_CODES.providerError, error.message)
       : new Error(error.message);
@@ -292,6 +293,7 @@ export class GdfSessionBroker {
         error: {
           message: getErrorMessage(error, "Global Datafeeds request failed"),
           ...(error instanceof AppError ? { status: error.status } : {}),
+          ...(error instanceof ProviderRateLimitedError ? { rateLimitedForMs: error.retryAfterMs } : {}),
         },
       };
     }

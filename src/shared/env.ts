@@ -63,6 +63,9 @@ const envSchema = z.object({
     .url()
     .default("wss://test.lisuns.com:4576"),
   GLOBAL_DATAFEEDS_EXCHANGES: z.string().default("BSE,BSE_IDX"),
+  // Client-side cap on GDF calls per rolling hour (0 = none). Set it to the account's real quota so a big
+  // catch-up stops itself instead of being refused ("Calls per hour are limited").
+  GLOBAL_DATAFEEDS_MAX_CALLS_PER_HOUR: z.coerce.number().int().min(0).default(0),
   GLOBAL_DATAFEEDS_SYMBOL_LIMIT: z.coerce
     .number()
     .int()

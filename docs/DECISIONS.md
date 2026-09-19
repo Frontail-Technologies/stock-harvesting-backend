@@ -848,3 +848,14 @@ Each entry stays until explicitly superseded by a new dated entry.
   (`max_locks_per_transaction` raised to 2560) and each process' pool is capped by
   `DB_POOL_MAX`. Duplicate work is still prevented by deterministic job ids (for example
   `market-data-catch-up:<exchange>:<date>`).
+
+- 2026-09-20 — GlobalDataFeeds enforces an hourly call quota and answers refused calls with an
+  untagged `RequestError` ("Calls per hour are limited."). Untagged, the reply could never be
+  matched to its request, so every affected `GetHistory` waited out its 30 s timeout and showed
+  up as a generic timeout; with 8 symbols in flight a catch-up kept burning calls. The client
+  now (1) recognises the reply and blocks all calls for a cooldown (5 min, doubling to 30 min
+  while it recurs, reset by any success), (2) rejects the waiting requests at once with
+  `ProviderRateLimitedError` (carried over the Redis broker with its cooldown), and (3) can
+  cap calls itself with `GLOBAL_DATAFEEDS_MAX_CALLS_PER_HOUR`. The daily candle sync stops
+  starting new symbols on that error, keeps the candles already saved and fails the run with
+  "retry in N minute(s)" instead of marking every remaining symbol failed.

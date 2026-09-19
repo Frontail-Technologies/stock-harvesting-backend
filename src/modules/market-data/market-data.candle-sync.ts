@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, type DbOrTx } from "../../db/client";
 import { instruments, marketCollections } from "../../db/schema";
 import { CANDLE_SOURCE, CANDLE_TIMEFRAME, DATA_PROVIDER_KEY, DEFAULT_EXCHANGE } from "../../shared/constants";
-import { AppError, getErrorMessage } from "../../shared/errors";
+import { AppError, ProviderRateLimitedError, getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import { normalizeSymbol } from "../../shared/normalize";
 import { getActiveProviderAccessToken, getEligibleProviderAdapter, markProviderConnectionExpired } from "../data-provider/data-provider.service";
@@ -759,7 +759,11 @@ export async function syncDailyCandlesForActiveInstruments(
     failedDetails: [],
   };
 
+  // Once the provider says its call quota is used up, stop starting new symbols: every further call would
+  // be refused, and counting each as a failed symbol only hides the real cause.
+  const limit: { error: ProviderRateLimitedError | null } = { error: null };
   await runWithConcurrency(rows, DAILY_CANDLE_SYNC_CONCURRENCY, async (row) => {
+    if (limit.error) return;
     summary.processed += 1;
     try {
       const result = await refreshDailyCandles({ symbol: row.symbol, exchange, targetDate });
@@ -781,6 +785,11 @@ export async function syncDailyCandlesForActiveInstruments(
         });
       }
     } catch (error) {
+      if (error instanceof ProviderRateLimitedError) {
+        limit.error = error;
+        summary.processed -= 1;
+        return;
+      }
       // getSafeProviderErrorMessage (not plain getErrorMessage) - a DB failure here is a
       // DrizzleQueryError whose own .message is just "Failed query: <sql> params: <params>";
       // the actual reason (timeout, too many connections, connection terminated, etc.) lives
@@ -814,6 +823,9 @@ export async function syncDailyCandlesForActiveInstruments(
   if (summary.updated + summary.repaired > 0) {
     await invalidateDashboardSnapshotsForExchange(exchange);
   }
+
+  // Candles saved before the limit was hit are kept; the run fails so it can be retried after the cooldown.
+  if (limit.error) throw limit.error;
 
   return summary;
 }

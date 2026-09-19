@@ -5,6 +5,7 @@ import { DATA_PROVIDER_KEY, HTTP_STATUS } from "../../../../shared/constants";
 import { env } from "../../../../shared/env";
 import { AppError, ERROR_CODES, ERROR_MESSAGES } from "../../../../shared/errors";
 import { logger } from "../../../../shared/logger";
+import { GdfCallGate, isGdfRateLimitMessage } from "./global-datafeeds.rate-limit";
 import {
   GLOBAL_DATAFEEDS_AUTH_TIMEOUT_MS,
   GLOBAL_DATAFEEDS_MESSAGE_TYPE,
@@ -137,6 +138,7 @@ export class GlobalDatafeedsWebSocketClient {
   private shouldReconnect = false;
   private remoteTransport: GlobalDatafeedsRemoteTransport | null = null;
   private startupGate: Promise<unknown> | null = null;
+  private callGate = new GdfCallGate(env.GLOBAL_DATAFEEDS_MAX_CALLS_PER_HOUR);
 
   // Requests wait for this before choosing between the local socket and the remote transport, so
   // a process never opens a socket before the broker has decided whether it owns the session.
@@ -181,6 +183,9 @@ export class GlobalDatafeedsWebSocketClient {
   ): Promise<T> {
     await this.startupGate;
     if (this.remoteTransport) return (await this.remoteTransport.request(request, timeoutMs)) as T;
+    // Refuse (fast, without opening a socket) while GDF is rate-limiting this key or the local hourly cap is reached.
+    this.callGate.assertAllowed();
+    this.callGate.registerCall();
     await this.connect();
 
     if (this.socket?.readyState !== WebSocket.OPEN) {
@@ -338,6 +343,17 @@ export class GlobalDatafeedsWebSocketClient {
       return;
     }
 
+    if (isGdfRateLimitMessage(response)) {
+      const error = this.callGate.onRateLimited();
+      this.emitDebug({ stage: "rate.limited", message: response.Message, messageType: response.MessageType });
+      logger.warn(
+        { provider: DATA_PROVIDER_KEY.globalDatafeeds, retryAfterMs: error.retryAfterMs },
+        "Global Datafeeds call limit reached; pausing calls",
+      );
+      this.rejectPending(error);
+      return;
+    }
+
     if (
       response.MessageType === GLOBAL_DATAFEEDS_MESSAGE_TYPE.realtimeResult ||
       response.MessageType === GLOBAL_DATAFEEDS_MESSAGE_TYPE.realtimeSnapshotResult
@@ -369,6 +385,7 @@ export class GlobalDatafeedsWebSocketClient {
 
     clearTimeout(pending.timeout);
     this.pending.delete(pending.userTag);
+    this.callGate.onSuccess();
     this.emitDebug({
       stage: "request.result",
       messageType: pending.messageType,

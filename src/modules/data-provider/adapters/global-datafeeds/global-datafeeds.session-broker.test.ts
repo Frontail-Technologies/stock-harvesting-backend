@@ -58,6 +58,7 @@ vi.mock("ioredis", () => {
   return { default: FakeRedis };
 });
 
+import { ProviderRateLimitedError } from "../../../../shared/errors";
 import { GdfSessionBroker } from "./global-datafeeds.session-broker";
 import type { GlobalDatafeedsWebSocketClient } from "./global-datafeeds.websocket-client";
 
@@ -159,6 +160,17 @@ describe("requests from a non-owner process", () => {
     await expect(api.client.transport!.request({ MessageType: "GetHistory" } as never, 100 as never)).rejects.toThrow(
       "timed out: GetHistory",
     );
+  });
+
+  it("keep the rate-limit error type and cooldown when the owner is being rate limited by GDF", async () => {
+    const worker = await startBroker("owner-candidate");
+    const api = await startBroker("proxy");
+    worker.client.request.mockRejectedValueOnce(new ProviderRateLimitedError("Global Datafeeds", 300_000));
+
+    const error = await api.client.transport!.request({ MessageType: "GetHistory" } as never, 100 as never).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProviderRateLimitedError);
+    expect((error as ProviderRateLimitedError).retryAfterMs).toBe(300_000);
   });
 
   it("fail immediately, without waiting for a timeout, when no owner is running", async () => {
