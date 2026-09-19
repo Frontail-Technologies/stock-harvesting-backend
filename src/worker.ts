@@ -1,6 +1,10 @@
 import { Worker, type Job } from "bullmq";
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "./db/client";
+import {
+  startGdfSessionBroker,
+  stopGdfSessionBroker,
+} from "./modules/data-provider/adapters/global-datafeeds/global-datafeeds.session-broker";
 import { syncJobs } from "./db/schema";
 import {
   refreshAllLatestInstrumentPrices,
@@ -205,6 +209,9 @@ function skippedNonProductionExchange(job: Job, exchange: string) {
   return { skipped: true, exchange };
 }
 
+// GDF allows one session per key: this worker owns it and the API relays through Redis.
+startGdfSessionBroker("owner-candidate");
+
 const worker = new Worker(
   QUEUE_NAMES.marketData,
   async (job) => {
@@ -384,6 +391,7 @@ async function shutdown(signal: string) {
   logger.info({ signal }, "Shutting down worker");
   clearInterval(heartbeatTimer);
   await worker.close();
+  await stopGdfSessionBroker();
   await pool.end();
   process.exit(0);
 }

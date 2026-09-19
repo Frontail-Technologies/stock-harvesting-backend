@@ -25,6 +25,13 @@ type PendingRequest = {
   timeout: NodeJS.Timeout;
 };
 
+// Set by the session broker when this process must NOT open its own GDF socket (GDF allows one
+// session per key). request()/send() are then answered by the process that owns the session.
+export type GlobalDatafeedsRemoteTransport = {
+  request: (request: GlobalDatafeedsRequest, timeoutMs: number) => Promise<GlobalDatafeedsResponse>;
+  send: (request: GlobalDatafeedsRequest) => Promise<void>;
+};
+
 type QuoteListener = (quote: GlobalDatafeedsQuoteRow) => void;
 type StatusListener = (connected: boolean, message?: string) => void;
 type DebugListener = (event: {
@@ -128,6 +135,26 @@ export class GlobalDatafeedsWebSocketClient {
   private debugListeners = new Set<DebugListener>();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private shouldReconnect = false;
+  private remoteTransport: GlobalDatafeedsRemoteTransport | null = null;
+  private startupGate: Promise<unknown> | null = null;
+
+  // Requests wait for this before choosing between the local socket and the remote transport, so
+  // a process never opens a socket before the broker has decided whether it owns the session.
+  setStartupGate(gate: Promise<unknown> | null) {
+    this.startupGate = gate;
+  }
+
+  setRemoteTransport(transport: GlobalDatafeedsRemoteTransport | null) {
+    this.remoteTransport = transport;
+  }
+
+  ingestRemoteQuote(quote: GlobalDatafeedsQuoteRow) {
+    for (const listener of this.quoteListeners) listener(quote);
+  }
+
+  ingestRemoteStatus(connected: boolean, message?: string) {
+    this.emitStatus(connected, message);
+  }
 
   isConfigured() {
     return Boolean(env.GLOBAL_DATAFEEDS_ENABLED && env.GLOBAL_DATAFEEDS_API_KEY);
@@ -152,6 +179,8 @@ export class GlobalDatafeedsWebSocketClient {
     request: GlobalDatafeedsRequest,
     timeoutMs = GLOBAL_DATAFEEDS_REQUEST_TIMEOUT_MS
   ): Promise<T> {
+    await this.startupGate;
+    if (this.remoteTransport) return (await this.remoteTransport.request(request, timeoutMs)) as T;
     await this.connect();
 
     if (this.socket?.readyState !== WebSocket.OPEN) {
@@ -197,6 +226,8 @@ export class GlobalDatafeedsWebSocketClient {
   }
 
   async send(request: GlobalDatafeedsRequest) {
+    await this.startupGate;
+    if (this.remoteTransport) return this.remoteTransport.send(request);
     await this.connect();
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify(request));

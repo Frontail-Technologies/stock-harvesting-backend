@@ -824,3 +824,18 @@ Each entry stays until explicitly superseded by a new dated entry.
   becomes active mid-request is never removed. Each delete writes a `job.deleted`
   audit log. Deleting a ledger row for the current trading day lets the next
   `ensureExpectedMarketDataJobs` pass recreate it; past-day rows stay deleted.
+
+- 2026-09-19 — One GlobalDataFeeds session per key: GDF refuses a second session
+  ("Access Denied. Key already in use by other session"), and the API and the worker each
+  opened their own socket, so whichever connected second timed out on every request. A
+  session broker (`global-datafeeds.session-broker.ts`) now makes exactly one process the
+  owner. The worker competes for a Redis lease (`gdf:session:owner`, 15 s TTL, renewed
+  every 5 s) and the winner opens the only socket. The API is a pure proxy: its
+  `globalDatafeedsClient.request()/send()` are executed by the owner over Redis pub/sub
+  (`gdf:rpc:request`, per-instance `gdf:rpc:response:<id>`), and the owner broadcasts quotes
+  and connection status (`gdf:quotes`, `gdf:status`) so the live stream keeps working. A
+  proxy fails immediately when no owner lease exists instead of waiting for a timeout. A
+  candidate that loses the lease acts as a proxy and takes over when the lease expires; a
+  restarted worker waits up to one TTL for a crashed predecessor's lease. Scripts and tests
+  that never start the broker keep the old direct socket (stop the worker before running
+  them). `GLOBAL_DATAFEEDS_SESSION_MODE=direct` restores per-process sockets.

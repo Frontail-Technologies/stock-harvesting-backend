@@ -50,6 +50,9 @@ const envSchema = z.object({
   EODHD_EXPIRES_AT: z.string().optional(),
   EODHD_EXCHANGE_CODE: z.string().trim().min(1).default("US"),
   GLOBAL_DATAFEEDS_ENABLED: z.coerce.boolean().default(false),
+  // "broker": one process (the worker) owns the single GDF session and the API relays through
+  // Redis. "direct": every process opens its own socket (only safe when one process runs).
+  GLOBAL_DATAFEEDS_SESSION_MODE: z.enum(["broker", "direct"]).default("broker"),
   GLOBAL_DATAFEEDS_API_KEY: z.string().optional(),
   GLOBAL_DATAFEEDS_EXPIRES_AT: z.string().optional(),
   GLOBAL_DATAFEEDS_WS_URL: z

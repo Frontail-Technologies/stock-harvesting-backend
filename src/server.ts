@@ -2,6 +2,10 @@ import { createServer } from "http";
 
 import { createApp } from "./app";
 import { pool } from "./db/client";
+import {
+  startGdfSessionBroker,
+  stopGdfSessionBroker,
+} from "./modules/data-provider/adapters/global-datafeeds/global-datafeeds.session-broker";
 import { closeQueues } from "./modules/jobs/queues";
 import { scheduleProductionMarketDataJobs } from "./modules/jobs/schedule-production-jobs";
 import { startMarketDataLedgerReconciliation } from "./modules/jobs/market-data-job-ledger";
@@ -15,6 +19,9 @@ import {
 } from "./modules/market-stream";
 import { env } from "./shared/env";
 import { logger } from "./shared/logger";
+
+// GDF allows one session per key: the worker owns it, this API process only relays through Redis.
+startGdfSessionBroker("proxy");
 
 const app = createApp();
 const server = createServer(app);
@@ -45,6 +52,7 @@ async function shutdown(signal: string) {
   server.close(async () => {
     await marketStreamGateway.close();
     closeMarketStreamProviders();
+    await stopGdfSessionBroker();
     await closeQueues();
     await closeRealtimeEvents();
     await pool.end();
