@@ -83,6 +83,7 @@ import {
   updateUserRole,
 } from "./admin.service";
 import { listRecentBackgroundJobRuns } from "../jobs/background-job-runs.service";
+import { getMarketDataQueueSnapshot } from "../jobs/queue-snapshot.service";
 import { getScheduledDailyCandleSyncStatuses } from "../jobs/scheduled-job-status.service";
 import { getMarketDataWorkerStatuses } from "../jobs/worker-status.service";
 import { getMarketDataHealth } from "../market-data/market-data.health";
@@ -333,6 +334,10 @@ adminRouter.get("/market-data/health", asyncHandler(async (_req, res) => {
 
 adminRouter.get("/market-data/job-runs", asyncHandler(async (_req, res) => {
   sendData(res, { runs: await listRecentBackgroundJobRuns() });
+}));
+
+adminRouter.get("/market-data/queue", asyncHandler(async (_req, res) => {
+  sendData(res, await getMarketDataQueueSnapshot());
 }));
 
 adminRouter.get("/market-data/schedules", asyncHandler(async (_req, res) => {
