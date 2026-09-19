@@ -17,6 +17,7 @@ import {
   getExchangeTodayIfTradingDay,
   getLatestExpectedTradingDay,
 } from "../market-data/trading-calendar";
+import { listNoHistorySymbols } from "../market-data/market-data.no-history";
 import { addJobWithTimeout, getMarketDataQueue } from "./queues";
 
 const EXPECTED_SCHEDULES = [
@@ -137,7 +138,7 @@ export async function getHistoricalCoverage(exchange: string, tradingDate: strin
     return { tradingDate, exchange, totalExpected: 0, completed: 0, missing: 0, coveragePct: 0, missingSymbols: [], exempt: 0 };
   }
 
-  const [present, exemptionRows] = await Promise.all([
+  const [present, exemptionRows, noHistorySymbols] = await Promise.all([
     db
       .select({ instrumentId: candles.instrumentId })
       .from(candles)
@@ -154,11 +155,18 @@ export async function getHistoricalCoverage(exchange: string, tradingDate: strin
         eq(backgroundJobRuns.tradingDate, tradingDate),
         eq(backgroundJobRuns.jobType, BACKGROUND_JOB_TYPES.dailyCandleCatchUp),
       )),
+    listNoHistorySymbols(exchange),
   ]);
-  const exemptSymbols = exemptionRows.flatMap((row) => {
-    const value = row.metadata.coverageExemptSymbols;
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  });
+  // Exempt = GlobalDataFeeds confirmed it has no history for the instrument (successful
+  // empty response). Provider errors, timeouts and persistence failures never land here,
+  // so those instruments stay counted as missing.
+  const exemptSymbols = [
+    ...exemptionRows.flatMap((row) => {
+      const value = row.metadata.coverageExemptSymbols;
+      return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+    }),
+    ...noHistorySymbols,
+  ];
   const calculated = calculateHistoricalCoverage(
     universe,
     present.map((row) => row.instrumentId),

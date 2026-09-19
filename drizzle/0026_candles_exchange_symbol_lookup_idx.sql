@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "candles_exchange_symbol_timeframe_time_idx" ON "candles" USING btree ("exchange","symbol","timeframe","time" DESC NULLS LAST);

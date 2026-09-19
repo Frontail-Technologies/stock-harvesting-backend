@@ -707,7 +707,8 @@ export async function triggerCandleBackfill(input: {
 }
 
 export async function triggerDailyCandleRefresh(input: { actorUserId: string; symbol: string }) {
-  const result = await refreshDailyCandles({ symbol: input.symbol });
+  // An explicit admin refresh deliberately re-queries an instrument already confirmed as having no history.
+  const result = await refreshDailyCandles({ symbol: input.symbol, forceRecheck: true });
   await writeAuditLog({
     actorUserId: input.actorUserId,
     action: "market_data.daily_candles_refreshed",

@@ -436,6 +436,11 @@ export async function replaceCandlesAtomically(
     monthly: ProviderDailyCandle[];
   }
 ) {
+  // Nothing to replace with: never run the range delete. A successful but empty provider
+  // response must not wipe valid stored candles (weekly/monthly are derived from daily, so
+  // an empty daily set means there is nothing to write at any timeframe).
+  if (input.daily.length === 0) return;
+
   await dbClient.transaction(async (tx) => {
     await deleteCandlesForRefresh(
       {

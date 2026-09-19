@@ -102,6 +102,14 @@ export const candles = pgTable(
       table.timeframe,
       table.time,
     ),
+    // Exchange + symbol lookups (newest first). Migration 0020 dropped the
+    // old unique constraint that used to serve them.
+    exchangeSymbolTimeframeTimeIdx: index("candles_exchange_symbol_timeframe_time_idx").on(
+      table.exchange,
+      table.symbol,
+      table.timeframe,
+      table.time.desc(),
+    ),
   }),
 );
 

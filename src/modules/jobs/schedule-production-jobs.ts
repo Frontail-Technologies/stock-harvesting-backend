@@ -1,5 +1,6 @@
 import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
+import { triggerPendingCollectionPreparations } from "../market-collections/market-collection-preparation.service";
 import { listInstrumentSyncExchanges, listProductionExchanges } from "../market-data/market-data.universe";
 import {
   scheduleCandleBootstrapReconciliation,
@@ -25,6 +26,7 @@ export async function scheduleProductionMarketDataJobs() {
     await ensureExpectedMarketDataJobs(new Date(), productionExchanges);
     await markExpectedMarketDataJobsQueued(queuedExchanges ?? []);
     await Promise.all(productionExchanges.map((exchange) => reconcileWeeklyStrongBacktests(exchange)));
+    await triggerPendingCollectionPreparations();
   } catch (error) {
     logger.warn(
       { message: getErrorMessage(error, "Unknown error") },

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import { marketCollections, weeklyStrongBacktestRuns } from "../../db/schema";
@@ -360,6 +360,32 @@ async function computeAvailabilityCounts(
   }
 
   return { membersWithRequiredHistory, membersUnavailable };
+}
+
+// A segment still "pending" after this long has no live preparation behind it: every path that
+// creates or repopulates one enqueues the job right away, so pending + stale means the job was
+// never enqueued or was lost (queue flush, worker crash, DB outage while it ran).
+const PENDING_PREPARATION_STALE_MS = 10 * 60_000;
+
+// Idempotent - the job id is deterministic per collection + membership version, so an
+// already-queued or running preparation is never duplicated.
+export async function triggerPendingCollectionPreparations(now: Date = new Date()) {
+  const rows = await db
+    .select({ id: marketCollections.id, latestMembershipVersionId: marketCollections.latestMembershipVersionId })
+    .from(marketCollections)
+    .where(
+      and(
+        eq(marketCollections.active, true),
+        eq(marketCollections.preparationStatus, COLLECTION_PREPARATION_STATUS.pending),
+        lt(marketCollections.updatedAt, new Date(now.getTime() - PENDING_PREPARATION_STALE_MS)),
+        sql`EXISTS (SELECT 1 FROM market_collection_members m WHERE m.collection_id = ${marketCollections.id} AND m.active = true)`
+      )
+    );
+
+  for (const row of rows) {
+    await triggerCollectionPreparation(row.id, row.latestMembershipVersionId);
+  }
+  return rows.length;
 }
 
 const COLLECTION_PREPARE_QUEUE_UNAVAILABLE_ERROR =

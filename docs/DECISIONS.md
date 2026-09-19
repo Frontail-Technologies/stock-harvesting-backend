@@ -28,6 +28,14 @@ Each entry stays until explicitly superseded by a new dated entry.
   configured. No hardcoded exchange or stock lists; legacy rows stay as
   history and never match. Instrument discovery additionally covers
   GlobalDataFeeds-configured exchanges so a new exchange can be populated.
+- 2026-09-19 — Bootstrap no-history state: a full-range GetHistory that GlobalDataFeeds
+  answers successfully with zero candles is stored as a success row (kind
+  `no-history-check`, candle_count 0) in `candle_bootstrap_checkpoints` - no new table.
+  Errors, timeouts and persistence failures never write it and stay retryable. Bootstrap
+  candidates exclude a confirmation younger than 7 days; after that one more full-range
+  check runs (admin per-symbol refresh rechecks immediately); the row is deleted when
+  candles are stored. Confirmed no-history instruments are exempt (not missing) in
+  historical coverage.
 - 2026-09-12 — Fewer DB tables/schemas are preferred over more.
 - 2026-09-12 — Drizzle is the default DB access approach.
 - 2026-09-12 — Zero explanatory comments in touched production code

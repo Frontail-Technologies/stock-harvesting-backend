@@ -2,7 +2,10 @@ import { sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import { marketCollectionMembers, marketCollections } from "../../db/schema";
+import { getErrorMessage } from "../../shared/errors";
+import { logger } from "../../shared/logger";
 import { normalizeSymbol } from "../../shared/normalize";
+import { triggerCollectionPreparation } from "../market-collections/market-collection-preparation.service";
 import {
   fetchSectoralClassificationBySector,
   fetchSectors,
@@ -176,6 +179,15 @@ async function syncAutoBseCollection(instrumentIds: string[]) {
 
     memberCount += chunk.length;
   }
+
+  // The segment starts as "pending" and only preparation moves it on - without this it
+  // showed "Preparing" forever, since nothing else ever enqueued it.
+  void triggerCollectionPreparation(collection.id, collection.latestMembershipVersionId ?? null).catch((error: unknown) => {
+    logger.error(
+      { collectionId: collection.id, message: getErrorMessage(error, "Unknown error") },
+      "Failed to trigger classified-universe collection preparation"
+    );
+  });
 
   return memberCount;
 }
