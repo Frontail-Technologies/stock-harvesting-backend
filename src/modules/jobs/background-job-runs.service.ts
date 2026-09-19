@@ -41,6 +41,76 @@ export async function startBackgroundJobRun(
   return row.id;
 }
 
+function scalarResult(result: unknown) {
+  if (!result || typeof result !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(result as Record<string, unknown>).filter(
+      ([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value),
+    ),
+  );
+}
+
+// Scheduled (repeatable) jobs are not started from the admin, so they have no sync_jobs row and never
+// showed in the job table. This records one background_job_runs row around them. A job started from the
+// admin already has its sync_jobs row, so it is not recorded a second time.
+export async function recordScheduledJobRun<T>(
+  input: { jobType: BackgroundJobType; exchange?: string; bullmqJobId?: string; hasSyncJob: boolean },
+  run: () => Promise<T>,
+): Promise<T> {
+  if (input.hasSyncJob) return run();
+
+  const startedAt = new Date();
+  const [row] = await db
+    .insert(backgroundJobRuns)
+    .values({
+      jobType: input.jobType,
+      exchange: input.exchange ?? null,
+      status: BACKGROUND_JOB_RUN_STATUS.running,
+      scheduledAt: startedAt,
+      startedAt,
+      bullmqJobId: input.bullmqJobId ?? null,
+    })
+    .returning({ id: backgroundJobRuns.id });
+  void publishRealtimeEvent({
+    kind: "admin",
+    event: { type: "market-data:job-started", data: { runId: row.id, jobType: input.jobType, startedAt: startedAt.toISOString() } },
+  });
+
+  try {
+    const result = await run();
+    const finishedAt = new Date();
+    await db
+      .update(backgroundJobRuns)
+      .set({
+        status: BACKGROUND_JOB_RUN_STATUS.completed,
+        finishedAt,
+        metadata: { result: scalarResult(result) },
+        updatedAt: finishedAt,
+      })
+      .where(eq(backgroundJobRuns.id, row.id));
+    void publishRealtimeEvent({
+      kind: "admin",
+      event: {
+        type: "market-data:job-completed",
+        data: {
+          runId: row.id,
+          jobType: input.jobType,
+          status: "completed",
+          finishedAt: finishedAt.toISOString(),
+          processed: 0,
+          updated: 0,
+          repaired: 0,
+          failed: 0,
+        },
+      },
+    });
+    return result;
+  } catch (error) {
+    await failBackgroundJobRun(row.id, input.jobType, getErrorMessage(error, "Job failed"));
+    throw error;
+  }
+}
+
 export async function emitJobProgress(input: {
   runId: string;
   jobType: BackgroundJobType;

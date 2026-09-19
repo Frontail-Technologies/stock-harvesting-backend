@@ -25,6 +25,11 @@ function schedulerIdMatchesJobType(id: string | null | undefined, jobType: Backg
     daily_candle_evening: "evening",
     daily_candle_catch_up: "",
     chart_ensure_fresh: "",
+    instrument_sync: "",
+    price_refresh: "",
+    sector_classification_sync: "",
+    index_candle_backfill: "",
+    candle_bootstrap_reconcile: "",
   };
   const suffix = suffixByJobType[jobType];
   return suffix.length > 0 && id.endsWith(`-${suffix}`);

@@ -31,6 +31,7 @@ import {
   failBackgroundJobRun,
   finishBackgroundJobRunFromSummary,
   recordChartEnsureFreshResultIfNeeded,
+  recordScheduledJobRun,
   startBackgroundJobRun,
 } from "./modules/jobs/background-job-runs.service";
 import { WORKER_HEARTBEAT_INTERVAL_MS, WORKER_NAMES, writeWorkerHeartbeat } from "./modules/jobs/worker-heartbeat";
@@ -134,6 +135,14 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
   }
 }
 
+// Records a job-table row for scheduled runs of jobs that otherwise leave no trace in Postgres.
+function runRecorded<T>(job: Job, jobType: BackgroundJobType, exchange: string | undefined, run: () => Promise<T>) {
+  return recordScheduledJobRun(
+    { jobType, exchange, bullmqJobId: job.id, hasSyncJob: typeof job.data.syncJobId === "string" },
+    run,
+  );
+}
+
 async function runTrackedDailyCandleSync(
   exchange: string,
   jobType: BackgroundJobType,
@@ -223,7 +232,7 @@ const worker = new Worker(
     if (job.name === JOB_NAMES.instrumentSync) {
       if (!exchange) throw new Error("instrumentSync job missing exchange");
       if (!(await isInstrumentSyncExchange(exchange))) return skippedNonProductionExchange(job, exchange);
-      return runTrackedJob(job, async () => {
+      return runTrackedJob(job, () => runRecorded(job, BACKGROUND_JOB_TYPES.instrumentSync, exchange, async () => {
         const result = await syncProviderInstruments(exchange);
         // A newly discovered exchange may only now have active instruments.
         void scheduleProductionMarketDataJobs();
@@ -237,23 +246,27 @@ const worker = new Worker(
           });
         }
         return result;
-      });
+      }));
     }
 
     if (job.name === JOB_NAMES.priceRefresh) {
       if (!exchange) throw new Error("priceRefresh job missing exchange");
       if (!(await isProductionExchange(exchange))) return skippedNonProductionExchange(job, exchange);
       return runTrackedJob(job, () =>
-        refreshAllLatestInstrumentPrices(exchange),
+        runRecorded(job, BACKGROUND_JOB_TYPES.priceRefresh, exchange, () => refreshAllLatestInstrumentPrices(exchange)),
       );
     }
 
     if (job.name === JOB_NAMES.sectorClassificationSync) {
-      return runTrackedJob(job, () => syncSectorClassifications());
+      return runTrackedJob(job, () =>
+        runRecorded(job, BACKGROUND_JOB_TYPES.sectorClassificationSync, undefined, () => syncSectorClassifications()),
+      );
     }
 
     if (job.name === JOB_NAMES.indexCandleBackfill) {
-      return runTrackedJob(job, () => backfillIndexCandles(exchange));
+      return runTrackedJob(job, () =>
+        runRecorded(job, BACKGROUND_JOB_TYPES.indexCandleBackfill, exchange, () => backfillIndexCandles(exchange)),
+      );
     }
 
     if (job.name === JOB_NAMES.dailyCandleSync) {
@@ -293,11 +306,11 @@ const worker = new Worker(
     if (job.name === JOB_NAMES.candleBootstrapReconcile) {
       if (!exchange) throw new Error("candleBootstrapReconcile job missing exchange");
       if (!(await isProductionExchange(exchange))) return skippedNonProductionExchange(job, exchange);
-      return runTrackedJob(job, async () => {
+      return runTrackedJob(job, () => runRecorded(job, BACKGROUND_JOB_TYPES.candleBootstrapReconcile, exchange, async () => {
         const targetExchange = exchange;
         const symbols = await findActiveSymbolsWithoutDailyCandles(targetExchange);
         return enqueueCandleBootstrapJobs(targetExchange, symbols);
-      });
+      }));
     }
 
     if (job.name === JOB_NAMES.weeklyStrongBacktestBackfill) {

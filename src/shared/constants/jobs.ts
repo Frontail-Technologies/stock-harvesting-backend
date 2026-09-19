@@ -23,6 +23,12 @@ export const BACKGROUND_JOB_TYPES = {
   dailyCandleEvening: "daily_candle_evening",
   dailyCandleCatchUp: "daily_candle_catch_up",
   chartEnsureFresh: "chart_ensure_fresh",
+  // Scheduled jobs recorded so the Market Data job table shows them (they have no sync_jobs row).
+  instrumentSync: "instrument_sync",
+  priceRefresh: "price_refresh",
+  sectorClassificationSync: "sector_classification_sync",
+  indexCandleBackfill: "index_candle_backfill",
+  candleBootstrapReconcile: "candle_bootstrap_reconcile",
 } as const;
 
 export type BackgroundJobType = (typeof BACKGROUND_JOB_TYPES)[keyof typeof BACKGROUND_JOB_TYPES];
