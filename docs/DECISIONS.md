@@ -816,3 +816,11 @@ Each entry stays until explicitly superseded by a new dated entry.
   routes, and classic network-flood DDoS protection is out of scope for
   application code (belongs at a CDN/WAF layer, which this repo has no
   visibility into) - not something addressed by this fix.
+
+- 2026-09-19 — Admin can delete a finished job from the Market Data job list:
+  `DELETE /api/admin/jobs/:id?source=run|provider` (`run` = `background_job_runs`,
+  `provider` = `sync_jobs`). Rows that are pending, queued or running are refused
+  with 409, both on a pre-check and inside the DELETE's own WHERE, so a job that
+  becomes active mid-request is never removed. Each delete writes a `job.deleted`
+  audit log. Deleting a ledger row for the current trading day lets the next
+  `ensureExpectedMarketDataJobs` pass recreate it; past-day rows stay deleted.

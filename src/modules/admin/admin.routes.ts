@@ -26,6 +26,7 @@ import {
 } from "../../shared/middleware";
 import {
   adminAnalyticsQuerySchema,
+  deleteJobQuerySchema,
   adminUsersExportQuerySchema,
   adminUsersQuerySchema,
   backfillCandlesBodySchema,
@@ -67,6 +68,7 @@ import {
   getWeeklyStrongBacktestStatus,
   listAdminUsers,
   listJobs,
+  deleteJobHistoryEntry,
   triggerCandleBackfill,
   triggerDailyCandleRefresh,
   triggerIndexCandleBackfill,
@@ -366,6 +368,16 @@ adminRouter.post(
 adminRouter.get("/jobs", asyncHandler(async (_req, res) => {
   sendData(res, { jobs: await listJobs() });
 }));
+
+adminRouter.delete(
+  "/jobs/:id",
+  validate({ params: userIdParamsSchema, query: deleteJobQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const params = req.params as { id: string };
+    const query = req.query as unknown as { source: "run" | "provider" };
+    sendData(res, await deleteJobHistoryEntry({ actorUserId: getAuthUserId(req), id: params.id, source: query.source }));
+  }),
+);
 
 adminRouter.get(
   "/analytics",

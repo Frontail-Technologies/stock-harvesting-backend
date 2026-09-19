@@ -48,6 +48,12 @@ export const indexCandleBackfillBodySchema = z
   })
   .strict();
 
+export const deleteJobQuerySchema = z
+  .object({
+    source: z.enum(["run", "provider"]),
+  })
+  .strict();
+
 export const userIdParamsSchema = z
   .object({
     id: z.string().uuid(),

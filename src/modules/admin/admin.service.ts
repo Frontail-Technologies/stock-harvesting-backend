@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-or
 
 import { db } from "../../db/client";
 import {
+  backgroundJobRuns,
   brandingSettings,
   syncJobs,
   users,
@@ -722,6 +723,34 @@ export async function triggerDailyCandleRefresh(input: { actorUserId: string; sy
 export async function listJobs() {
   await failStaleSyncJobs();
   return db.select().from(syncJobs).orderBy(desc(syncJobs.createdAt)).limit(50);
+}
+
+const ACTIVE_JOB_STATUSES = new Set<string>(["pending", "queued", "running"]);
+
+// Removes one finished row from the job history. Rows that are still pending, queued or
+// running are refused so the worker's progress updates never target a deleted row.
+export async function deleteJobHistoryEntry(input: { actorUserId: string; id: string; source: "run" | "provider" }) {
+  const table = input.source === "run" ? backgroundJobRuns : syncJobs;
+  const [existing] = await db.select({ status: table.status }).from(table).where(eq(table.id, input.id)).limit(1);
+  if (!existing) throw notFound("Job not found");
+  if (ACTIVE_JOB_STATUSES.has(existing.status)) {
+    throw conflict("This job is still active. Wait for it to finish before deleting it.");
+  }
+
+  const [deleted] = await db
+    .delete(table)
+    .where(and(eq(table.id, input.id), sql`${table.status}::text NOT IN ('pending', 'queued', 'running')`))
+    .returning({ id: table.id });
+  if (!deleted) throw conflict("This job is still active. Wait for it to finish before deleting it.");
+
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "job.deleted",
+    targetType: input.source === "run" ? "background_job_run" : "sync_job",
+    targetId: input.id,
+    metadata: { status: existing.status },
+  });
+  return { id: deleted.id };
 }
 
 export async function getAdminAnalytics(input: { period: "all" | "today" | "7d" | "30d" | "90d" }) {
