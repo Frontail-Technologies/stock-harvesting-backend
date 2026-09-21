@@ -1,6 +1,6 @@
 import { DATA_PROVIDER_KEY, HTTP_STATUS, PROVIDER_STATUS } from "../../../../shared/constants";
 import { env } from "../../../../shared/env";
-import { AppError, ERROR_CODES } from "../../../../shared/errors";
+import { AppError, ERROR_CODES, isProviderRateLimitedError } from "../../../../shared/errors";
 import { normalizeSymbol } from "../../../../shared/normalize";
 import type {
   DataProviderAdapter,
@@ -99,10 +99,30 @@ async function requestWithRetry<T extends GlobalDatafeedsResponse = GlobalDatafe
       return await globalDatafeedsClient.request<T>(request, timeoutMs);
     } catch (error) {
       lastError = error;
+      // A refused request or an exhausted quota is not transient: retrying only spends another call.
+      if (error instanceof GlobalDatafeedsRequestError || isProviderRateLimitedError(error)) throw error;
       if (attempt < attempts) await sleep(500);
     }
   }
   throw lastError;
+}
+
+export class GlobalDatafeedsRequestError extends AppError {
+  constructor(messageType: string, message: string) {
+    super(HTTP_STATUS.badGateway, ERROR_CODES.providerError, `Global Datafeeds ${messageType} rejected: ${message}`);
+    this.name = "GlobalDatafeedsRequestError";
+  }
+}
+
+// GDF reports a refused request (entitlement, disabled periodicity, quota, bad identifier) as a
+// RequestError with no Result. resultArray() turns that into [], which callers read as "the provider
+// has no candles for this symbol" - a refused call was being recorded as a confirmed no-history
+// instrument. History and snapshot calls therefore treat it as a failure, never as an empty result.
+function assertNotRequestError(response: GlobalDatafeedsResponse | unknown, messageType: string) {
+  const reply = response as { MessageType?: string; Message?: string } | null;
+  if (reply?.MessageType === "RequestError") {
+    throw new GlobalDatafeedsRequestError(messageType, reply.Message ?? "request refused");
+  }
 }
 
 function resultArray<T>(response: GlobalDatafeedsResponse | unknown): T[] {
@@ -294,6 +314,7 @@ export class GlobalDatafeedsDataProviderAdapter implements DataProviderAdapter {
       GLOBAL_DATAFEEDS_HISTORY_REQUEST_TIMEOUT_MS
     );
 
+    assertNotRequestError(response, GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory);
     return resultArray<GlobalDatafeedsHistoryRow>(response)
       .map(toGlobalDatafeedsDailyCandle)
       .filter((candle): candle is ProviderDailyCandle => Boolean(candle))
@@ -328,6 +349,7 @@ export class GlobalDatafeedsDataProviderAdapter implements DataProviderAdapter {
         InstrumentIdentifiers: batch.map((token) => ({ Value: token })),
       });
 
+      assertNotRequestError(response, GLOBAL_DATAFEEDS_MESSAGE_TYPE.getSnapshot);
       for (const row of resultArray<GlobalDatafeedsQuoteRow>(response)) {
         const token = row.InstrumentIdentifier;
         const symbol = token ? symbolByToken.get(token) : undefined;

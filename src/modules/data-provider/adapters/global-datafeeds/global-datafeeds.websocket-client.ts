@@ -374,6 +374,24 @@ export class GlobalDatafeedsWebSocketClient {
       pending = [...this.pending.values()][0];
     }
 
+    // GDF omits UserTag/Request metadata from some RequestError replies. With more than one
+    // request in flight there is no honest way to identify the rejected call. Fail every pending
+    // call immediately so callers retry or record the provider failure; leaving them pending turns
+    // one explicit refusal into a burst of misleading request timeouts.
+    if (!pending && response.MessageType === "RequestError" && this.pending.size > 0) {
+      const error = new Error(
+        `Global Datafeeds request rejected: ${response.Message ?? "request refused"}`,
+      );
+      this.emitDebug({
+        stage: "request.rejected",
+        message: response.Message,
+        messageType: response.MessageType,
+        payload: { pendingRequests: this.pending.size },
+      });
+      this.rejectPending(error);
+      return;
+    }
+
     if (!pending) {
       this.emitDebug({
         stage: "response.unmatched",

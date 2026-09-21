@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import {
@@ -7,7 +7,12 @@ import {
   syncJobs,
   weeklyStrongBacktestRuns,
 } from "../../db/schema";
-import { JOB_NAMES, JOB_STATUS, SYNC_JOB_TYPES } from "../../shared/constants";
+import {
+  COLLECTION_PREPARATION_STATUS,
+  JOB_NAMES,
+  JOB_STATUS,
+  SYNC_JOB_TYPES,
+} from "../../shared/constants";
 import { getErrorMessage } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import { addJobWithTimeout, getMarketDataQueue } from "../jobs/queues";
@@ -17,6 +22,12 @@ import { syncWeeklyStrongBacktestIncremental } from "./weekly-strong-backtest.ge
 type AutomaticBacktestType =
   | typeof SYNC_JOB_TYPES.weeklyStrongBacktestBackfill
   | typeof SYNC_JOB_TYPES.weeklyStrongBacktestHistoricalRebuild;
+
+export const AUTOMATIC_BACKTEST_FAILURE_COOLDOWN_MS = 6 * 60 * 60_000;
+
+export function automaticBacktestFailureCooldownStart(now = new Date()) {
+  return new Date(now.getTime() - AUTOMATIC_BACKTEST_FAILURE_COOLDOWN_MS);
+}
 
 export function classifyBacktestReconciliation(input: {
   collectionIds: string[];
@@ -63,6 +74,21 @@ async function enqueueCollectionBacktest(input: {
     .limit(1);
   if (existing.length > 0) return "active" as const;
 
+  const recentFailure = await db
+    .select({ id: syncJobs.id })
+    .from(syncJobs)
+    .where(
+      and(
+        eq(syncJobs.type, input.type),
+        eq(syncJobs.status, JOB_STATUS.failed),
+        gte(syncJobs.updatedAt, automaticBacktestFailureCooldownStart()),
+        sql`${syncJobs.payload} ->> 'collectionId' = ${input.collectionId}`,
+        sql`${syncJobs.payload} ->> 'automatic' = 'true'`,
+      ),
+    )
+    .limit(1);
+  if (recentFailure.length > 0) return "cooldown" as const;
+
   const [syncJob] = await db
     .insert(syncJobs)
     .values({
@@ -105,7 +131,7 @@ async function enqueueCollectionBacktest(input: {
 export async function reconcileWeeklyStrongBacktests(exchange: string) {
   const [collections, currentRuns, historicalRuns, versionedCollections] = await Promise.all([
     db
-      .select({ id: marketCollections.id })
+      .select({ id: marketCollections.id, preparationStatus: marketCollections.preparationStatus })
       .from(marketCollections)
       .where(and(eq(marketCollections.exchange, exchange), eq(marketCollections.active, true))),
     db
@@ -125,12 +151,14 @@ export async function reconcileWeeklyStrongBacktests(exchange: string) {
   const historicalIds = new Set(historicalRuns.map((row) => row.collectionId));
   const versionedIds = new Set(versionedCollections.map((row) => row.collectionId));
   const plan = classifyBacktestReconciliation({
-    collectionIds: collections.map((collection) => collection.id),
+    collectionIds: collections
+      .filter((collection) => collection.preparationStatus === COLLECTION_PREPARATION_STATUS.ready)
+      .map((collection) => collection.id),
     currentIds,
     historicalIds,
     versionedIds,
   });
-  const results: Array<"queued" | "active" | "failed" | "unavailable"> = [];
+  const results: Array<"queued" | "active" | "cooldown" | "failed" | "unavailable"> = [];
 
   if (plan.incrementalIds.length > 0) await syncWeeklyStrongBacktestIncremental(exchange);
 
@@ -154,6 +182,10 @@ export async function reconcileWeeklyStrongBacktests(exchange: string) {
     initialized: plan.incrementalIds.length,
     queued: results.filter((value) => value === "queued").length,
     active: results.filter((value) => value === "active").length,
+    coolingDown: results.filter((value) => value === "cooldown").length,
+    awaitingPreparation: collections.filter(
+      (collection) => collection.preparationStatus !== COLLECTION_PREPARATION_STATUS.ready,
+    ).length,
     failed: results.filter((value) => value === "failed").length,
     queueUnavailable: results.filter((value) => value === "unavailable").length,
   };

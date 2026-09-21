@@ -216,3 +216,14 @@ describe("live data relay", () => {
     expect(api.client.ingestRemoteStatus).toHaveBeenCalledWith(false, "socket closed");
   });
 });
+
+describe("a broker that cannot start", () => {
+  it("reports itself as not started, so callers can refuse to fall back to a direct socket", async () => {
+    const broker = new GdfSessionBroker("proxy", asClient(fakeClient()), 0);
+
+    expect(broker.isStarted()).toBe(false);
+    await broker.start();
+    expect(broker.isStarted()).toBe(true);
+    await broker.stop();
+  });
+});

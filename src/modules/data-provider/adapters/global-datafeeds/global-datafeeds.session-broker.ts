@@ -83,6 +83,8 @@ export class GdfSessionBroker {
   private stopped = false;
   private detachOwnerListeners: Array<() => void> = [];
   private loggedRedisError = false;
+  private started = false;
+  ready: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly role: GdfSessionRole,
@@ -94,6 +96,11 @@ export class GdfSessionBroker {
 
   isOwner() {
     return this.owner;
+  }
+
+  // True once start() completed, i.e. Redis is reachable and this process knows its role.
+  isStarted() {
+    return this.started;
   }
 
   async start() {
@@ -127,6 +134,7 @@ export class GdfSessionBroker {
       this.leaseTimer = setInterval(() => void this.tryLease(), GDF_LEASE_RENEW_INTERVAL_MS);
       this.leaseTimer.unref();
     }
+    this.started = true;
     logger.info({ instanceId: this.instanceId, role: this.role, owner: this.owner }, "GDF session broker started");
   }
 
@@ -322,12 +330,30 @@ export function startGdfSessionBroker(
   const broker = new GdfSessionBroker(role, client);
   activeBroker = broker;
   const ready = broker.start().catch((error) => {
+    if (role === "proxy") {
+      // A proxy must never open its own socket (the worker holds the only session), even when Redis is
+      // unreachable: it fails clearly instead of competing for the key.
+      logger.error(
+        { message: getErrorMessage(error, "Unknown error") },
+        "GDF session broker failed to start; this process will not open a Global Datafeeds socket",
+      );
+      const unavailable = async (): Promise<never> => {
+        throw new AppError(
+          HTTP_STATUS.badGateway,
+          ERROR_CODES.providerError,
+          "Global Datafeeds session broker is unavailable (Redis unreachable)",
+        );
+      };
+      client.setRemoteTransport({ request: unavailable, send: unavailable });
+      return;
+    }
     logger.error(
       { message: getErrorMessage(error, "Unknown error") },
       "GDF session broker failed to start; using a direct socket",
     );
     client.setRemoteTransport(null);
   });
+  broker.ready = ready;
   client.setStartupGate(ready);
   return broker;
 }

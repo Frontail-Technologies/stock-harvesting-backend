@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyBacktestReconciliation } from "./weekly-strong-backtest.reconciliation";
+import {
+  AUTOMATIC_BACKTEST_FAILURE_COOLDOWN_MS,
+  automaticBacktestFailureCooldownStart,
+  classifyBacktestReconciliation,
+} from "./weekly-strong-backtest.reconciliation";
 
 describe("classifyBacktestReconciliation", () => {
   it("queues an initial backfill for every active segment without current runs", () => {
@@ -37,5 +41,14 @@ describe("classifyBacktestReconciliation", () => {
     expect(result.initialIds).toEqual([]);
     expect(result.historicalIds).toEqual([]);
     expect(result.incrementalIds).toEqual(["done"]);
+  });
+});
+
+describe("automatic backtest retry cooldown", () => {
+  it("waits six hours before automatic reconciliation retries a failed segment", () => {
+    const now = new Date("2026-09-21T12:00:00.000Z");
+
+    expect(AUTOMATIC_BACKTEST_FAILURE_COOLDOWN_MS).toBe(6 * 60 * 60_000);
+    expect(automaticBacktestFailureCooldownStart(now).toISOString()).toBe("2026-09-21T06:00:00.000Z");
   });
 });

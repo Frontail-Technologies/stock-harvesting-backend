@@ -16,6 +16,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed:admin": "tsx src/scripts/seed-admin.ts",
+    "gdf:check-symbol": "tsx src/scripts/check-gdf-symbol-candles.ts",
     "candles:bootstrap:bse": "tsx src/scripts/bootstrap-bse-candles.ts",
     "backtest:load-all-history": "tsx src/scripts/load-all-backtest-history.ts"
   },
