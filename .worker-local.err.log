@@ -1,0 +1,1823 @@
+(node:3804) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:25652) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32416) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:9552) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job market-data-catch-up:BSE:2026-09-18
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+(node:33896) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15748) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32952) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+Error: could not renew lock for job 108
+    at D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:44:51
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async LockManager.extendLocks (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:32:9)
+    at async Timeout._onTimeout (D:\stock-harvesting\backend\node_modules\bullmq\dist\cjs\classes\lock-manager.js:80:21)
+(node:40476) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40196) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16564) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:12720) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:26428) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:38168) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41988) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:34104) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:34388) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:37172) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
