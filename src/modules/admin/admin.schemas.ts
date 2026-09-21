@@ -54,6 +54,15 @@ export const deleteJobQuerySchema = z
   })
   .strict();
 
+export const bulkDeleteJobsBodySchema = z
+  .object({
+    jobs: z.array(z.object({
+      id: z.string().uuid(),
+      source: z.enum(["run", "provider"]),
+    }).strict()).min(1).max(100),
+  })
+  .strict();
+
 export const userIdParamsSchema = z
   .object({
     id: z.string().uuid(),

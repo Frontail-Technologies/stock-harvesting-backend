@@ -26,6 +26,7 @@ import { getInstrumentsBySymbol, refreshLatestInstrumentStats } from "./market-d
 import { ensureInstrumentsForSymbols, getOrCreateInstrument } from "./market-data.instrument-sync";
 import { getDefaultChartHistoryFromDate } from "./market-data.dates";
 import { planDailyCandleSync } from "./market-data.candle-sync-plan";
+import { aggregateBseIntradayCandles } from "./market-data.intraday-aggregation";
 import { getExchangeTodayIfTradingDay, getLatestExpectedTradingDay } from "./trading-calendar";
 import { applyProviderDailyCandle, readCurrentDayCandle } from "../market-stream/market-stream-candles";
 import { publishMarketStreamEvent } from "../market-stream/market-stream.hub";
@@ -166,14 +167,27 @@ export async function backfillDailyCandles(
     const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
     let daily: ProviderDailyCandle[];
     try {
-      daily = await adapter.fetchDailyCandles({
-        accessToken,
-        instrumentToken: instrument.instrumentToken,
-        symbol,
-        from: input.from,
-        to: input.to,
-        exchangeCode: exchange,
-      });
+      if (exchange === "BSE" && input.from === input.to && adapter.fetchIntradayCandles) {
+        const bars = await adapter.fetchIntradayCandles({
+          accessToken,
+          instrumentToken: instrument.instrumentToken,
+          symbol,
+          date: input.from,
+          exchangeCode: exchange,
+          periodMinutes: 15,
+        });
+        const aggregated = aggregateBseIntradayCandles(bars, input.from, true);
+        daily = aggregated ? [aggregated] : [];
+      } else {
+        daily = await adapter.fetchDailyCandles({
+          accessToken,
+          instrumentToken: instrument.instrumentToken,
+          symbol,
+          from: input.from,
+          to: input.to,
+          exchangeCode: exchange,
+        });
+      }
       void recordProviderSuccess(adapter.providerKey);
     } catch (error) {
       void recordProviderFailure(adapter.providerKey, error);
@@ -421,13 +435,14 @@ async function fetchCurrentDayDelayedCandleUncached(
 ): Promise<CurrentDayDelayedCandle | null> {
   const todayDate = getExchangeTodayIfTradingDay(exchange);
   if (!todayDate) return null;
-  if (exchange === "BSE" && isProviderCapabilityCoolingDown(DATA_PROVIDER_KEY.globalDatafeeds, "BSE")) return null;
   if (await hasStoredDailyCandleForDate(symbol, exchange, todayDate)) return null;
 
   try {
-    await ensureMarketStreamSymbols([{ exchange, symbol }]);
+    const snapshotCoolingDown = exchange === "BSE" &&
+      isProviderCapabilityCoolingDown(DATA_PROVIDER_KEY.globalDatafeeds, "BSE");
+    if (!snapshotCoolingDown) await ensureMarketStreamSymbols([{ exchange, symbol }]);
 
-    const snapshot = await fetchDelayedSnapshotForSymbol(symbol, exchange);
+    const snapshot = snapshotCoolingDown ? null : await fetchDelayedSnapshotForSymbol(symbol, exchange);
     if (snapshot) {
       const candleEvent = applyProviderDailyCandle({
         exchange,
@@ -442,7 +457,15 @@ async function fetchCurrentDayDelayedCandleUncached(
       if (candleEvent) publishMarketStreamEvent(candleEvent);
     }
 
-    const row = await waitForCurrentDayCandle({ exchange, symbol, date: todayDate, waitMs: snapshot ? 0 : waitMs });
+    let row = await waitForCurrentDayCandle({ exchange, symbol, date: todayDate, waitMs: snapshot ? 0 : waitMs });
+    if (!row && exchange === "BSE") {
+      const provisional = await fetchAggregatedIntradayCandle(symbol, exchange, todayDate);
+      if (provisional) {
+        const candleEvent = applyProviderDailyCandle({ exchange, symbol, ...provisional });
+        if (candleEvent) publishMarketStreamEvent(candleEvent);
+        row = await waitForCurrentDayCandle({ exchange, symbol, date: todayDate, waitMs: 0 });
+      }
+    }
     if (!row) return null;
 
     return {
@@ -462,6 +485,30 @@ async function fetchCurrentDayDelayedCandleUncached(
     );
     return null;
   }
+}
+
+async function fetchAggregatedIntradayCandle(symbol: string, exchange: string, date: string) {
+  const adapter = await getEligibleProviderAdapter({ exchange, capability: "historical_daily_candles" });
+  if (!adapter?.fetchIntradayCandles) return null;
+  const instrument = await getOrCreateInstrument(symbol, exchange);
+  if (!instrument) return null;
+  const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
+  const bars = await adapter.fetchIntradayCandles({
+    accessToken,
+    instrumentToken: instrument.instrumentToken,
+    symbol,
+    date,
+    exchangeCode: exchange,
+    periodMinutes: 15,
+  });
+  const aggregated = aggregateBseIntradayCandles(bars, date, false);
+  if (!aggregated) return null;
+  const latestBarTime = bars
+    .map((bar) => bar.time)
+    .filter((time) => time.startsWith(date))
+    .sort()
+    .at(-1);
+  return latestBarTime ? { ...aggregated, time: latestBarTime } : null;
 }
 
 async function hasStoredDailyCandleForDate(symbol: string, exchange: string, date: string): Promise<boolean> {

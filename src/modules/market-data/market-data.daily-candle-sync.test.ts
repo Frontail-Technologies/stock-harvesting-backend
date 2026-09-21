@@ -87,6 +87,43 @@ beforeEach(() => {
 });
 
 describe("refreshDailyCandles - gap repair", () => {
+  it("persists a complete 15-minute BSE session for a targeted post-market sync", async () => {
+    readCandleHistoryRange.mockResolvedValue({ from: "2020-01-01", to: "2026-09-18" });
+    readCandleDatesInRange
+      .mockResolvedValueOnce(new Set())
+      .mockResolvedValueOnce(new Set(["2026-09-21"]));
+    const fetchDailyCandles = vi.fn();
+    const fetchIntradayCandles = vi.fn().mockResolvedValue(
+      Array.from({ length: 25 }, (_, index) => ({
+        time: new Date(Date.parse("2026-09-21T03:45:00.000Z") + index * 900_000).toISOString(),
+        open: 100,
+        high: 102,
+        low: 99,
+        close: 101,
+        volume: 10,
+      }))
+    );
+    getEligibleProviderAdapter.mockResolvedValue({
+      providerKey: "global-datafeeds",
+      fetchDailyCandles,
+      fetchIntradayCandles,
+    } as never);
+
+    const result = await refreshDailyCandles({
+      symbol: "UTLSOLAR",
+      exchange: "BSE",
+      targetDate: "2026-09-21",
+    });
+
+    expect(fetchIntradayCandles).toHaveBeenCalledWith(expect.objectContaining({
+      symbol: "UTLSOLAR",
+      date: "2026-09-21",
+      periodMinutes: 15,
+    }));
+    expect(fetchDailyCandles).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "updated", insertedDaily: 1 });
+  });
+
   it("1-2-3. a present latest candle with absent recent middle dates is restored by a normal refresh (the LALPATHLAB-class regression)", async () => {
     readCandleHistoryRange.mockResolvedValue({ from: "2020-01-01", to: "2026-09-11" });
     const before = new Set(["2026-09-08", "2026-09-11"]);

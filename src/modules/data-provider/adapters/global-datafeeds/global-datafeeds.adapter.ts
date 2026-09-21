@@ -5,6 +5,7 @@ import { normalizeSymbol } from "../../../../shared/normalize";
 import type {
   DataProviderAdapter,
   ProviderDailyCandle,
+  ProviderIntradayCandle,
   ProviderExchange,
   ProviderHealthStatus,
   ProviderInstrument,
@@ -318,6 +319,41 @@ export class GlobalDatafeedsDataProviderAdapter implements DataProviderAdapter {
     return resultArray<GlobalDatafeedsHistoryRow>(response)
       .map(toGlobalDatafeedsDailyCandle)
       .filter((candle): candle is ProviderDailyCandle => Boolean(candle))
+      .sort((a, b) => a.time.localeCompare(b.time));
+  }
+
+  async fetchIntradayCandles(input: {
+    instrumentToken: string;
+    symbol: string;
+    date: string;
+    exchangeCode?: string;
+    periodMinutes?: number;
+  }): Promise<ProviderIntradayCandle[]> {
+    const exchange = assertExchangeSupported(input.exchangeCode ?? GLOBAL_DATAFEEDS_DEFAULT_EXCHANGE);
+    const periodMinutes = input.periodMinutes ?? 15;
+    const response = await requestWithRetry({
+      MessageType: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory,
+      Exchange: exchange,
+      InstrumentIdentifier: input.instrumentToken || normalizeSymbol(input.symbol),
+      Periodicity: "MINUTE",
+      Period: periodMinutes,
+      From: Math.floor(Date.parse(`${input.date}T03:45:00.000Z`) / 1000),
+      To: Math.floor(Date.parse(`${input.date}T10:00:00.000Z`) / 1000),
+      isShortIdentifier: "False",
+      AdjustSplits: true,
+    }, 2, GLOBAL_DATAFEEDS_HISTORY_REQUEST_TIMEOUT_MS);
+
+    assertNotRequestError(response, GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory);
+    return resultArray<GlobalDatafeedsHistoryRow>(response)
+      .map((row) => ({
+        time: new Date(Number(row.LastTradeTime) * 1000).toISOString(),
+        open: Number(row.Open),
+        high: Number(row.High),
+        low: Number(row.Low),
+        close: Number(row.Close),
+        volume: Number(row.TradedQty ?? 0),
+      }))
+      .filter((row) => [row.open, row.high, row.low, row.close, row.volume].every(Number.isFinite))
       .sort((a, b) => a.time.localeCompare(b.time));
   }
 

@@ -72,6 +72,7 @@ vi.mock("../market-stream/market-stream.capabilities", () => ({
 import * as providerServiceModule from "../data-provider/data-provider.service";
 import * as candlesModule from "./market-data.candles";
 import * as instrumentsModule from "./market-data.instruments";
+import * as instrumentSyncModule from "./market-data.instrument-sync";
 import * as tradingCalendarModule from "./trading-calendar";
 import * as marketStreamCandlesModule from "../market-stream/market-stream-candles";
 import * as marketStreamHubModule from "../market-stream/market-stream.hub";
@@ -85,6 +86,7 @@ const upsertCandles = vi.mocked(candlesModule.upsertCandles);
 const replaceCandlesAtomically = vi.mocked(candlesModule.replaceCandlesAtomically);
 const readCandleDatesInRange = vi.mocked(candlesModule.readCandleDatesInRange);
 const getInstrumentsBySymbol = vi.mocked(instrumentsModule.getInstrumentsBySymbol);
+const getOrCreateInstrument = vi.mocked(instrumentSyncModule.getOrCreateInstrument);
 const getLatestExpectedTradingDay = vi.mocked(tradingCalendarModule.getLatestExpectedTradingDay);
 const getExchangeTodayIfTradingDay = vi.mocked(tradingCalendarModule.getExchangeTodayIfTradingDay);
 const readCurrentDayCandle = vi.mocked(marketStreamCandlesModule.readCurrentDayCandle);
@@ -100,6 +102,7 @@ beforeEach(() => {
   readCurrentDayCandle.mockReturnValue(null);
   isProviderCapabilityCoolingDown.mockReturnValue(false);
   getEligibleProviderAdapter.mockResolvedValue(undefined as never);
+  getOrCreateInstrument.mockResolvedValue(undefined as never);
   getInstrumentsBySymbol.mockResolvedValue(new Map());
   readCandleDatesInRange.mockResolvedValue(new Set());
 });
@@ -155,7 +158,7 @@ describe("fetchCurrentDayDelayedCandle", () => {
 
     expect(result).toBeNull();
     expect(ensureMarketStreamSymbols).not.toHaveBeenCalled();
-    expect(readCurrentDayCandle).not.toHaveBeenCalled();
+    expect(readCurrentDayCandle).toHaveBeenCalledTimes(1);
   });
 
   it("waits briefly after subscribing so chart open can return a just-arrived delayed candle", async () => {
@@ -345,6 +348,38 @@ describe("fetchCurrentDayDelayedCandle", () => {
 
     expect(applyProviderDailyCandle).not.toHaveBeenCalled();
     expect(result).toBeNull();
+  });
+
+  it("aggregates 15-minute bars provisionally when the snapshot is empty", async () => {
+    getExchangeTodayIfTradingDay.mockReturnValue("2026-09-16");
+    getLatestExpectedTradingDay.mockReturnValue("2026-09-15");
+    const fetchDelayedSnapshot = vi.fn().mockResolvedValue([]);
+    const fetchIntradayCandles = vi.fn().mockResolvedValue([
+      { time: "2026-09-16T03:45:00.000Z", open: 100, high: 104, low: 99, close: 103, volume: 10 },
+      { time: "2026-09-16T04:00:00.000Z", open: 103, high: 106, low: 102, close: 105, volume: 20 },
+    ]);
+    getEligibleProviderAdapter.mockResolvedValue({
+      providerKey: "global-datafeeds",
+      fetchDelayedSnapshot,
+      fetchIntradayCandles,
+    } as never);
+    getOrCreateInstrument.mockResolvedValue({ id: "instrument-1", instrumentToken: "UTLSOLAR" } as never);
+    readCurrentDayCandle
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce({
+        exchange: "BSE", symbol: "UTLSOLAR", timeframe: "1D", time: "2026-09-16",
+        open: 100, high: 106, low: 99, close: 105, volume: 30, lastUpdatedAt: "2026-09-16T10:00:00.000Z",
+      });
+    applyProviderDailyCandle.mockReturnValue({
+      type: "market.candle.update",
+      data: { exchange: "BSE", symbol: "UTLSOLAR", timeframe: "1D", time: "2026-09-16", open: 100, high: 106, low: 99, close: 105, volume: 30, lastUpdatedAt: "2026-09-16T10:00:00.000Z" },
+    });
+
+    const result = await fetchCurrentDayDelayedCandle({ symbol: "UTLSOLAR", exchange: "BSE", waitMs: 0 });
+
+    expect(fetchIntradayCandles).toHaveBeenCalled();
+    expect(result).toMatchObject({ open: 100, high: 106, low: 99, close: 105, volume: 30, provisional: true });
+    expect(upsertCandles).not.toHaveBeenCalled();
   });
 
   it("a GetSnapshot failure surfaces through the existing provider error tracking and still falls back to the stream", async () => {

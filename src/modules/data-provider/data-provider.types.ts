@@ -46,6 +46,8 @@ export type ProviderDailyCandle = {
   volume: number;
 };
 
+export type ProviderIntradayCandle = ProviderDailyCandle;
+
 export type ProviderSymbolDailyCandle = ProviderDailyCandle & {
   symbol: string;
 };
@@ -102,6 +104,14 @@ export interface DataProviderAdapter {
     to: string;
     exchangeCode?: string;
   }): Promise<ProviderDailyCandle[]>;
+  fetchIntradayCandles?(input: {
+    accessToken?: string;
+    instrumentToken: string;
+    symbol: string;
+    date: string;
+    exchangeCode?: string;
+    periodMinutes?: number;
+  }): Promise<ProviderIntradayCandle[]>;
   fetchLatestDailyCandles?(input?: {
     accessToken?: string;
     symbols?: string[];

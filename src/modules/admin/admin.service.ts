@@ -779,6 +779,34 @@ export async function deleteJobHistoryEntry(input: { actorUserId: string; id: st
   return { id: deleted.id };
 }
 
+export async function bulkDeleteFailedJobHistory(input: {
+  actorUserId: string;
+  jobs: Array<{ id: string; source: "run" | "provider" }>;
+}) {
+  const runIds = input.jobs.filter((job) => job.source === "run").map((job) => job.id);
+  const providerIds = input.jobs.filter((job) => job.source === "provider").map((job) => job.id);
+
+  const deletedIds = await db.transaction(async (tx) => {
+    const deletedRuns = runIds.length === 0 ? [] : await tx
+      .delete(backgroundJobRuns)
+      .where(and(inArray(backgroundJobRuns.id, runIds), eq(backgroundJobRuns.status, "failed")))
+      .returning({ id: backgroundJobRuns.id });
+    const deletedProviderJobs = providerIds.length === 0 ? [] : await tx
+      .delete(syncJobs)
+      .where(and(inArray(syncJobs.id, providerIds), eq(syncJobs.status, JOB_STATUS.failed)))
+      .returning({ id: syncJobs.id });
+    return [...deletedRuns, ...deletedProviderJobs].map((row) => row.id);
+  });
+
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    action: "jobs.failed_bulk_deleted",
+    targetType: "job_history",
+    metadata: { requestedCount: input.jobs.length, deletedCount: deletedIds.length, deletedIds },
+  });
+  return { deletedCount: deletedIds.length };
+}
+
 export async function getAdminAnalytics(input: { period: "all" | "today" | "7d" | "30d" | "90d" }) {
   const days = input.period === "today" ? 1 : input.period === "7d" ? 7 : input.period === "30d" ? 30 : input.period === "90d" ? 90 : null;
   const today = sql`(now() at time zone 'Asia/Kolkata')::date`;

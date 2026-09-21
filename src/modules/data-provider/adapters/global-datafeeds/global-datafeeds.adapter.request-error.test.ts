@@ -70,3 +70,32 @@ describe("fetchDailyCandles", () => {
     expect(candles[0]).toMatchObject({ open: 410, close: 417.25, volume: 1000 });
   });
 });
+
+describe("fetchIntradayCandles", () => {
+  it("requests the complete BSE session as 15-minute history", async () => {
+    request.mockResolvedValue({
+      MessageType: "HistoryOHLCResult",
+      Result: [
+        { LastTradeTime: 1790000100, Open: 416.75, High: 423.8, Low: 413.05, Close: 422, TradedQty: 12398 },
+      ],
+    });
+
+    const rows = await new GlobalDatafeedsDataProviderAdapter().fetchIntradayCandles({
+      instrumentToken: "UTLSOLAR",
+      symbol: "UTLSOLAR",
+      date: "2026-09-21",
+      exchangeCode: "BSE",
+    });
+
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      MessageType: "GetHistory",
+      Exchange: "BSE",
+      InstrumentIdentifier: "UTLSOLAR",
+      Periodicity: "MINUTE",
+      Period: 15,
+      From: 1789962300,
+      To: 1789984800,
+    }), 9000);
+    expect(rows[0]).toMatchObject({ open: 416.75, close: 422, volume: 12398 });
+  });
+});

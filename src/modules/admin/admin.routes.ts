@@ -26,6 +26,7 @@ import {
 } from "../../shared/middleware";
 import {
   adminAnalyticsQuerySchema,
+  bulkDeleteJobsBodySchema,
   deleteJobQuerySchema,
   adminUsersExportQuerySchema,
   adminUsersQuerySchema,
@@ -68,6 +69,7 @@ import {
   getWeeklyStrongBacktestStatus,
   listAdminUsers,
   listJobs,
+  bulkDeleteFailedJobHistory,
   deleteJobHistoryEntry,
   triggerCandleBackfill,
   triggerDailyCandleRefresh,
@@ -213,6 +215,15 @@ adminRouter.delete(
     });
     sendData(res, result);
   })
+);
+
+adminRouter.post(
+  "/jobs/bulk-delete-failed",
+  validate({ body: bulkDeleteJobsBodySchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { jobs: Array<{ id: string; source: "run" | "provider" }> };
+    sendData(res, await bulkDeleteFailedJobHistory({ actorUserId: getAuthUserId(req), jobs: body.jobs }));
+  }),
 );
 
 adminRouter.get("/data-provider/statuses", asyncHandler(async (_req, res) => {
