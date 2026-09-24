@@ -87,6 +87,43 @@ beforeEach(() => {
 });
 
 describe("refreshDailyCandles - gap repair", () => {
+  it("repairs every missing completed BSE day from 15-minute bars when daily history is unavailable", async () => {
+    getLatestExpectedTradingDay.mockReturnValue("2026-09-23");
+    readCandleHistoryRange.mockResolvedValue({ from: "2020-01-01", to: "2026-09-18" });
+    readCandleDatesInRange
+      .mockResolvedValueOnce(new Set(["2026-09-18"]))
+      .mockResolvedValueOnce(new Set(["2026-09-18", "2026-09-21", "2026-09-22", "2026-09-23"]));
+
+    const fetchDailyCandles = vi.fn();
+    const fetchIntradayCandles = vi.fn(async ({ date }: { date: string }) =>
+      Array.from({ length: 25 }, (_, index) => ({
+        time: new Date(Date.parse(`${date}T03:45:00.000Z`) + index * 900_000).toISOString(),
+        open: 100,
+        high: 102,
+        low: 99,
+        close: 101,
+        volume: 10,
+      }))
+    );
+    getEligibleProviderAdapter.mockResolvedValue({
+      providerKey: "global-datafeeds",
+      fetchDailyCandles,
+      fetchIntradayCandles,
+    } as never);
+
+    const result = await refreshDailyCandles({ symbol: "TCS", exchange: "BSE" });
+
+    expect(fetchIntradayCandles.mock.calls.map(([input]) => input.date)).toEqual([
+      "2026-09-21",
+      "2026-09-22",
+      "2026-09-23",
+    ]);
+    expect(fetchDailyCandles).not.toHaveBeenCalled();
+    expect(candlesModule.upsertCandles).toHaveBeenCalledTimes(1);
+    expect(candlesModule.replaceCandlesAtomically).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "updated", insertedDaily: 3, failedDates: [] });
+  });
+
   it("persists a complete 15-minute BSE session for a targeted post-market sync", async () => {
     readCandleHistoryRange.mockResolvedValue({ from: "2020-01-01", to: "2026-09-18" });
     readCandleDatesInRange

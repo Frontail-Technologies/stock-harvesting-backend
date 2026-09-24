@@ -75,7 +75,7 @@ describe("ensureFreshDailyCandles - job id safety", () => {
     await ensureFreshDailyCandles({ symbol: "TCS", exchange: "BSE" });
 
     const [, , opts] = queue.add.mock.calls[0];
-    expect(opts.jobId).toBe("chart-ensure-fresh-BSE-TCS-2026-09-11");
+    expect(opts.jobId).toBe("chart-ensure-fresh-v2-BSE-TCS-2026-09-11");
     expect(opts.jobId).not.toContain(":");
   });
 });
@@ -275,13 +275,13 @@ describe("ensureFreshDailyCandles - queue-backed dedupe", () => {
 
     getLatestExpectedTradingDay.mockReturnValueOnce("2026-09-11");
     await ensureFreshDailyCandles({ symbol: "TCS", exchange: "BSE" });
-    expect(queue.getJob).toHaveBeenLastCalledWith("chart-ensure-fresh-BSE-TCS-2026-09-11");
+    expect(queue.getJob).toHaveBeenLastCalledWith("chart-ensure-fresh-v2-BSE-TCS-2026-09-11");
 
     queue.getJob.mockResolvedValue(undefined);
     queue.add.mockResolvedValue(fakeJob("waiting", timedOutWait()));
     getLatestExpectedTradingDay.mockReturnValueOnce("2026-09-14");
     await ensureFreshDailyCandles({ symbol: "TCS", exchange: "BSE" });
-    expect(queue.getJob).toHaveBeenLastCalledWith("chart-ensure-fresh-BSE-TCS-2026-09-14");
+    expect(queue.getJob).toHaveBeenLastCalledWith("chart-ensure-fresh-v2-BSE-TCS-2026-09-14");
   });
 });
 

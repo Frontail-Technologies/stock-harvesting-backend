@@ -41,7 +41,7 @@ function toResult(
 }
 
 function buildEnsureFreshKey(exchange: string, symbol: string, latestExpectedDate: string) {
-  return `chart-ensure-fresh-${exchange}-${symbol}-${latestExpectedDate}`;
+  return `chart-ensure-fresh-v2-${exchange}-${symbol}-${latestExpectedDate}`;
 }
 
 const inMemoryResults = new Map<string, DailyCandleSyncResult>();

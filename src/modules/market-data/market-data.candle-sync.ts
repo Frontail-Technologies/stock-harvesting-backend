@@ -27,7 +27,7 @@ import { ensureInstrumentsForSymbols, getOrCreateInstrument } from "./market-dat
 import { getDefaultChartHistoryFromDate } from "./market-data.dates";
 import { planDailyCandleSync } from "./market-data.candle-sync-plan";
 import { aggregateBseIntradayCandles } from "./market-data.intraday-aggregation";
-import { getExchangeTodayIfTradingDay, getLatestExpectedTradingDay } from "./trading-calendar";
+import { getExchangeTodayIfTradingDay, getLatestExpectedTradingDay, shiftDateString } from "./trading-calendar";
 import { applyProviderDailyCandle, readCurrentDayCandle } from "../market-stream/market-stream-candles";
 import { publishMarketStreamEvent } from "../market-stream/market-stream.hub";
 import { isProviderCapabilityCoolingDown } from "../market-stream/market-stream.capabilities";
@@ -130,6 +130,7 @@ export type BackfillDailyCandlesResult = {
   insertedMonthly: number;
   dailyCandles: ProviderDailyCandle[];
   providerConfirmedEmpty?: boolean;
+  intradayRepairSkipped?: boolean;
 };
 
 export async function backfillDailyCandles(
@@ -138,6 +139,7 @@ export async function backfillDailyCandles(
     from: string;
     to: string;
     exchange?: string;
+    intradayRepairDates?: string[];
   },
   dbClient: DbOrTx = db
 ): Promise<BackfillDailyCandlesResult> {
@@ -166,8 +168,23 @@ export async function backfillDailyCandles(
     // Everything that can fail (network, vendor, rate limits) happens before existing rows are touched - deleteCandlesForRefresh only runs with validated replacement data in hand.
     const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
     let daily: ProviderDailyCandle[];
+    const useIntradayRepair = exchange === "BSE" && input.intradayRepairDates !== undefined && adapter.fetchIntradayCandles;
     try {
-      if (exchange === "BSE" && input.from === input.to && adapter.fetchIntradayCandles) {
+      if (useIntradayRepair) {
+        daily = [];
+        for (const date of input.intradayRepairDates ?? []) {
+          const bars = await adapter.fetchIntradayCandles!({
+            accessToken,
+            instrumentToken: instrument.instrumentToken,
+            symbol,
+            date,
+            exchangeCode: exchange,
+            periodMinutes: 15,
+          });
+          const aggregated = aggregateBseIntradayCandles(bars, date, true);
+          if (aggregated) daily.push(aggregated);
+        }
+      } else if (exchange === "BSE" && input.from === input.to && adapter.fetchIntradayCandles) {
         const bars = await adapter.fetchIntradayCandles({
           accessToken,
           instrumentToken: instrument.instrumentToken,
@@ -194,19 +211,37 @@ export async function backfillDailyCandles(
       throw error;
     }
 
-    const weekly = aggregateWeeklyCandles(daily);
-    const monthly = aggregateMonthlyCandles(daily);
+    // A 15-minute repair supplies isolated completed days, not a complete
+    // week/month. Upsert only those daily rows; chart and analytics reads
+    // derive larger timeframes from the authoritative daily series.
+    const isIntradayWrite = Boolean(useIntradayRepair || (exchange === "BSE" && input.from === input.to && adapter.fetchIntradayCandles));
+    const weekly = isIntradayWrite ? [] : aggregateWeeklyCandles(daily);
+    const monthly = isIntradayWrite ? [] : aggregateMonthlyCandles(daily);
 
-    await replaceCandlesAtomically(dbClient, {
-      instrumentId: instrument.id,
-      exchange,
-      symbol,
-      from: input.from,
-      to: input.to,
-      daily,
-      weekly,
-      monthly,
-    });
+    if (isIntradayWrite) {
+      await upsertCandles(
+        daily.map((candle) => ({
+          instrumentId: instrument.id,
+          exchange,
+          symbol,
+          timeframe: CANDLE_TIMEFRAME.day,
+          source: CANDLE_SOURCE.provider,
+          ...candle,
+        })),
+        dbClient
+      );
+    } else {
+      await replaceCandlesAtomically(dbClient, {
+        instrumentId: instrument.id,
+        exchange,
+        symbol,
+        from: input.from,
+        to: input.to,
+        daily,
+        weekly,
+        monthly,
+      });
+    }
 
     // A denormalized read-cache refresh - if this fails, candles are still correctly replaced, only instruments.latest* stays stale until next sync.
     await refreshLatestInstrumentStats(exchange, [symbol], dbClient);
@@ -226,6 +261,7 @@ export async function backfillDailyCandles(
       // The provider answered successfully and had nothing for the range - unlike an
       // error/timeout (thrown above) or a no-op because no provider was eligible.
       providerConfirmedEmpty: daily.length === 0,
+      intradayRepairSkipped: Boolean(useIntradayRepair && input.intradayRepairDates?.length === 0),
     };
   } catch (error) {
     recordCandleBackfill(exchange, "failed", startedAt);
@@ -652,6 +688,15 @@ export type DailyCandleSyncResult = {
   failedDates: string[];
 };
 
+function getCompletedWeekdaysAfter(fromExclusive: string, toInclusive: string): string[] {
+  const dates: string[] = [];
+  for (let date = shiftDateString(fromExclusive, 1); date <= toInclusive; date = shiftDateString(date, 1)) {
+    const weekday = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) dates.push(date);
+  }
+  return dates;
+}
+
 // The manual-refresh and scheduled-sync entry points share this one function -
 // range planning (planDailyCandleSync) and the write path (backfillDailyCandles)
 // stay identical between both callers, no separate formulas.
@@ -699,9 +744,22 @@ export async function refreshDailyCandles(
     }
   }
 
-  const result = await backfillDailyCandles({ symbol, exchange, from: syncFrom, to: syncTo }, dbClient);
+  // GDF's current BSE subscription exposes history as 15-minute bars only.
+  // Give that adapter the exact completed tail dates missing after the last
+  // stored candle; adapters with daily history continue using the range path.
+  const intradayRepairDates =
+    exchange === "BSE" && !isBootstrap && !input.targetDate && latestStoredDate
+      ? getCompletedWeekdaysAfter(latestStoredDate, latestExpectedTradingDate)
+      : undefined;
+  const result = await backfillDailyCandles(
+    { symbol, exchange, from: syncFrom, to: syncTo, intradayRepairDates },
+    dbClient
+  );
 
   if (result.dailyCandles.length === 0) {
+    if (result.intradayRepairSkipped) {
+      return { symbol, instrumentId: instrument.id, status: "already-current", insertedDaily: 0, failedDates: [] };
+    }
     if (isBootstrap && result.providerConfirmedEmpty) {
       await recordNoHistoryConfirmed({ exchange, symbol, requestedFrom: syncFrom, requestedTo: syncTo }).catch((error) => {
         logger.warn(
