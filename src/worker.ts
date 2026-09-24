@@ -170,9 +170,11 @@ async function runTrackedDailyCandleSync(
   }
   const runId = claimed;
   try {
+    let progressWrites = Promise.resolve();
     const summary = await syncDailyCandlesForActiveInstruments(exchange, (progress) => {
-      void emitJobProgress({ runId, jobType, ...progress });
-    }, options?.symbols, jobType === BACKGROUND_JOB_TYPES.dailyCandleCatchUp ? coverageTradingDate : undefined);
+      progressWrites = progressWrites.then(() => emitJobProgress({ runId, jobType, ...progress }));
+    }, options?.symbols, coverageTradingDate);
+    await progressWrites;
     await finishBackgroundJobRunFromSummary(runId, jobType, summary);
     await finishLedgerCoverage({
       runId,

@@ -120,6 +120,17 @@ export async function emitJobProgress(input: {
   repaired: number;
   failed: number;
 }) {
+  await db
+    .update(backgroundJobRuns)
+    .set({
+      processedCount: input.processed,
+      updatedCount: input.updated,
+      repairedCount: input.repaired,
+      failedCount: input.failed,
+      totalExpected: input.total,
+      updatedAt: new Date(),
+    })
+    .where(eq(backgroundJobRuns.id, input.runId));
   void publishRealtimeEvent({
     kind: "admin",
     event: { type: "market-data:job-progress", data: input },

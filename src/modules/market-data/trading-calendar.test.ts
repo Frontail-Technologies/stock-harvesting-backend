@@ -4,12 +4,31 @@ import {
   getExchangeTodayIfTradingDay,
   getIsoWeekRange,
   getLatestExpectedTradingDay,
+  getRecentExpectedTradingDays,
   getWeekEndingFriday,
   isCompletedTradingWeek,
   isConsecutiveIsoWeek,
   resolveCompletedWeekEndingFromTradingDay,
   resolveLatestCompletedWeekEnding,
 } from "./trading-calendar";
+
+describe("getRecentExpectedTradingDays", () => {
+  it("returns a bounded newest-first weekday lookback", () => {
+    expect(getRecentExpectedTradingDays("BSE", new Date("2026-09-24T09:00:00Z"), 3)).toEqual([
+      "2026-09-23",
+      "2026-09-22",
+      "2026-09-21",
+    ]);
+  });
+
+  it("skips weekends", () => {
+    expect(getRecentExpectedTradingDays("BSE", new Date("2026-09-21T04:00:00Z"), 3)).toEqual([
+      "2026-09-18",
+      "2026-09-17",
+      "2026-09-16",
+    ]);
+  });
+});
 
 // NSE/BSE close at 15:30 IST (Asia/Kolkata, UTC+5:30) = 10:00 UTC.
 describe("getLatestExpectedTradingDay - India exchanges (NSE)", () => {

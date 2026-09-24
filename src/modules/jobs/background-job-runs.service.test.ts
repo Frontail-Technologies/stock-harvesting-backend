@@ -164,7 +164,8 @@ describe("failBackgroundJobRun", () => {
 describe("emitJobProgress", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("publishes a job-progress admin event without writing to the DB", async () => {
+  it("persists progress for reconnects and publishes the live admin event", async () => {
+    const set = mockUpdateChain();
     await emitJobProgress({
       runId: "run-1",
       jobType: BACKGROUND_JOB_TYPES.dailyCandleMorning,
@@ -175,8 +176,13 @@ describe("emitJobProgress", () => {
       failed: 2,
     });
 
-    expect(db.insert).not.toHaveBeenCalled();
-    expect(db.update).not.toHaveBeenCalled();
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      processedCount: 25,
+      totalExpected: 100,
+      updatedCount: 20,
+      repairedCount: 3,
+      failedCount: 2,
+    }));
     expect(publishRealtimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "admin",

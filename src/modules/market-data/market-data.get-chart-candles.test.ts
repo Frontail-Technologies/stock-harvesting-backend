@@ -264,6 +264,32 @@ describe("getChartCandles - 1W excludes the in-progress/incomplete week", () => 
     expect(result.candles.some((candle) => candle.time === "2026-09-18")).toBe(false);
   });
 
+  it("includes the forming weekly candle when the chart route opts in", async () => {
+    getInstrumentsBySymbol.mockResolvedValue(new Map([["TCS", { id: "i-1" } as never]]));
+    readChartCandles.mockResolvedValue(CURRENT_WEEK_IN_PROGRESS_ROWS);
+    isCompletedTradingWeek.mockReturnValue(false);
+
+    const result = await getChartCandles({
+      symbol: "TCS",
+      timeframe: "1W" as never,
+      exchange: "BSE",
+      includeIncompleteWeekly: true,
+    });
+
+    expect(result.candles).toEqual([
+      {
+        time: "2026-09-18",
+        open: 10,
+        high: 14,
+        low: 9,
+        close: 13,
+        volume: 300,
+      },
+    ]);
+    expect(result.dataThrough).toBe("2026-09-16");
+    expect(isCompletedTradingWeek).not.toHaveBeenCalled();
+  });
+
   it("2. after Fri 18 Sep market close, the same week's candle is included, labeled 18 Sep", async () => {
     getInstrumentsBySymbol.mockResolvedValue(new Map([["TCS", { id: "i-1" } as never]]));
     readChartCandles.mockResolvedValue([

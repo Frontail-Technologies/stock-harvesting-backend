@@ -16,6 +16,7 @@ import { activeUniverseFilter, listProductionExchanges } from "../market-data/ma
 import {
   getExchangeTodayIfTradingDay,
   getLatestExpectedTradingDay,
+  getRecentExpectedTradingDays,
 } from "../market-data/trading-calendar";
 import { listNoHistorySymbols } from "../market-data/market-data.no-history";
 import { addJobWithTimeout, getMarketDataQueue } from "./queues";
@@ -95,7 +96,7 @@ export async function ensureExpectedMarketDataJobs(
   let created = 0;
 
   for (const exchange of productionExchanges) {
-    const dates = new Set<string>([getLatestExpectedTradingDay(exchange, at)]);
+    const dates = new Set<string>(getRecentExpectedTradingDays(exchange, at, 3));
     const today = getExchangeTodayIfTradingDay(exchange, at);
     if (today) dates.add(today);
 
@@ -288,8 +289,9 @@ export async function reconcileMarketDataJobLedger(at: Date = new Date()) {
 
   const targets = new Map<string, { exchange: string; tradingDate: string }>();
   for (const exchange of exchanges) {
-    const tradingDate = getLatestExpectedTradingDay(exchange, at);
-    targets.set(`${exchange}:${tradingDate}`, { exchange, tradingDate });
+    for (const tradingDate of getRecentExpectedTradingDays(exchange, at, 3)) {
+      targets.set(`${exchange}:${tradingDate}`, { exchange, tradingDate });
+    }
   }
   for (const row of missedRows) {
     if (row.exchange && row.tradingDate) {
@@ -414,7 +416,10 @@ export async function getMarketDataOperations(at: Date = new Date()) {
       .where(recentCandleDatesCondition(exchange, tradingDate))
       .orderBy(desc(candles.time))
       .limit(4);
-    const dates = [...new Set([tradingDate, ...recentDates.map((row) => row.date)])];
+    const dates = [...new Set([
+      ...getRecentExpectedTradingDays(exchange, at, 3),
+      ...recentDates.map((row) => row.date),
+    ])];
     return Promise.all(dates.map((date) => getHistoricalCoverage(exchange, date)));
   }));
   const coverage = coverageGroups.flat();

@@ -190,6 +190,9 @@ marketDataRouter.get(
       before: query.before,
       limit: query.limit,
       exchange: query.exchange,
+      // Chart display may show the current forming weekly bar. The default
+      // service behavior remains completed-only for analytical callers.
+      includeIncompleteWeekly: true,
     });
 
     sendData(res, result);

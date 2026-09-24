@@ -162,6 +162,7 @@ export async function getChartCandles(input: {
   before?: string;
   limit?: number;
   exchange?: string;
+  includeIncompleteWeekly?: boolean;
 }): Promise<ChartCandlesResult> {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
@@ -185,8 +186,10 @@ export async function getChartCandles(input: {
     const candles = deriveChartCandlesFromDailyRows(dailyRows, input.timeframe).map((row) =>
       toChartCandleResponse(row, input.timeframe)
     );
-    const completedCandles = excludeIncompleteWeeklyCandle(candles, input.timeframe, exchange);
-    const pageCandles = input.limit ? completedCandles.slice(-input.limit) : completedCandles;
+    const visibleCandles = input.includeIncompleteWeekly
+      ? candles
+      : excludeIncompleteWeeklyCandle(candles, input.timeframe, exchange);
+    const pageCandles = input.limit ? visibleCandles.slice(-input.limit) : visibleCandles;
     return {
       candles: pageCandles,
       dataThrough: dailyRows[dailyRows.length - 1].time,
@@ -212,7 +215,9 @@ export async function getChartCandles(input: {
     if (legacyRows.length > 0) {
       const candles = legacyRows.map((row) => toChartCandleResponse(row, input.timeframe));
       return {
-        candles: excludeIncompleteWeeklyCandle(candles, input.timeframe, exchange),
+        candles: input.includeIncompleteWeekly
+          ? candles
+          : excludeIncompleteWeeklyCandle(candles, input.timeframe, exchange),
         dataThrough: null,
       };
     }
@@ -233,13 +238,10 @@ function getCandlePageCursor(time: string, timeframe: CandleTimeframe) {
   return time;
 }
 
-// The 1W chart must only ever show COMPLETED weeks (see
-// trading-calendar.ts's isCompletedTradingWeek) - an in-progress week's
-// candle is dropped entirely, never shown early under a future
-// week-ending Friday label. Checked on the already-Friday-labeled time
-// (toChartCandleResponse), which isCompletedTradingWeek handles
-// correctly since getWeekEndingFriday is idempotent for a Friday input.
-// 1D and 1M are untouched.
+// Analytical callers remain completed-week-only by default. The chart
+// route explicitly opts into the forming weekly candle for display; that
+// candle is derived from stored daily rows and is never persisted as a
+// completed weekly result. 1D and 1M are untouched.
 function excludeIncompleteWeeklyCandle<T extends { time: string }>(
   candlesList: T[],
   timeframe: CandleTimeframe,

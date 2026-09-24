@@ -91,6 +91,19 @@ export function getLatestExpectedTradingDay(exchange: string, at: Date = new Dat
   return candidateDate;
 }
 
+export function getRecentExpectedTradingDays(exchange: string, at: Date = new Date(), count = 3): string[] {
+  if (count <= 0) return [];
+  const dates = [getLatestExpectedTradingDay(exchange, at)];
+  while (dates.length < count) {
+    let candidate = shiftDateString(dates.at(-1)!, -1);
+    while ([0, 6].includes(new Date(`${candidate}T00:00:00.000Z`).getUTCDay())) {
+      candidate = shiftDateString(candidate, -1);
+    }
+    dates.push(candidate);
+  }
+  return dates;
+}
+
 // A week is complete once its own Friday is on or before the exchange's latest expected completed trading day - i.e. once Friday's daily candle is itself expected to exist. Shared by the whole Weekly Strong pipeline (weekly-strong-evaluator.ts's excludeIncompleteTradingWeek) and Scanner's weekly candle series (scanner.candles.ts).
 export function isCompletedTradingWeek(
   weekCandleTime: string,
