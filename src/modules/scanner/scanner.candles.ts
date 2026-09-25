@@ -10,6 +10,7 @@ export type ScannerWeeklySeriesInput = {
   segments: ScannerWeeklyCandle[][];
   latestSegment: ScannerWeeklyCandle[];
   isLatestWeekFresh: boolean;
+  dailyCloses?: ScannerDailyClose[];
 };
 
 export function deriveScannerWeeklyCloses(dailyCloses: ScannerDailyClose[]): ScannerWeeklyCandle[] {
@@ -48,5 +49,5 @@ export async function getScannerWeeklySeriesInput(
   );
   if (segments.length === 0) return null;
 
-  return { segments, latestSegment, isLatestWeekFresh };
+  return { segments, latestSegment, isLatestWeekFresh, dailyCloses };
 }

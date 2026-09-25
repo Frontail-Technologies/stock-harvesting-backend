@@ -87,13 +87,14 @@ export function resolveCurrentScannerSignal(
 export function resolveLiveScannerSignalFromDailyCloses(
   dailyCloses: ScannerDailyClose[],
   exchange: string,
-  requestedLookbackWeeks: number
+  requestedLookbackWeeks: number,
+  options: { strict?: boolean } = {}
 ): CurrentScannerSignal {
   const weeklyCloses = deriveScannerWeeklyCloses(dailyCloses);
   if (weeklyCloses.length === 0) return EMPTY_SIGNAL;
 
   const { latestSegment, isLatestWeekFresh } = classifyScannerWeeklySeries(weeklyCloses, exchange);
-  return resolveCurrentScannerSignal(latestSegment, isLatestWeekFresh, requestedLookbackWeeks);
+  return resolveCurrentScannerSignal(latestSegment, isLatestWeekFresh, requestedLookbackWeeks, options);
 }
 
 export function resolveScannerSignalFromDailyCloses(

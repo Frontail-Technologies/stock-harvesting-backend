@@ -7,6 +7,7 @@ import { normalizeSymbol } from "../../shared/normalize";
 import { calculateNear250WeekCloseHighScan } from "./rules/near-250-week-close-high";
 import { computeSymbolBreakoutBacktest } from "./scanner.backtest";
 import { getScannerWeeklySeriesInput } from "./scanner.candles";
+import { resolveLiveScannerSignalFromDailyCloses } from "./scanner-current-signal";
 import {
   DEFAULT_SCANNER_LOOKBACK,
   SCANNER_LOOKBACK_WEEKS,
@@ -94,6 +95,20 @@ async function calculateCurrentNear250WeekCloseHighResult(input: {
 
   if (!scan) return null;
 
+  // Historical highlight times remain completed-week results. Only the
+  // extension into the forming week follows the live verdict also used by
+  // the Dashboard's Stocks In/Out tables. A stock that is live "Out" must
+  // therefore not keep a yellow current-week highlight merely because it
+  // passed last Friday.
+  const liveMatched = seriesInput.dailyCloses
+    ? resolveLiveScannerSignalFromDailyCloses(
+        seriesInput.dailyCloses,
+        input.exchange,
+        lookbackWeeks,
+        { strict: true }
+      ).matched
+    : scan.matched;
+
   return {
     id: `${SCANNER_RULE_KEY.near250WeekCloseHigh}:${input.exchange}:${symbol}:${lookback}:${scan.endTime}`,
     ruleKey: SCANNER_RULE_KEY.near250WeekCloseHigh,
@@ -103,7 +118,7 @@ async function calculateCurrentNear250WeekCloseHighResult(input: {
     startTime: scan.startTime,
     endTime: scan.endTime,
     highlightTimes: scan.highlightTimes,
-    metrics: { latestMatched: scan.matched },
+    metrics: { latestMatched: liveMatched },
   };
 }
 
@@ -119,5 +134,4 @@ export function toClientScanMetrics(metrics: Record<string, unknown>): { latestM
     ? { latestMatched: metrics.latestMatched }
     : {};
 }
-
 
