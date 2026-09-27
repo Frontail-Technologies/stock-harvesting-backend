@@ -22,7 +22,9 @@ registerBullmqJobsCollector(async (gauge) => {
   }
 });
 
-const REPEATABLE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+export const INSTRUMENT_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+export const INSTRUMENT_SYNC_INDEX_CRON = "10 16 * * 1-5";
+export const MARKET_DATA_SCHEDULE_TZ = "Asia/Kolkata";
 // Bootstrap is maintenance work, not a freshness loop. Two batches per hour leave enough of GDF's
 // hourly allowance for chart refreshes, catch-up, and instrument sync while still draining gaps.
 export const CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS = 30 * 60 * 1000;
@@ -176,13 +178,18 @@ export async function scheduleRepeatableMarketDataSync(exchanges: string[]) {
 
   for (const exchange of exchanges) {
     try {
-      await queue.add(
-        JOB_NAMES.instrumentSync,
-        { exchange },
+      const schedulerId = `${INSTRUMENT_SYNC_SCHEDULER_PREFIX}${exchange}`;
+      const repeat = exchange.endsWith("_IDX")
+        ? { pattern: INSTRUMENT_SYNC_INDEX_CRON, tz: MARKET_DATA_SCHEDULE_TZ }
+        : { every: INSTRUMENT_SYNC_INTERVAL_MS };
+
+      await queue.upsertJobScheduler(
+        schedulerId,
+        repeat,
         {
-          jobId: `${INSTRUMENT_SYNC_SCHEDULER_PREFIX}${exchange}`,
-          priority: MAINTENANCE_JOB_PRIORITY,
-          repeat: { every: REPEATABLE_SYNC_INTERVAL_MS },
+          name: JOB_NAMES.instrumentSync,
+          data: { exchange },
+          opts: { priority: MAINTENANCE_JOB_PRIORITY },
         },
       );
     } catch (error) {
@@ -251,7 +258,7 @@ export async function scheduleCandleBootstrapReconciliation(exchanges: string[])
   }
 }
 
-export const DAILY_CANDLE_SYNC_TZ = "Asia/Kolkata";
+export const DAILY_CANDLE_SYNC_TZ = MARKET_DATA_SCHEDULE_TZ;
 const DAILY_CANDLE_SYNC_MORNING_CRON = "40 9 * * 1-5";
 const DAILY_CANDLE_SYNC_POST_MARKET_CRON = "50 15 * * 1-5";
 const DAILY_CANDLE_SYNC_RETRY_CRON = "0 17 * * 1-5";

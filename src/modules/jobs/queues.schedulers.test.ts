@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const queueApi = vi.hoisted(() => ({
   add: vi.fn(),
+  upsertJobScheduler: vi.fn(),
   getJobSchedulers: vi.fn(),
   removeJobScheduler: vi.fn(),
 }));
@@ -9,6 +10,7 @@ const queueApi = vi.hoisted(() => ({
 vi.mock("bullmq", () => ({
   Queue: class {
     add = queueApi.add;
+    upsertJobScheduler = queueApi.upsertJobScheduler;
     getJobSchedulers = queueApi.getJobSchedulers;
     removeJobScheduler = queueApi.removeJobScheduler;
     on = vi.fn();
@@ -25,6 +27,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   env.REDIS_URL = "redis://localhost:6379";
   queueApi.add.mockResolvedValue(undefined);
+  queueApi.upsertJobScheduler.mockResolvedValue(undefined);
   queueApi.removeJobScheduler.mockResolvedValue(true);
 });
 
@@ -68,5 +71,30 @@ describe("repeatable scheduler registration", () => {
     expect(queueApi.removeJobScheduler.mock.calls.map((call) => call[0])).toEqual([
       "repeatable-instrument-sync-NSE",
     ]);
+  });
+
+  it("syncs regular instruments every 30 minutes but index instruments once after market", async () => {
+    queueApi.getJobSchedulers.mockResolvedValue([]);
+
+    await scheduleRepeatableMarketDataSync(["BSE", "BSE_IDX"]);
+
+    expect(queueApi.upsertJobScheduler).toHaveBeenNthCalledWith(
+      1,
+      "repeatable-instrument-sync-BSE",
+      { every: 30 * 60 * 1000 },
+      expect.objectContaining({
+        name: "instrument-sync",
+        data: { exchange: "BSE" },
+      }),
+    );
+    expect(queueApi.upsertJobScheduler).toHaveBeenNthCalledWith(
+      2,
+      "repeatable-instrument-sync-BSE_IDX",
+      { pattern: "10 16 * * 1-5", tz: "Asia/Kolkata" },
+      expect.objectContaining({
+        name: "instrument-sync",
+        data: { exchange: "BSE_IDX" },
+      }),
+    );
   });
 });
