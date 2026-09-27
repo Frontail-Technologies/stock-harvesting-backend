@@ -14,9 +14,56 @@ import type { DailyCandleSyncFailureDetail, DailyCandleSyncSummary } from "../ma
 import { getLatestExpectedTradingDay } from "../market-data/trading-calendar";
 import { publishRealtimeEvent } from "./realtime-events";
 import { claimMarketDataLedgerRun } from "./market-data-job-ledger";
+import { getMarketDataQueue } from "./queues";
 
 const FAILED_SYMBOLS_METADATA_CAP = 25;
 const RECENT_JOB_RUNS_DEFAULT_LIMIT = 200;
+const QUEUE_LOOKUP_TIMEOUT_MS = 3_000;
+const ACTIVE_DATABASE_STATUSES = new Set<string>([
+  BACKGROUND_JOB_RUN_STATUS.queued,
+  BACKGROUND_JOB_RUN_STATUS.running,
+]);
+let queueReconciliationWarningLogged = false;
+
+export type BackgroundJobQueueState =
+  | "active"
+  | "waiting"
+  | "waiting-children"
+  | "delayed"
+  | "prioritized"
+  | "completed"
+  | "failed"
+  | "missing"
+  | "not-linked"
+  | "unavailable";
+
+async function withQueueLookupTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Redis job lookup timed out")), QUEUE_LOOKUP_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function markOrphanedRun(id: string, reason: string) {
+  const finishedAt = new Date();
+  await db
+    .update(backgroundJobRuns)
+    .set({
+      status: BACKGROUND_JOB_RUN_STATUS.failed,
+      finishedAt,
+      errorSummary: reason,
+      updatedAt: finishedAt,
+    })
+    .where(eq(backgroundJobRuns.id, id));
+  return finishedAt;
+}
 
 export async function startBackgroundJobRun(
   jobType: BackgroundJobType,
@@ -263,13 +310,71 @@ export async function recordChartEnsureFreshRun(input: {
 }
 
 export async function listRecentBackgroundJobRuns(limit = RECENT_JOB_RUNS_DEFAULT_LIMIT) {
-  return db
+  const rows = await db
     .select()
     .from(backgroundJobRuns)
     .orderBy(
       desc(sql`coalesce(${backgroundJobRuns.startedAt}, ${backgroundJobRuns.scheduledAt}, ${backgroundJobRuns.createdAt})`)
     )
     .limit(limit);
+
+  const activeRows = rows.filter((row) => ACTIVE_DATABASE_STATUSES.has(row.status));
+  if (activeRows.length === 0) return rows.map((row) => ({ ...row, queueState: "not-linked" as const }));
+
+  const queue = getMarketDataQueue();
+  if (!queue) {
+    return rows.map((row) => ({
+      ...row,
+      queueState: ACTIVE_DATABASE_STATUSES.has(row.status) ? "unavailable" as const : "not-linked" as const,
+    }));
+  }
+
+  const queueStates = new Map<string, BackgroundJobQueueState>();
+  let queueLookupError: unknown = null;
+  await Promise.all(activeRows.map(async (row) => {
+    if (!row.bullmqJobId) {
+      queueStates.set(row.id, "missing");
+      return;
+    }
+    try {
+      const job = await withQueueLookupTimeout(queue.getJob(row.bullmqJobId));
+      queueStates.set(row.id, job ? await withQueueLookupTimeout(job.getState()) as BackgroundJobQueueState : "missing");
+    } catch (error) {
+      queueStates.set(row.id, "unavailable");
+      queueLookupError ??= error;
+    }
+  }));
+  if (queueLookupError && !queueReconciliationWarningLogged) {
+    queueReconciliationWarningLogged = true;
+    logger.warn(
+      { message: getErrorMessage(queueLookupError, "Queue lookup failed") },
+      "Could not reconcile background job runs with Redis",
+    );
+  } else if (!queueLookupError) {
+    queueReconciliationWarningLogged = false;
+  }
+
+  return Promise.all(rows.map(async (row) => {
+    if (!ACTIVE_DATABASE_STATUSES.has(row.status)) return { ...row, queueState: "not-linked" as const };
+
+    const queueState = queueStates.get(row.id) ?? "unavailable";
+    const isOrphaned = queueState === "missing";
+    const queueFinishedWithoutDb = queueState === "completed" || queueState === "failed";
+    if (!isOrphaned && !queueFinishedWithoutDb) return { ...row, queueState };
+
+    const reason = isOrphaned
+      ? "Orphaned job: no corresponding Redis queue job exists"
+      : `Queue job is ${queueState}, but its database run was never finalised`;
+    const finishedAt = await markOrphanedRun(row.id, reason);
+    return {
+      ...row,
+      status: BACKGROUND_JOB_RUN_STATUS.failed,
+      finishedAt,
+      errorSummary: reason,
+      updatedAt: finishedAt,
+      queueState,
+    };
+  }));
 }
 
 export async function getLatestBackgroundJobRunByType(jobTypes: BackgroundJobType[]) {

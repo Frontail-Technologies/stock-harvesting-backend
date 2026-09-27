@@ -2,16 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../db/client", () => ({ db: { insert: vi.fn(), update: vi.fn(), select: vi.fn() } }));
 vi.mock("./realtime-events", () => ({ publishRealtimeEvent: vi.fn() }));
+vi.mock("./queues", () => ({ getMarketDataQueue: vi.fn() }));
 vi.mock("../market-data/trading-calendar", () => ({ getLatestExpectedTradingDay: vi.fn(() => "2026-09-16") }));
 
 import * as dbClientModule from "../../db/client";
 import * as realtimeEventsModule from "./realtime-events";
-import { BACKGROUND_JOB_TYPES } from "../../shared/constants";
+import * as queuesModule from "./queues";
+import { BACKGROUND_JOB_RUN_STATUS, BACKGROUND_JOB_TYPES } from "../../shared/constants";
 import type { DailyCandleSyncSummary } from "../market-data/market-data.candle-sync";
 import {
   emitJobProgress,
   failBackgroundJobRun,
   finishBackgroundJobRunFromSummary,
+  listRecentBackgroundJobRuns,
   recordChartEnsureFreshResultIfNeeded,
   recordChartEnsureFreshRun,
   startBackgroundJobRun,
@@ -19,6 +22,7 @@ import {
 
 const db = vi.mocked(dbClientModule.db);
 const publishRealtimeEvent = vi.mocked(realtimeEventsModule.publishRealtimeEvent);
+const getMarketDataQueue = vi.mocked(queuesModule.getMarketDataQueue);
 
 function baseSummary(overrides: Partial<DailyCandleSyncSummary> = {}): DailyCandleSyncSummary {
   return {
@@ -49,6 +53,85 @@ function mockUpdateChain() {
   db.update.mockReturnValueOnce({ set } as never);
   return set;
 }
+
+function mockSelectRows(rows: unknown[]) {
+  const limit = vi.fn(async () => rows);
+  const orderBy = vi.fn(() => ({ limit }));
+  const from = vi.fn(() => ({ orderBy }));
+  db.select.mockReturnValueOnce({ from } as never);
+}
+
+function activeRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "run-1",
+    jobType: BACKGROUND_JOB_TYPES.instrumentSync,
+    status: BACKGROUND_JOB_RUN_STATUS.running,
+    bullmqJobId: "bull-1",
+    startedAt: new Date("2026-09-27T05:30:00.000Z"),
+    scheduledAt: null,
+    finishedAt: null,
+    errorSummary: null,
+    createdAt: new Date("2026-09-27T05:30:00.000Z"),
+    updatedAt: new Date("2026-09-27T05:30:00.000Z"),
+    ...overrides,
+  };
+}
+
+describe("listRecentBackgroundJobRuns queue reconciliation", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("keeps a database run active when its Redis job is active", async () => {
+    mockSelectRows([activeRun()]);
+    getMarketDataQueue.mockReturnValue({
+      getJob: vi.fn(async () => ({ getState: vi.fn(async () => "active") })),
+    } as never);
+
+    const [run] = await listRecentBackgroundJobRuns();
+
+    expect(run.status).toBe("running");
+    expect(run.queueState).toBe("active");
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("marks a database-only active run failed when its Redis job is missing", async () => {
+    mockSelectRows([activeRun()]);
+    getMarketDataQueue.mockReturnValue({ getJob: vi.fn(async () => undefined) } as never);
+    const set = mockUpdateChain();
+
+    const [run] = await listRecentBackgroundJobRuns();
+
+    expect(run.status).toBe("failed");
+    expect(run.queueState).toBe("missing");
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      status: "failed",
+      errorSummary: "Orphaned job: no corresponding Redis queue job exists",
+    }));
+  });
+
+  it("marks an active database row without a BullMQ id as an orphan", async () => {
+    mockSelectRows([activeRun({ bullmqJobId: null })]);
+    getMarketDataQueue.mockReturnValue({ getJob: vi.fn() } as never);
+    mockUpdateChain();
+
+    const [run] = await listRecentBackgroundJobRuns();
+
+    expect(run.status).toBe("failed");
+    expect(run.queueState).toBe("missing");
+  });
+
+  it("does not fail a run when Redis is unavailable", async () => {
+    mockSelectRows([activeRun()]);
+    getMarketDataQueue.mockReturnValue({
+      getJob: vi.fn(async () => { throw new Error("Redis unavailable"); }),
+    } as never);
+
+    const [run] = await listRecentBackgroundJobRuns();
+
+    expect(run.status).toBe("running");
+    expect(run.queueState).toBe("unavailable");
+    expect(db.update).not.toHaveBeenCalled();
+  });
+});
 
 describe("startBackgroundJobRun", () => {
   beforeEach(() => vi.clearAllMocks());
