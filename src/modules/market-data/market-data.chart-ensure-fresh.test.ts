@@ -15,6 +15,7 @@ vi.mock("./market-data.candle-sync", () => ({
 vi.mock("../jobs/queues", () => ({
   getMarketDataQueue: vi.fn(),
   getMarketDataQueueEvents: vi.fn(),
+  getMarketDataQueueRedisClient: vi.fn(async () => null),
 }));
 
 vi.mock("./trading-calendar", () => ({

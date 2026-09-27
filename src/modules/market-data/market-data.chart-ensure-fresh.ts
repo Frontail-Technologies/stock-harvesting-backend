@@ -5,6 +5,7 @@ import { logger } from "../../shared/logger";
 import { normalizeSymbol } from "../../shared/normalize";
 import { recordChartEnsureFreshResultIfNeeded } from "../jobs/background-job-runs.service";
 import { getMarketDataQueue, getMarketDataQueueEvents } from "../jobs/queues";
+import { assertGlobalDatafeedsAvailable } from "../jobs/provider-cooldown.service";
 import { refreshDailyCandles, type DailyCandleSyncResult, type DailyCandleSyncStatus } from "./market-data.candle-sync";
 import { getLatestExpectedTradingDay } from "./trading-calendar";
 
@@ -109,6 +110,7 @@ export async function ensureFreshDailyCandles(input: {
   const waitForCompletion = input.waitForCompletion ?? true;
 
   if (input.forceRefresh) {
+    await assertGlobalDatafeedsAvailable();
     inMemoryResults.delete(jobId);
   }
 

@@ -3,6 +3,7 @@ import type { GlobalDatafeedsResponse } from "./global-datafeeds.types";
 
 export const GDF_RATE_LIMIT_BASE_COOLDOWN_MS = 5 * 60_000;
 export const GDF_RATE_LIMIT_MAX_COOLDOWN_MS = 30 * 60_000;
+export const GDF_RATE_LIMIT_REDIS_KEY = "gdf:rate-limit:blocked-until";
 const HOUR_MS = 60 * 60_000;
 
 // GDF answers a call over the hourly quota with a RequestError ("Calls per hour are limited.") that

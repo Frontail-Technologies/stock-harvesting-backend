@@ -47,6 +47,7 @@ import { listProviderSettings, updateProviderSettings } from "../data-provider/d
 import type { DataProviderSettingsRow } from "../data-provider/data-provider.types";
 import { closeMarketStreamProviderByKey } from "../market-stream/market-stream.service";
 import { addJobWithTimeout, getMarketDataQueue } from "../jobs/queues";
+import { assertGlobalDatafeedsAvailable } from "../jobs/provider-cooldown.service";
 import { logger } from "../../shared/logger";
 import type { adminUserSortFields } from "./admin.schemas";
 
@@ -443,6 +444,7 @@ export async function triggerInstrumentSync(input: {
   actorUserId: string;
   exchange: string;
 }) {
+  await assertGlobalDatafeedsAvailable();
   const queue = getMarketDataQueue();
   const [job] = await db
     .insert(syncJobs)
@@ -567,6 +569,7 @@ export async function triggerIndexCandleBackfill(input: {
   actorUserId: string;
   exchange?: string;
 }) {
+  await assertGlobalDatafeedsAvailable();
   await assertNoActiveSyncJob(SYNC_JOB_TYPES.indexCandleBackfill, "exchange", input.exchange);
   await assertNoActiveSyncJob(SYNC_JOB_TYPES.instrumentSync, "exchange", input.exchange);
   const queue = getMarketDataQueue();
@@ -626,6 +629,7 @@ export async function triggerPriceRefresh(input: {
   actorUserId: string;
   exchange: string;
 }) {
+  await assertGlobalDatafeedsAvailable();
   await assertNoActiveSyncJob(SYNC_JOB_TYPES.priceRefresh, "exchange", input.exchange);
   const queue = getMarketDataQueue();
   const [job] = await db
@@ -696,6 +700,7 @@ export async function triggerCandleBackfill(input: {
   from: string;
   to: string;
 }) {
+  await assertGlobalDatafeedsAvailable();
   const result = await backfillDailyCandles(input);
   await writeAuditLog({
     actorUserId: input.actorUserId,
@@ -708,6 +713,7 @@ export async function triggerCandleBackfill(input: {
 }
 
 export async function triggerDailyCandleRefresh(input: { actorUserId: string; symbol: string }) {
+  await assertGlobalDatafeedsAvailable();
   // An explicit admin refresh deliberately re-queries an instrument already confirmed as having no history.
   const result = await refreshDailyCandles({ symbol: input.symbol, forceRecheck: true });
   await writeAuditLog({

@@ -60,6 +60,7 @@ vi.mock("ioredis", () => {
 
 import { ProviderRateLimitedError } from "../../../../shared/errors";
 import { GdfSessionBroker } from "./global-datafeeds.session-broker";
+import { GDF_RATE_LIMIT_REDIS_KEY } from "./global-datafeeds.rate-limit";
 import type { GlobalDatafeedsWebSocketClient } from "./global-datafeeds.websocket-client";
 
 function fakeClient() {
@@ -171,6 +172,7 @@ describe("requests from a non-owner process", () => {
 
     expect(error).toBeInstanceOf(ProviderRateLimitedError);
     expect((error as ProviderRateLimitedError).retryAfterMs).toBe(300_000);
+    expect(Number(bus.store.get(GDF_RATE_LIMIT_REDIS_KEY))).toBeGreaterThan(Date.now());
   });
 
   it("fail immediately, without waiting for a timeout, when no owner is running", async () => {

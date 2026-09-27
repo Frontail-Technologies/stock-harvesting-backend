@@ -20,6 +20,7 @@ import {
 } from "../market-data/trading-calendar";
 import { listNoHistorySymbols } from "../market-data/market-data.no-history";
 import { addJobWithTimeout, getMarketDataQueue } from "./queues";
+import { getGlobalDatafeedsCooldown } from "./provider-cooldown.service";
 
 const EXPECTED_SCHEDULES = [
   { jobType: BACKGROUND_JOB_TYPES.dailyCandleMorning, time: "09:40" },
@@ -407,7 +408,10 @@ export function recentCandleDatesCondition(exchange: string, tradingDate: string
 }
 
 export async function getMarketDataOperations(at: Date = new Date()) {
-  const exchanges = await listProductionExchanges();
+  const [exchanges, providerCooldown] = await Promise.all([
+    listProductionExchanges(),
+    getGlobalDatafeedsCooldown(at),
+  ]);
   const coverageGroups = await Promise.all(exchanges.map(async (exchange) => {
     const tradingDate = getLatestExpectedTradingDay(exchange, at);
     const recentDates = await db
@@ -434,6 +438,7 @@ export async function getMarketDataOperations(at: Date = new Date()) {
     historicalThrough,
     backtestsThrough: backtest?.through ?? null,
     productionProvider: "GlobalDataFeeds",
+    providerCooldown,
     coverage,
     jobs: await listMarketDataLedger(100),
   };

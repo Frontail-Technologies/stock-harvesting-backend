@@ -29,6 +29,7 @@ vi.mock("./market-data.instrument-sync", () => ({
 vi.mock("./market-data.instruments", () => ({
   getInstrumentsBySymbol: vi.fn().mockResolvedValue(new Map()),
   refreshLatestInstrumentStats: vi.fn().mockResolvedValue(undefined),
+  markInstrumentCandleRefresh: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("./market-data.candles", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./market-data.candles")>();

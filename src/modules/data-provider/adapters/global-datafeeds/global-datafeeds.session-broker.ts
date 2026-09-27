@@ -11,6 +11,7 @@ import type {
   GlobalDatafeedsResponse,
 } from "./global-datafeeds.types";
 import { globalDatafeedsClient, type GlobalDatafeedsWebSocketClient } from "./global-datafeeds.websocket-client";
+import { GDF_RATE_LIMIT_REDIS_KEY } from "./global-datafeeds.rate-limit";
 
 // GlobalDataFeeds allows ONE session per API key. With the API and the worker both opening their
 // own socket, whichever connects second is refused ("Key already in use by other session") and its
@@ -295,6 +296,17 @@ export class GdfSessionBroker {
         reply = { id: message.id, ok: true, response };
       }
     } catch (error) {
+      if (error instanceof ProviderRateLimitedError && this.commands) {
+        const blockedUntil = Date.now() + error.retryAfterMs;
+        await this.commands
+          .set(GDF_RATE_LIMIT_REDIS_KEY, String(blockedUntil), "PX", error.retryAfterMs)
+          .catch((redisError) => {
+            logger.warn(
+              { message: getErrorMessage(redisError, "Unknown Redis error") },
+              "Failed to publish Global Datafeeds cooldown",
+            );
+          });
+      }
       reply = {
         id: message.id,
         ok: false,

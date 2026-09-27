@@ -52,6 +52,7 @@ import {
 } from "./shared/metrics/metrics";
 import { startWorkerMetricsServer } from "./shared/metrics/worker-metrics-server";
 import { getJobRuntimeLimitMs } from "./modules/jobs/job-runtime-limits";
+import { getGlobalDatafeedsCooldown } from "./modules/jobs/provider-cooldown.service";
 
 const connection = getRedisConnectionOptions();
 
@@ -68,6 +69,14 @@ if (env.METRICS_ENABLED) {
 // run finishes. Skip only that exact duplicate; different job types and dated
 // catch-ups remain independent and never wait behind another job's watchdog.
 const activeProviderOperations = new Set<string>();
+const PROVIDER_BACKED_JOB_NAMES = new Set<string>([
+  JOB_NAMES.instrumentSync,
+  JOB_NAMES.priceRefresh,
+  JOB_NAMES.indexCandleBackfill,
+  JOB_NAMES.dailyCandleSync,
+  JOB_NAMES.marketDataCatchUp,
+  JOB_NAMES.chartCandleEnsureFresh,
+]);
 
 async function runProviderOperationOnce<T>(key: string, run: () => Promise<T>): Promise<T | { skipped: true; reason: string }> {
   if (activeProviderOperations.has(key)) {
@@ -245,6 +254,13 @@ startGdfSessionBroker("owner-candidate");
 const worker = new Worker(
   QUEUE_NAMES.marketData,
   async (job) => {
+    if (PROVIDER_BACKED_JOB_NAMES.has(job.name)) {
+      const cooldown = await getGlobalDatafeedsCooldown();
+      if (cooldown.active) {
+        await worker.rateLimit(cooldown.remainingMs);
+        throw Worker.RateLimitError();
+      }
+    }
     const runtimeLimitMs = getJobRuntimeLimitMs(job.name);
     const watchdog = setTimeout(() => {
       logger.fatal(

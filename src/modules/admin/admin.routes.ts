@@ -85,6 +85,7 @@ import {
   updateUserRole,
 } from "./admin.service";
 import { listRecentBackgroundJobRuns } from "../jobs/background-job-runs.service";
+import { assertGlobalDatafeedsAvailable } from "../jobs/provider-cooldown.service";
 import { getMarketDataQueueSnapshot } from "../jobs/queue-snapshot.service";
 import { getScheduledDailyCandleSyncStatuses } from "../jobs/scheduled-job-status.service";
 import { getMarketDataWorkerStatuses } from "../jobs/worker-status.service";
@@ -368,6 +369,7 @@ adminRouter.post(
   validate({ body: marketDataLedgerActionBodySchema }),
   asyncHandler(async (req, res) => {
     const body = req.body as { exchange: string; tradingDate: string };
+    await assertGlobalDatafeedsAvailable();
     sendAccepted(res, { runId: await createAndQueueCatchUp(body.exchange, body.tradingDate, undefined, { force: true }) });
   }),
 );
