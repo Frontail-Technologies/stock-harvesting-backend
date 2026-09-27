@@ -165,24 +165,15 @@ describe("ensureFreshDailyCandles - queue-backed dedupe", () => {
     expect(queue.add).not.toHaveBeenCalled();
   });
 
-  it("a forced manual refresh removes a completed same-day job and runs a fresh repair", async () => {
+  it("a forced manual refresh bypasses a completed queue job and runs the repair directly", async () => {
     const queue = fakeQueue();
-    const completedJob = fakeJob("completed", resolvedWait(undefined), {
-      symbol: "MOREPENLAB",
-      status: "provider-empty",
-      insertedDaily: 0,
-      failedDates: [],
-    });
-    queue.getJob.mockResolvedValue(completedJob);
-    queue.add.mockResolvedValue(
-      fakeJob("waiting", resolvedWait({
-        symbol: "MOREPENLAB",
-        status: "repaired",
-        insertedDaily: 5,
-        failedDates: [],
-      }))
-    );
     getMarketDataQueue.mockReturnValue(queue as never);
+    refreshDailyCandles.mockResolvedValue({
+      symbol: "MOREPENLAB",
+      status: "repaired",
+      insertedDaily: 5,
+      failedDates: [],
+    } as never);
 
     const result = await ensureFreshDailyCandles({
       symbol: "MOREPENLAB",
@@ -191,8 +182,9 @@ describe("ensureFreshDailyCandles - queue-backed dedupe", () => {
       forceRefresh: true,
     });
 
-    expect(completedJob.remove).toHaveBeenCalledOnce();
-    expect(queue.add).toHaveBeenCalledOnce();
+    expect(queue.getJob).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+    expect(refreshDailyCandles).toHaveBeenCalledWith({ symbol: "MOREPENLAB", exchange: "BSE" });
     expect(result).toEqual({ status: "repaired", changed: true, latestExpectedDate: "2026-09-11" });
   });
 

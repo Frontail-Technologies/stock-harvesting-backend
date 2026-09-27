@@ -21,6 +21,7 @@ const CHANGED_STATUSES = new Set<EnsureFreshDailyCandlesStatus>(["updated", "rep
 const ENSURE_FRESH_JOB_RETENTION_SECONDS = 20 * 60 * 60;
 const ENSURE_FRESH_QUEUE_LOOKUP_TIMEOUT_MS = 3_000;
 const ENSURE_FRESH_REPAIR_WAIT_TIMEOUT_MS = 90_000;
+const MANUAL_REFRESH_WAIT_TIMEOUT_MS = 30_000;
 const JOB_WAIT_TIMEOUT_MESSAGE = "timed out before finishing";
 const REPAIR_WAIT_TIMEOUT_MESSAGE = "Timed out waiting for the chart candle repair";
 
@@ -111,6 +112,17 @@ export async function ensureFreshDailyCandles(input: {
     inMemoryResults.delete(jobId);
   }
 
+  // A button-triggered refresh must not sit behind a congested market-data
+  // queue. It still reaches the single GDF session through the session broker,
+  // and runInMemoryFallback deduplicates concurrent requests in this process.
+  if (input.forceRefresh && waitForCompletion) {
+    return withTimeoutOrInProgress(
+      runInMemoryFallback({ symbol, exchange }, jobId),
+      latestExpectedDate,
+      MANUAL_REFRESH_WAIT_TIMEOUT_MS
+    );
+  }
+
   const queue = getMarketDataQueue();
   if (!queue) {
     if (!waitForCompletion) {
@@ -173,10 +185,11 @@ export async function ensureFreshDailyCandles(input: {
 
 async function withTimeoutOrInProgress(
   promise: Promise<DailyCandleSyncResult>,
-  latestExpectedDate: string
+  latestExpectedDate: string,
+  timeoutMs = ENSURE_FRESH_REPAIR_WAIT_TIMEOUT_MS
 ): Promise<EnsureFreshDailyCandlesResult> {
   try {
-    const result = await withTimeout(promise, ENSURE_FRESH_REPAIR_WAIT_TIMEOUT_MS, REPAIR_WAIT_TIMEOUT_MESSAGE);
+    const result = await withTimeout(promise, timeoutMs, REPAIR_WAIT_TIMEOUT_MESSAGE);
     return toResult(result.status, latestExpectedDate);
   } catch (error) {
     if (error instanceof Error && error.message === REPAIR_WAIT_TIMEOUT_MESSAGE) {
