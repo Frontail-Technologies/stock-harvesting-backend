@@ -25,8 +25,13 @@ describe("aggregateBseIntradayCandles", () => {
     });
   });
 
-  it("does not produce a canonical candle from an incomplete session", () => {
-    expect(aggregateBseIntradayCandles(sessionBars(24), "2026-09-21", true)).toBeNull();
+  it("aggregates a completed session even when an illiquid stock has empty intervals", () => {
+    expect(aggregateBseIntradayCandles(sessionBars(24), "2026-09-21", true)).toMatchObject({
+      time: "2026-09-21",
+      open: 100,
+      close: 124,
+      volume: 300,
+    });
   });
 
   it("allows available bars for a provisional current-day candle", () => {

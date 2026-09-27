@@ -7,7 +7,7 @@ const BSE_BAR_MINUTES = 15;
 export function aggregateBseIntradayCandles(
   bars: ProviderIntradayCandle[],
   date: string,
-  requireComplete: boolean
+  _requireComplete: boolean
 ): ProviderDailyCandle | null {
   const bySlot = new Map<number, ProviderIntradayCandle>();
   for (const bar of bars) {
@@ -21,7 +21,11 @@ export function aggregateBseIntradayCandles(
     bySlot.set(offset / BSE_BAR_MINUTES, bar);
   }
 
-  if (bySlot.size === 0 || (requireComplete && bySlot.size !== BSE_SESSION_BAR_COUNT)) return null;
+  // GetHistory only returns intervals in which the instrument traded. Once
+  // the caller has established that `date` is a completed session, missing
+  // slots are valid for illiquid stocks and must not prevent daily OHLCV
+  // finalization. An entirely empty response still means no candle.
+  if (bySlot.size === 0) return null;
   const ordered = [...bySlot.entries()].sort(([a], [b]) => a - b).map(([, bar]) => bar);
   return {
     time: date,

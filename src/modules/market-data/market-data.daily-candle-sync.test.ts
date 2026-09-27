@@ -124,6 +124,43 @@ describe("refreshDailyCandles - gap repair", () => {
     expect(result).toMatchObject({ status: "updated", insertedDaily: 3, failedDates: [] });
   });
 
+  it("persists successful repair dates and reports only the date whose provider request failed", async () => {
+    getLatestExpectedTradingDay.mockReturnValue("2026-09-23");
+    readCandleHistoryRange.mockResolvedValue({ from: "2020-01-01", to: "2026-09-18" });
+    readCandleDatesInRange
+      .mockResolvedValueOnce(new Set(["2026-09-18"]))
+      .mockResolvedValueOnce(new Set(["2026-09-18", "2026-09-21", "2026-09-23"]));
+
+    const fetchIntradayCandles = vi.fn(async ({ date }: { date: string }) => {
+      if (date === "2026-09-22") throw new Error("GDF timeout");
+      return Array.from({ length: 25 }, (_, index) => ({
+        time: new Date(Date.parse(`${date}T03:45:00.000Z`) + index * 900_000).toISOString(),
+        open: 100,
+        high: 102,
+        low: 99,
+        close: 101,
+        volume: 10,
+      }));
+    });
+    getEligibleProviderAdapter.mockResolvedValue({
+      providerKey: "global-datafeeds",
+      fetchDailyCandles: vi.fn(),
+      fetchIntradayCandles,
+    } as never);
+
+    const result = await refreshDailyCandles({ symbol: "TCS", exchange: "BSE" });
+
+    expect(candlesModule.upsertCandles).toHaveBeenCalledTimes(1);
+    expect(candlesModule.upsertCandles).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ time: "2026-09-21" }),
+        expect.objectContaining({ time: "2026-09-23" }),
+      ]),
+      expect.anything()
+    );
+    expect(result).toMatchObject({ status: "failed", insertedDaily: 2, failedDates: ["2026-09-22"] });
+  });
+
   it("persists a complete 15-minute BSE session for a targeted post-market sync", async () => {
     readCandleHistoryRange.mockResolvedValue({ from: "2020-01-01", to: "2026-09-18" });
     readCandleDatesInRange

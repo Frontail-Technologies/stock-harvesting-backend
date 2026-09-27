@@ -131,6 +131,7 @@ export type BackfillDailyCandlesResult = {
   dailyCandles: ProviderDailyCandle[];
   providerConfirmedEmpty?: boolean;
   intradayRepairSkipped?: boolean;
+  providerFailedDates?: string[];
 };
 
 export async function backfillDailyCandles(
@@ -168,21 +169,31 @@ export async function backfillDailyCandles(
     // Everything that can fail (network, vendor, rate limits) happens before existing rows are touched - deleteCandlesForRefresh only runs with validated replacement data in hand.
     const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
     let daily: ProviderDailyCandle[];
+    const providerFailedDates: string[] = [];
     const useIntradayRepair = exchange === "BSE" && input.intradayRepairDates !== undefined && adapter.fetchIntradayCandles;
     try {
       if (useIntradayRepair) {
         daily = [];
         for (const date of input.intradayRepairDates ?? []) {
-          const bars = await adapter.fetchIntradayCandles!({
-            accessToken,
-            instrumentToken: instrument.instrumentToken,
-            symbol,
-            date,
-            exchangeCode: exchange,
-            periodMinutes: 15,
-          });
-          const aggregated = aggregateBseIntradayCandles(bars, date, true);
-          if (aggregated) daily.push(aggregated);
+          try {
+            const bars = await adapter.fetchIntradayCandles!({
+              accessToken,
+              instrumentToken: instrument.instrumentToken,
+              symbol,
+              date,
+              exchangeCode: exchange,
+              periodMinutes: 15,
+            });
+            const aggregated = aggregateBseIntradayCandles(bars, date, true);
+            if (aggregated) daily.push(aggregated);
+          } catch (error) {
+            providerFailedDates.push(date);
+            void recordProviderFailure(adapter.providerKey, error);
+            logger.warn(
+              { exchange, symbol, date, message: getErrorMessage(error, "Intraday history failed") },
+              "Skipped failed BSE daily candle repair date"
+            );
+          }
         }
       } else if (exchange === "BSE" && input.from === input.to && adapter.fetchIntradayCandles) {
         const bars = await adapter.fetchIntradayCandles({
@@ -205,7 +216,7 @@ export async function backfillDailyCandles(
           exchangeCode: exchange,
         });
       }
-      void recordProviderSuccess(adapter.providerKey);
+      if (providerFailedDates.length === 0) void recordProviderSuccess(adapter.providerKey);
     } catch (error) {
       void recordProviderFailure(adapter.providerKey, error);
       throw error;
@@ -262,6 +273,7 @@ export async function backfillDailyCandles(
       // error/timeout (thrown above) or a no-op because no provider was eligible.
       providerConfirmedEmpty: daily.length === 0,
       intradayRepairSkipped: Boolean(useIntradayRepair && input.intradayRepairDates?.length === 0),
+      providerFailedDates,
     };
   } catch (error) {
     recordCandleBackfill(exchange, "failed", startedAt);
@@ -757,6 +769,15 @@ export async function refreshDailyCandles(
   );
 
   if (result.dailyCandles.length === 0) {
+    if (result.providerFailedDates?.length) {
+      return {
+        symbol,
+        instrumentId: instrument.id,
+        status: "failed",
+        insertedDaily: 0,
+        failedDates: result.providerFailedDates,
+      };
+    }
     if (result.intradayRepairSkipped) {
       return { symbol, instrumentId: instrument.id, status: "already-current", insertedDaily: 0, failedDates: [] };
     }
@@ -782,9 +803,12 @@ export async function refreshDailyCandles(
     to: syncTo,
   });
 
-  const failedDates = result.dailyCandles
-    .map((candle) => candle.time)
-    .filter((time) => !datesAfter.has(time));
+  const failedDates = [
+    ...(result.providerFailedDates ?? []),
+    ...result.dailyCandles
+      .map((candle) => candle.time)
+      .filter((time) => !datesAfter.has(time)),
+  ];
 
   if (failedDates.length > 0) {
     logger.error({ exchange, symbol, failedDates }, "Daily candle sync persistence failure");
