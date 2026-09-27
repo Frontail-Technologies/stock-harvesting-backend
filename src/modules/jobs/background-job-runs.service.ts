@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../../db/client";
 import { backgroundJobRuns } from "../../db/schema";
@@ -16,7 +16,7 @@ import { publishRealtimeEvent } from "./realtime-events";
 import { claimMarketDataLedgerRun } from "./market-data-job-ledger";
 
 const FAILED_SYMBOLS_METADATA_CAP = 25;
-const RECENT_JOB_RUNS_DEFAULT_LIMIT = 25;
+const RECENT_JOB_RUNS_DEFAULT_LIMIT = 200;
 
 export async function startBackgroundJobRun(
   jobType: BackgroundJobType,
@@ -263,7 +263,13 @@ export async function recordChartEnsureFreshRun(input: {
 }
 
 export async function listRecentBackgroundJobRuns(limit = RECENT_JOB_RUNS_DEFAULT_LIMIT) {
-  return db.select().from(backgroundJobRuns).orderBy(desc(backgroundJobRuns.startedAt)).limit(limit);
+  return db
+    .select()
+    .from(backgroundJobRuns)
+    .orderBy(
+      desc(sql`coalesce(${backgroundJobRuns.startedAt}, ${backgroundJobRuns.scheduledAt}, ${backgroundJobRuns.createdAt})`)
+    )
+    .limit(limit);
 }
 
 export async function getLatestBackgroundJobRunByType(jobTypes: BackgroundJobType[]) {
