@@ -53,7 +53,7 @@ async function withQueueLookupTimeout<T>(operation: Promise<T>): Promise<T> {
 
 async function markOrphanedRun(id: string, reason: string) {
   const finishedAt = new Date();
-  await db
+  const [updated] = await db
     .update(backgroundJobRuns)
     .set({
       status: BACKGROUND_JOB_RUN_STATUS.failed,
@@ -61,8 +61,17 @@ async function markOrphanedRun(id: string, reason: string) {
       errorSummary: reason,
       updatedAt: finishedAt,
     })
-    .where(eq(backgroundJobRuns.id, id));
-  return finishedAt;
+    .where(
+      and(
+        eq(backgroundJobRuns.id, id),
+        inArray(backgroundJobRuns.status, [
+          BACKGROUND_JOB_RUN_STATUS.queued,
+          BACKGROUND_JOB_RUN_STATUS.running,
+        ]),
+      ),
+    )
+    .returning({ id: backgroundJobRuns.id });
+  return updated ? finishedAt : null;
 }
 
 export async function startBackgroundJobRun(
@@ -359,13 +368,16 @@ export async function listRecentBackgroundJobRuns(limit = RECENT_JOB_RUNS_DEFAUL
 
     const queueState = queueStates.get(row.id) ?? "unavailable";
     const isOrphaned = queueState === "missing";
-    const queueFinishedWithoutDb = queueState === "completed" || queueState === "failed";
+    const queueFinishedWithoutDb = queueState === "failed";
     if (!isOrphaned && !queueFinishedWithoutDb) return { ...row, queueState };
 
     const reason = isOrphaned
       ? "Orphaned job: no corresponding Redis queue job exists"
       : `Queue job is ${queueState}, but its database run was never finalised`;
     const finishedAt = await markOrphanedRun(row.id, reason);
+    // The worker may have finalised this row after the initial SELECT. In that case the guarded
+    // update changes nothing; the next short poll will return the worker's terminal result.
+    if (!finishedAt) return { ...row, queueState };
     return {
       ...row,
       status: BACKGROUND_JOB_RUN_STATUS.failed,

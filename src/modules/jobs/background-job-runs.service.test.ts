@@ -48,10 +48,18 @@ function mockInsertChain(returned: unknown) {
 }
 
 function mockUpdateChain() {
-  const where = vi.fn(async () => undefined);
+  const returning = vi.fn(async () => [{ id: "run-1" }]);
+  const where = vi.fn(() => ({ returning }));
   const set = vi.fn(() => ({ where }));
   db.update.mockReturnValueOnce({ set } as never);
   return set;
+}
+
+function mockGuardedUpdateMiss() {
+  const returning = vi.fn(async () => []);
+  const where = vi.fn(() => ({ returning }));
+  const set = vi.fn(() => ({ where }));
+  db.update.mockReturnValueOnce({ set } as never);
 }
 
 function mockSelectRows(rows: unknown[]) {
@@ -108,6 +116,19 @@ describe("listRecentBackgroundJobRuns queue reconciliation", () => {
     }));
   });
 
+  it("never converts a Redis-completed job into a database failure", async () => {
+    mockSelectRows([activeRun()]);
+    getMarketDataQueue.mockReturnValue({
+      getJob: vi.fn(async () => ({ getState: vi.fn(async () => "completed") })),
+    } as never);
+
+    const [run] = await listRecentBackgroundJobRuns();
+
+    expect(run.status).toBe("running");
+    expect(run.queueState).toBe("completed");
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
   it("marks an active database row without a BullMQ id as an orphan", async () => {
     mockSelectRows([activeRun({ bullmqJobId: null })]);
     getMarketDataQueue.mockReturnValue({ getJob: vi.fn() } as never);
@@ -130,6 +151,17 @@ describe("listRecentBackgroundJobRuns queue reconciliation", () => {
     expect(run.status).toBe("running");
     expect(run.queueState).toBe("unavailable");
     expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a run finalised by the worker during reconciliation", async () => {
+    mockSelectRows([activeRun()]);
+    getMarketDataQueue.mockReturnValue({ getJob: vi.fn(async () => undefined) } as never);
+    mockGuardedUpdateMiss();
+
+    const [run] = await listRecentBackgroundJobRuns();
+
+    expect(run.status).toBe("running");
+    expect(run.queueState).toBe("missing");
   });
 });
 
@@ -172,7 +204,7 @@ describe("finishBackgroundJobRunFromSummary", () => {
     const callOrder: string[] = [];
     set.mockImplementationOnce(() => {
       callOrder.push("db-write");
-      return { where: vi.fn(async () => undefined) };
+      return { where: vi.fn(() => ({ returning: vi.fn(async () => [{ id: "run-1" }]) })) };
     });
     publishRealtimeEvent.mockImplementationOnce(async () => {
       callOrder.push("publish");
