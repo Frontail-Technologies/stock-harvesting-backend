@@ -33,6 +33,7 @@ vi.mock("./market-data.instrument-sync", () => ({
 
 vi.mock("./market-data.instruments", () => ({
   getInstrumentsBySymbol: vi.fn().mockResolvedValue(new Map()),
+  markInstrumentCandleRefresh: vi.fn().mockResolvedValue(undefined),
   refreshLatestInstrumentStats: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -57,6 +58,7 @@ import * as instrumentSyncModule from "./market-data.instrument-sync";
 import * as candlesModule from "./market-data.candles";
 import * as tradingCalendarModule from "./trading-calendar";
 import {
+  excludeRecentlyRefreshedInstruments,
   refreshDailyCandles,
   syncDailyCandlesForActiveInstruments,
 } from "./market-data.candle-sync";
@@ -84,6 +86,22 @@ beforeEach(() => {
   vi.clearAllMocks();
   getLatestExpectedTradingDay.mockReturnValue("2026-09-11");
   getOrCreateInstrument.mockResolvedValue({ id: "instrument-1", instrumentToken: "tok-1" } as never);
+});
+
+describe("excludeRecentlyRefreshedInstruments", () => {
+  it("skips only a recent refresh for the same stock target date", () => {
+    const now = new Date("2026-09-27T06:00:00.000Z").getTime();
+    const rows = [
+      { symbol: "SAME_RECENT", lastCandleRefreshAt: new Date(now - 60_000), lastCandleRefreshTargetDate: "2026-09-25" },
+      { symbol: "OTHER_DATE", lastCandleRefreshAt: new Date(now - 60_000), lastCandleRefreshTargetDate: "2026-09-24" },
+      { symbol: "OLD_ATTEMPT", lastCandleRefreshAt: new Date(now - 20 * 60_000), lastCandleRefreshTargetDate: "2026-09-25" },
+    ];
+
+    expect(excludeRecentlyRefreshedInstruments(rows, "2026-09-25", now).map((row) => row.symbol)).toEqual([
+      "OTHER_DATE",
+      "OLD_ATTEMPT",
+    ]);
+  });
 });
 
 describe("refreshDailyCandles - gap repair", () => {

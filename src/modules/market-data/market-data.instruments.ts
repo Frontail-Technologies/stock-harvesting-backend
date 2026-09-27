@@ -527,6 +527,21 @@ export async function refreshLatestInstrumentStats(exchange: string, symbols: st
   await applyLatestInstrumentStats(exchange, stats, dbClient);
 }
 
+export async function markInstrumentCandleRefresh(
+  instrumentId: string,
+  targetDate: string,
+  dbClient: DbOrTx = db
+) {
+  await dbClient.execute(sql`
+    UPDATE instruments
+    SET
+      last_candle_refresh_at = now(),
+      last_candle_refresh_target_date = ${targetDate}::date,
+      updated_at = now()
+    WHERE id = ${instrumentId}::uuid
+  `);
+}
+
 export type LatestInstrumentStat = {
   close: number;
   open: number;

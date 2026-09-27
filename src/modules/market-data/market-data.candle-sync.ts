@@ -22,7 +22,11 @@ import {
   upsertCandles,
   type CandleUpsertInput,
 } from "./market-data.candles";
-import { getInstrumentsBySymbol, refreshLatestInstrumentStats } from "./market-data.instruments";
+import {
+  getInstrumentsBySymbol,
+  markInstrumentCandleRefresh,
+  refreshLatestInstrumentStats,
+} from "./market-data.instruments";
 import { ensureInstrumentsForSymbols, getOrCreateInstrument } from "./market-data.instrument-sync";
 import { getDefaultChartHistoryFromDate } from "./market-data.dates";
 import { planDailyCandleSync } from "./market-data.candle-sync-plan";
@@ -768,6 +772,11 @@ export async function refreshDailyCandles(
     dbClient
   );
 
+  // Persist the provider attempt separately from latestPriceAt. Bulk catch-up
+  // jobs use this target-aware timestamp to avoid immediately requesting the
+  // same stock/date again while still allowing a different missing date.
+  await markInstrumentCandleRefresh(instrument.id, latestExpectedTradingDate, dbClient);
+
   if (result.dailyCandles.length === 0) {
     if (result.providerFailedDates?.length) {
       return {
@@ -848,6 +857,21 @@ export type DailyCandleSyncSummary = {
 // (planDailyCandleSync) that refreshDailyCandles uses for a single symbol. One
 // symbol failing never aborts the run - failures are isolated and reported.
 const DAILY_CANDLE_SYNC_PROGRESS_BATCH_SIZE = 25;
+const RECENT_CANDLE_REFRESH_COOLDOWN_MS = 15 * 60_000;
+
+export function excludeRecentlyRefreshedInstruments<
+  T extends {
+    lastCandleRefreshAt: Date | null;
+    lastCandleRefreshTargetDate: string | null;
+  },
+>(rows: T[], targetDate: string, nowMs = Date.now()): T[] {
+  const recentCutoff = nowMs - RECENT_CANDLE_REFRESH_COOLDOWN_MS;
+  return rows.filter((row) => !(
+    row.lastCandleRefreshTargetDate === targetDate &&
+    row.lastCandleRefreshAt &&
+    row.lastCandleRefreshAt.getTime() >= recentCutoff
+  ));
+}
 
 export type DailyCandleSyncProgress = {
   processed: number;
@@ -867,13 +891,20 @@ export async function syncDailyCandlesForActiveInstruments(
     ? [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))]
     : null;
   const rows = await db
-    .select({ symbol: instruments.symbol })
+    .select({
+      symbol: instruments.symbol,
+      lastCandleRefreshAt: instruments.lastCandleRefreshAt,
+      lastCandleRefreshTargetDate: instruments.lastCandleRefreshTargetDate,
+    })
     .from(instruments)
     .where(
       normalizedSymbols
         ? and(activeUniverseFilter(exchange), inArray(instruments.symbol, normalizedSymbols))
         : activeUniverseFilter(exchange),
     );
+
+  const refreshTargetDate = targetDate ?? getLatestExpectedTradingDay(exchange);
+  const eligibleRows = excludeRecentlyRefreshedInstruments(rows, refreshTargetDate);
 
   const summary: DailyCandleSyncSummary = {
     processed: 0,
@@ -891,7 +922,7 @@ export async function syncDailyCandlesForActiveInstruments(
   // Once the provider says its call quota is used up, stop starting new symbols: every further call would
   // be refused, and counting each as a failed symbol only hides the real cause.
   const limit: { error: ProviderRateLimitedError | null } = { error: null };
-  await runWithConcurrency(rows, DAILY_CANDLE_SYNC_CONCURRENCY, async (row) => {
+  await runWithConcurrency(eligibleRows, DAILY_CANDLE_SYNC_CONCURRENCY, async (row) => {
     if (limit.error) return;
     summary.processed += 1;
     try {
@@ -938,10 +969,10 @@ export async function syncDailyCandlesForActiveInstruments(
       );
     }
 
-    if (onProgress && (summary.processed % DAILY_CANDLE_SYNC_PROGRESS_BATCH_SIZE === 0 || summary.processed === rows.length)) {
+    if (onProgress && (summary.processed % DAILY_CANDLE_SYNC_PROGRESS_BATCH_SIZE === 0 || summary.processed === eligibleRows.length)) {
       onProgress({
         processed: summary.processed,
-        total: rows.length,
+        total: eligibleRows.length,
         updated: summary.updated,
         repaired: summary.repaired,
         failed: summary.failed,

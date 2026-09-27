@@ -64,6 +64,24 @@ if (env.METRICS_ENABLED) {
   startWorkerMetricsServer();
 }
 
+// Repeat schedulers can activate the same operation again before its previous
+// run finishes. Skip only that exact duplicate; different job types and dated
+// catch-ups remain independent and never wait behind another job's watchdog.
+const activeProviderOperations = new Set<string>();
+
+async function runProviderOperationOnce<T>(key: string, run: () => Promise<T>): Promise<T | { skipped: true; reason: string }> {
+  if (activeProviderOperations.has(key)) {
+    logger.info({ operationKey: key }, "Skipped duplicate provider operation already running");
+    return { skipped: true, reason: "same-operation-running" };
+  }
+  activeProviderOperations.add(key);
+  try {
+    return await run();
+  } finally {
+    activeProviderOperations.delete(key);
+  }
+}
+
 // Log-safe job context: never the whole job.data (can carry tokens on some
 // job types) - only the identifying fields.
 function jobLogContext(job: Job | undefined) {
@@ -249,7 +267,7 @@ const worker = new Worker(
     if (job.name === JOB_NAMES.instrumentSync) {
       if (!exchange) throw new Error("instrumentSync job missing exchange");
       if (!(await isInstrumentSyncExchange(exchange))) return skippedNonProductionExchange(job, exchange);
-      return runTrackedJob(job, () => runRecorded(job, BACKGROUND_JOB_TYPES.instrumentSync, exchange, async () => {
+      return runProviderOperationOnce(`${job.name}:${exchange}`, () => runTrackedJob(job, () => runRecorded(job, BACKGROUND_JOB_TYPES.instrumentSync, exchange, async () => {
         const result = await syncProviderInstruments(exchange);
         // A newly discovered exchange may only now have active instruments.
         void scheduleProductionMarketDataJobs();
@@ -263,15 +281,15 @@ const worker = new Worker(
           });
         }
         return result;
-      }));
+      })));
     }
 
     if (job.name === JOB_NAMES.priceRefresh) {
       if (!exchange) throw new Error("priceRefresh job missing exchange");
       if (!(await isProductionExchange(exchange))) return skippedNonProductionExchange(job, exchange);
-      return runTrackedJob(job, () =>
+      return runProviderOperationOnce(`${job.name}:${exchange}`, () => runTrackedJob(job, () =>
         runRecorded(job, BACKGROUND_JOB_TYPES.priceRefresh, exchange, () => refreshAllLatestInstrumentPrices(exchange)),
-      );
+      ));
     }
 
     if (job.name === JOB_NAMES.sectorClassificationSync) {
@@ -281,9 +299,9 @@ const worker = new Worker(
     }
 
     if (job.name === JOB_NAMES.indexCandleBackfill) {
-      return runTrackedJob(job, () =>
+      return runProviderOperationOnce(`${job.name}:${exchange ?? "BSE_IDX"}`, () => runTrackedJob(job, () =>
         runRecorded(job, BACKGROUND_JOB_TYPES.indexCandleBackfill, exchange, () => backfillIndexCandles(exchange)),
-      );
+      ));
     }
 
     if (job.name === JOB_NAMES.dailyCandleSync) {
@@ -293,7 +311,9 @@ const worker = new Worker(
         typeof job.data.jobType === "string"
           ? (job.data.jobType as BackgroundJobType)
           : BACKGROUND_JOB_TYPES.dailyCandlePostMarket;
-      return runTrackedJob(job, () => runTrackedDailyCandleSync(exchange, jobType, job));
+      return runProviderOperationOnce(`${job.name}:${jobType}:${exchange}`, () =>
+        runTrackedJob(job, () => runTrackedDailyCandleSync(exchange, jobType, job))
+      );
     }
 
     if (job.name === JOB_NAMES.marketDataCatchUp) {
@@ -317,7 +337,9 @@ const worker = new Worker(
       const symbol =
         typeof job.data.symbol === "string" ? job.data.symbol : undefined;
       if (!symbol) throw new Error("chartCandleEnsureFresh job missing symbol");
-      return runTrackedJob(job, () => runTrackedChartEnsureFresh(symbol, exchange));
+      return runProviderOperationOnce(`${job.name}:${exchange ?? "BSE"}:${symbol}`, () =>
+        runTrackedJob(job, () => runTrackedChartEnsureFresh(symbol, exchange))
+      );
     }
 
     if (job.name === JOB_NAMES.candleBootstrapReconcile) {

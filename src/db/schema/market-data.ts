@@ -32,6 +32,8 @@ export const instruments = pgTable(
     latestVolume: numeric("latest_volume", { precision: 20, scale: 0 }),
     latestChangePct: numeric("latest_change_pct", { precision: 10, scale: 4 }),
     latestPriceAt: date("latest_price_at"),
+    lastCandleRefreshAt: timestamp("last_candle_refresh_at", { withTimezone: true }),
+    lastCandleRefreshTargetDate: date("last_candle_refresh_target_date"),
     sector: varchar("sector", { length: 255 }),
     sectorCode: varchar("sector_code", { length: 32 }),
     industry: varchar("industry", { length: 255 }),
