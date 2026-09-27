@@ -125,7 +125,11 @@ describe("addJobWithTimeout", () => {
     const queue = { add } as unknown as Queue;
 
     await expect(addJobWithTimeout(queue, "some-job", { a: 1 })).resolves.toBeUndefined();
-    expect(add).toHaveBeenCalledWith("some-job", { a: 1 }, { removeOnComplete: true, removeOnFail: true });
+    expect(add).toHaveBeenCalledWith("some-job", { a: 1 }, {
+      removeOnComplete: true,
+      removeOnFail: true,
+      priority: 5,
+    });
   });
 
   it("passes a deterministic jobId through when given one, so a duplicate trigger collapses into the existing job instead of running the same heavy work twice", async () => {
@@ -137,7 +141,7 @@ describe("addJobWithTimeout", () => {
     expect(add).toHaveBeenCalledWith(
       "some-job",
       { a: 1 },
-      { removeOnComplete: true, removeOnFail: true, jobId: "some-job:col-1" }
+      { removeOnComplete: true, removeOnFail: true, priority: 5, jobId: "some-job:col-1" }
     );
   });
 

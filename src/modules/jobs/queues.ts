@@ -100,6 +100,9 @@ export function getMarketDataQueueEvents() {
 }
 
 const ENQUEUE_TIMEOUT_MS = 5_000;
+const MANUAL_JOB_PRIORITY = 5;
+const SCHEDULED_JOB_PRIORITY = 10;
+const MAINTENANCE_JOB_PRIORITY = 20;
 
 // Defense-in-depth on top of the producer's own finite maxRetriesPerRequest/connectTimeout above:
 // this bounds the call so a down Redis fails fast and visibly instead of leaving a caller's
@@ -112,10 +115,20 @@ export async function addJobWithTimeout<T extends object>(
   queue: Queue,
   jobName: string,
   data: T,
-  opts?: { jobId?: string; attempts?: number; backoff?: { type: "fixed" | "exponential"; delay: number } },
+  opts?: {
+    jobId?: string;
+    attempts?: number;
+    backoff?: { type: "fixed" | "exponential"; delay: number };
+    priority?: number;
+  },
 ): Promise<void> {
   await Promise.race([
-    queue.add(jobName, data, { removeOnComplete: true, removeOnFail: true, ...opts }).then(() => undefined),
+    queue.add(jobName, data, {
+      removeOnComplete: true,
+      removeOnFail: true,
+      priority: MANUAL_JOB_PRIORITY,
+      ...opts,
+    }).then(() => undefined),
     new Promise<never>((_, reject) => {
       setTimeout(
         () => reject(new Error(`Timed out enqueueing "${jobName}" job after ${ENQUEUE_TIMEOUT_MS}ms - Redis may be unreachable`)),
@@ -166,6 +179,7 @@ export async function scheduleRepeatableMarketDataSync(exchanges: string[]) {
         { exchange },
         {
           jobId: `${INSTRUMENT_SYNC_SCHEDULER_PREFIX}${exchange}`,
+          priority: MAINTENANCE_JOB_PRIORITY,
           repeat: { every: REPEATABLE_SYNC_INTERVAL_MS },
         },
       );
@@ -191,6 +205,7 @@ export async function enqueueCandleBootstrapJobs(exchange: string, symbols: stri
     data: { symbol, exchange },
     opts: {
       jobId: `initial-candle-bootstrap-${exchange}-${symbol}`,
+      priority: MAINTENANCE_JOB_PRIORITY,
       removeOnComplete: true,
       removeOnFail: true,
     },
@@ -220,6 +235,7 @@ export async function scheduleCandleBootstrapReconciliation(exchanges: string[])
         { exchange },
         {
           jobId: `${BOOTSTRAP_RECONCILE_SCHEDULER_PREFIX}${exchange}`,
+          priority: MAINTENANCE_JOB_PRIORITY,
           repeat: { every: CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS },
         },
       );
@@ -276,6 +292,7 @@ export async function scheduleRepeatableDailyCandleSync(exchanges: string[]) {
           { exchange, jobType: schedule.jobType },
           {
             jobId: `${DAILY_CANDLE_SYNC_SCHEDULER_PREFIX}${exchange}-${schedule.suffix}`,
+            priority: SCHEDULED_JOB_PRIORITY,
             repeat: { pattern: schedule.pattern, tz: DAILY_CANDLE_SYNC_TZ },
           },
         );

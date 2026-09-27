@@ -143,6 +143,7 @@ export async function ensureFreshDailyCandles(input: {
         { symbol, exchange },
         {
           jobId,
+          priority: 1,
           removeOnComplete: { age: ENSURE_FRESH_JOB_RETENTION_SECONDS },
           removeOnFail: true,
         }

@@ -51,6 +51,7 @@ import {
   safeInc,
 } from "./shared/metrics/metrics";
 import { startWorkerMetricsServer } from "./shared/metrics/worker-metrics-server";
+import { getJobRuntimeLimitMs } from "./modules/jobs/job-runtime-limits";
 
 const connection = getRedisConnectionOptions();
 
@@ -226,6 +227,20 @@ startGdfSessionBroker("owner-candidate");
 const worker = new Worker(
   QUEUE_NAMES.marketData,
   async (job) => {
+    const runtimeLimitMs = getJobRuntimeLimitMs(job.name);
+    const watchdog = setTimeout(() => {
+      logger.fatal(
+        { ...jobLogContext(job), runtimeLimitMs },
+        "Market-data job exceeded its runtime limit; terminating the worker so BullMQ can recover the stalled job",
+      );
+      // A timed-out promise may still hold DB/socket work. Exiting is the
+      // only reliable cancellation boundary; PM2 restarts the worker and
+      // BullMQ recovers the expired lock instead of losing both slots.
+      process.exit(1);
+    }, runtimeLimitMs);
+    watchdog.unref();
+
+    try {
     const exchange =
       typeof job.data.exchange === "string" ? job.data.exchange : undefined;
 
@@ -366,8 +381,17 @@ const worker = new Worker(
     }
 
     throw new Error(`Unsupported job: ${job.name}`);
+    } finally {
+      clearTimeout(watchdog);
+    }
   },
-  { connection, concurrency: env.WORKER_CONCURRENCY },
+  {
+    connection,
+    concurrency: env.WORKER_CONCURRENCY,
+    lockDuration: 30_000,
+    stalledInterval: 30_000,
+    maxStalledCount: 1,
+  },
 );
 
 const workerStartedAt = new Date().toISOString();
