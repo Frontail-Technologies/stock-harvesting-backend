@@ -165,6 +165,37 @@ describe("ensureFreshDailyCandles - queue-backed dedupe", () => {
     expect(queue.add).not.toHaveBeenCalled();
   });
 
+  it("a forced manual refresh removes a completed same-day job and runs a fresh repair", async () => {
+    const queue = fakeQueue();
+    const completedJob = fakeJob("completed", resolvedWait(undefined), {
+      symbol: "MOREPENLAB",
+      status: "provider-empty",
+      insertedDaily: 0,
+      failedDates: [],
+    });
+    queue.getJob.mockResolvedValue(completedJob);
+    queue.add.mockResolvedValue(
+      fakeJob("waiting", resolvedWait({
+        symbol: "MOREPENLAB",
+        status: "repaired",
+        insertedDaily: 5,
+        failedDates: [],
+      }))
+    );
+    getMarketDataQueue.mockReturnValue(queue as never);
+
+    const result = await ensureFreshDailyCandles({
+      symbol: "MOREPENLAB",
+      exchange: "BSE",
+      waitForCompletion: true,
+      forceRefresh: true,
+    });
+
+    expect(completedJob.remove).toHaveBeenCalledOnce();
+    expect(queue.add).toHaveBeenCalledOnce();
+    expect(result).toEqual({ status: "repaired", changed: true, latestExpectedDate: "2026-09-11" });
+  });
+
   it("an existing active/waiting job is reused (not re-enqueued) - two calls collapse into one job", async () => {
     const queue = fakeQueue();
     queue.getJob.mockResolvedValueOnce(undefined).mockResolvedValueOnce(fakeJob("waiting", timedOutWait()));

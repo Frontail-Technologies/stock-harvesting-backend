@@ -99,12 +99,17 @@ export async function ensureFreshDailyCandles(input: {
   symbol: string;
   exchange?: string;
   waitForCompletion?: boolean;
+  forceRefresh?: boolean;
 }): Promise<EnsureFreshDailyCandlesResult> {
   const symbol = normalizeSymbol(input.symbol);
   const exchange = input.exchange ?? DEFAULT_EXCHANGE;
   const latestExpectedDate = getLatestExpectedTradingDay(exchange);
   const jobId = buildEnsureFreshKey(exchange, symbol, latestExpectedDate);
   const waitForCompletion = input.waitForCompletion ?? true;
+
+  if (input.forceRefresh) {
+    inMemoryResults.delete(jobId);
+  }
 
   const queue = getMarketDataQueue();
   if (!queue) {
@@ -124,11 +129,15 @@ export async function ensureFreshDailyCandles(input: {
     if (existingJob) {
       const state = await existingJob.getState();
       if (state === "completed") {
-        const returnValue = existingJob.returnvalue as DailyCandleSyncResult | undefined;
-        if (returnValue && returnValue.status !== "failed" && returnValue.status !== "bootstrap-required") {
-          return toResult(returnValue.status, latestExpectedDate);
+        if (input.forceRefresh) {
+          await existingJob.remove().catch(() => undefined);
+        } else {
+          const returnValue = existingJob.returnvalue as DailyCandleSyncResult | undefined;
+          if (returnValue && returnValue.status !== "failed" && returnValue.status !== "bootstrap-required") {
+            return toResult(returnValue.status, latestExpectedDate);
+          }
+          await existingJob.remove().catch(() => undefined);
         }
-        await existingJob.remove().catch(() => undefined);
       } else if (state === "failed") {
         await existingJob.remove().catch(() => undefined);
       } else {

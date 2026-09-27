@@ -66,6 +66,8 @@ export const ensureFreshCandlesBodySchema = z
   .object({
     symbol: z.string().trim().min(1).max(64),
     exchange: exchangeSchema,
+    waitForCompletion: z.boolean().optional(),
+    forceRefresh: z.boolean().optional(),
   })
   .strict();
 

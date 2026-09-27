@@ -147,8 +147,19 @@ marketDataRouter.post(
   "/candles/ensure-fresh",
   validate({ body: ensureFreshCandlesBodySchema }),
   asyncHandler(async (req, res) => {
-    const body = req.body as { symbol: string; exchange: string };
-    sendData(res, await ensureFreshDailyCandles({ ...body, waitForCompletion: false }));
+    const body = req.body as {
+      symbol: string;
+      exchange: string;
+      waitForCompletion?: boolean;
+      forceRefresh?: boolean;
+    };
+    sendData(
+      res,
+      await ensureFreshDailyCandles({
+        ...body,
+        waitForCompletion: body.waitForCompletion ?? false,
+      })
+    );
   })
 );
 
