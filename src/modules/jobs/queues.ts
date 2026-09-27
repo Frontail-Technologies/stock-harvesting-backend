@@ -23,7 +23,9 @@ registerBullmqJobsCollector(async (gauge) => {
 });
 
 const REPEATABLE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
-const CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS = 10 * 60 * 1000;
+// Bootstrap is maintenance work, not a freshness loop. Two batches per hour leave enough of GDF's
+// hourly allowance for chart refreshes, catch-up, and instrument sync while still draining gaps.
+export const CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS = 30 * 60 * 1000;
 
 let marketDataQueue: Queue | null = null;
 let marketDataQueueEvents: QueueEvents | null = null;
@@ -230,13 +232,14 @@ export async function scheduleCandleBootstrapReconciliation(exchanges: string[])
 
   for (const exchange of exchanges) {
     try {
-      await queue.add(
-        JOB_NAMES.candleBootstrapReconcile,
-        { exchange },
+      const schedulerId = `${BOOTSTRAP_RECONCILE_SCHEDULER_PREFIX}${exchange}`;
+      await queue.upsertJobScheduler(
+        schedulerId,
+        { every: CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS },
         {
-          jobId: `${BOOTSTRAP_RECONCILE_SCHEDULER_PREFIX}${exchange}`,
-          priority: MAINTENANCE_JOB_PRIORITY,
-          repeat: { every: CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS },
+          name: JOB_NAMES.candleBootstrapReconcile,
+          data: { exchange },
+          opts: { priority: MAINTENANCE_JOB_PRIORITY },
         },
       );
     } catch (error) {

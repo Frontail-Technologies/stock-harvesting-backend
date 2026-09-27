@@ -990,9 +990,9 @@ export async function syncDailyCandlesForActiveInstruments(
   return summary;
 }
 
-// Bootstrap candidates: active production instruments with no daily candle that do not
-// hold a still-fresh "provider confirmed no history" state. "Zero candle rows" alone is
-// not enough - that re-selected every no-history instrument on every reconcile pass.
+// Bootstrap candidates: active production instruments without persisted daily-candle stats that do
+// not hold a still-fresh "provider confirmed no history" state. latest_price_at is maintained from
+// stored candles; using it avoids an unbounded anti-join across every Timescale candle chunk.
 export function buildBootstrapCandidatesQuery(exchange: string, providerKey: string, limit: number, now: Date) {
   return sql`
     SELECT i.symbol
@@ -1000,12 +1000,7 @@ export function buildBootstrapCandidatesQuery(exchange: string, providerKey: str
     WHERE i.exchange = ${exchange}
       AND i.active = true
       AND i.provider = ${providerKey}
-      AND NOT EXISTS (
-        SELECT 1
-        FROM candles c
-        WHERE c.instrument_id = i.id
-          AND c.timeframe = ${CANDLE_TIMEFRAME.day}
-      )
+      AND i.latest_price_at IS NULL
       AND NOT EXISTS (
         SELECT 1
         FROM candle_bootstrap_checkpoints b

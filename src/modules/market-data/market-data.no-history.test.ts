@@ -90,7 +90,8 @@ describe("bootstrap candidate selection", () => {
   it("excludes instruments holding a fresh no-history confirmation, but only for the recheck window", () => {
     const { sql, params } = dialect.sqlToQuery(buildBootstrapCandidatesQuery("BSE_IDX", "global-datafeeds", 100, T));
 
-    expect(sql).toMatch(/NOT EXISTS \(\s*SELECT 1\s+FROM candles c/);
+    expect(sql).toMatch(/i\.latest_price_at IS NULL/);
+    expect(sql).not.toMatch(/FROM candles c/);
     expect(sql).toMatch(/NOT EXISTS \(\s*SELECT 1\s+FROM candle_bootstrap_checkpoints b/);
     expect(sql).toMatch(/b\.completed_at > \$\d+/);
     expect(params).toContain(NO_HISTORY_CHECKPOINT_KIND);

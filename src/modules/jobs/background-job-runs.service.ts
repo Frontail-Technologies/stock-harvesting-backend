@@ -8,7 +8,7 @@ import {
   SCHEDULED_DAILY_CANDLE_SYNC_JOB_TYPES,
   type BackgroundJobType,
 } from "../../shared/constants";
-import { getErrorMessage } from "../../shared/errors";
+import { getErrorMessage, serializeError } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 import type { DailyCandleSyncFailureDetail, DailyCandleSyncSummary } from "../market-data/market-data.candle-sync";
 import { getLatestExpectedTradingDay } from "../market-data/trading-calendar";
@@ -24,6 +24,12 @@ const ACTIVE_DATABASE_STATUSES = new Set<string>([
   BACKGROUND_JOB_RUN_STATUS.running,
 ]);
 let queueReconciliationWarningLogged = false;
+
+function getJobFailureSummary(error: unknown) {
+  const serialized = serializeError(error);
+  if (!serialized.cause?.message) return serialized.message || "Job failed";
+  return `${serialized.cause.message}${serialized.cause.code ? ` (${serialized.cause.code})` : ""}`;
+}
 
 export type BackgroundJobQueueState =
   | "active"
@@ -110,7 +116,13 @@ function scalarResult(result: unknown) {
 // showed in the job table. This records one background_job_runs row around them. A job started from the
 // admin already has its sync_jobs row, so it is not recorded a second time.
 export async function recordScheduledJobRun<T>(
-  input: { jobType: BackgroundJobType; exchange?: string; bullmqJobId?: string; hasSyncJob: boolean },
+  input: {
+    jobType: BackgroundJobType;
+    exchange?: string;
+    bullmqJobId?: string;
+    hasSyncJob: boolean;
+    discardWhenNoWork?: boolean;
+  },
   run: () => Promise<T>,
 ): Promise<T> {
   if (input.hasSyncJob) return run();
@@ -134,13 +146,18 @@ export async function recordScheduledJobRun<T>(
 
   try {
     const result = await run();
+    const scalar = scalarResult(result);
+    if (input.discardWhenNoWork && scalar.queued === 0) {
+      await db.delete(backgroundJobRuns).where(eq(backgroundJobRuns.id, row.id));
+      return result;
+    }
     const finishedAt = new Date();
     await db
       .update(backgroundJobRuns)
       .set({
         status: BACKGROUND_JOB_RUN_STATUS.completed,
         finishedAt,
-        metadata: { result: scalarResult(result) },
+        metadata: { result: scalar },
         updatedAt: finishedAt,
       })
       .where(eq(backgroundJobRuns.id, row.id));
@@ -162,7 +179,7 @@ export async function recordScheduledJobRun<T>(
     });
     return result;
   } catch (error) {
-    await failBackgroundJobRun(row.id, input.jobType, getErrorMessage(error, "Job failed"));
+    await failBackgroundJobRun(row.id, input.jobType, getJobFailureSummary(error));
     throw error;
   }
 }

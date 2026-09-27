@@ -2,7 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Queue } from "bullmq";
 
 import { env } from "../../shared/env";
-import { addJobWithTimeout, getProducerRedisConnectionOptions, getRedisConnectionOptions } from "./queues";
+import {
+  addJobWithTimeout,
+  CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS,
+  getProducerRedisConnectionOptions,
+  getRedisConnectionOptions,
+} from "./queues";
+
+describe("maintenance schedule cadence", () => {
+  it("runs candle bootstrap reconciliation twice per hour", () => {
+    expect(CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS).toBe(30 * 60_000);
+  });
+});
 
 // getMarketDataQueue()/scheduleRepeatableMarketDataSync() themselves aren't
 // tested here: constructing a real bullmq Queue (even with a fake host)

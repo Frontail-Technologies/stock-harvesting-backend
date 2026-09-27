@@ -164,9 +164,21 @@ async function runTrackedJob<T>(job: Job, run: () => Promise<T>): Promise<T> {
 }
 
 // Records a job-table row for scheduled runs of jobs that otherwise leave no trace in Postgres.
-function runRecorded<T>(job: Job, jobType: BackgroundJobType, exchange: string | undefined, run: () => Promise<T>) {
+function runRecorded<T>(
+  job: Job,
+  jobType: BackgroundJobType,
+  exchange: string | undefined,
+  run: () => Promise<T>,
+  options?: { discardWhenNoWork?: boolean },
+) {
   return recordScheduledJobRun(
-    { jobType, exchange, bullmqJobId: job.id, hasSyncJob: typeof job.data.syncJobId === "string" },
+    {
+      jobType,
+      exchange,
+      bullmqJobId: job.id,
+      hasSyncJob: typeof job.data.syncJobId === "string",
+      discardWhenNoWork: options?.discardWhenNoWork,
+    },
     run,
   );
 }
@@ -365,7 +377,7 @@ const worker = new Worker(
         const targetExchange = exchange;
         const symbols = await findActiveSymbolsWithoutDailyCandles(targetExchange);
         return enqueueCandleBootstrapJobs(targetExchange, symbols);
-      }));
+      }, { discardWhenNoWork: true }));
     }
 
     if (job.name === JOB_NAMES.weeklyStrongBacktestBackfill) {

@@ -17,6 +17,7 @@ vi.mock("../../db/client", () => ({
         return { where: async () => undefined };
       },
     }),
+    delete: () => ({ where: async () => undefined }),
   },
 }));
 vi.mock("./realtime-events", () => ({ publishRealtimeEvent }));
@@ -68,6 +69,38 @@ describe("recordScheduledJobRun", () => {
       status: BACKGROUND_JOB_RUN_STATUS.failed,
       errorSummary: "Query read timeout",
     });
+  });
+
+  it("stores the database driver's root cause instead of a generated SQL dump", async () => {
+    const driverError = Object.assign(new Error("relation candle_bootstrap_checkpoints does not exist"), { code: "42P01" });
+    const queryError = new Error("Failed query: SELECT ...", { cause: driverError });
+
+    await expect(
+      recordScheduledJobRun(
+        { jobType: BACKGROUND_JOB_TYPES.candleBootstrapReconcile, exchange: "BSE", hasSyncJob: false },
+        async () => { throw queryError; },
+      ),
+    ).rejects.toThrow("Failed query");
+
+    expect(state.updates.at(-1)).toMatchObject({
+      status: BACKGROUND_JOB_RUN_STATUS.failed,
+      errorSummary: "relation candle_bootstrap_checkpoints does not exist (42P01)",
+    });
+  });
+
+  it("discards a no-work maintenance run instead of adding job-history noise", async () => {
+    const result = await recordScheduledJobRun(
+      {
+        jobType: BACKGROUND_JOB_TYPES.candleBootstrapReconcile,
+        exchange: "BSE_IDX",
+        hasSyncJob: false,
+        discardWhenNoWork: true,
+      },
+      async () => ({ queued: 0 }),
+    );
+
+    expect(result).toEqual({ queued: 0 });
+    expect(state.updates).toHaveLength(0);
   });
 
   it("does not record a second row for a job started from the admin (it already has a sync_jobs row)", async () => {
