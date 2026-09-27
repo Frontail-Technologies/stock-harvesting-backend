@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Covers the weekly_strong snapshot cache-freshness fix: a row cached
@@ -83,7 +83,13 @@ function buildRow(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2024-06-03T04:00:00.000Z"));
   writeDashboardSnapshot.mockResolvedValue({ asOfDate: "2024-01-01" });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("getOrComputeWeeklyStrongSnapshot - cache freshness", () => {
@@ -148,6 +154,7 @@ describe("getOrComputeWeeklyStrongSnapshot - cache freshness", () => {
   });
 
   it("6. dashboard Analysis week never surfaces the in-progress week's Friday - a snapshot cached mid-week (14-18 Sep 2026) resolves to 11 Sep, not 18 Sep", async () => {
+    vi.setSystemTime(new Date("2026-09-16T06:00:00.000Z"));
     const cachedRows = [buildRow()];
     readDashboardSnapshotWithMeta.mockResolvedValueOnce({
       payload: cachedRows,
@@ -158,6 +165,34 @@ describe("getOrComputeWeeklyStrongSnapshot - cache freshness", () => {
     const result = await getOrComputeWeeklyStrongSnapshot("col-sep2026", "BSE", MEMBER_ROWS);
 
     expect(result.weekEnding).toBe("2026-09-11");
+  });
+
+  it("recomputes a prior-week snapshot after the next Friday has completed", async () => {
+    vi.setSystemTime(new Date("2026-09-27T05:00:00.000Z"));
+    readDashboardSnapshotWithMeta.mockResolvedValueOnce({
+      payload: [buildRow({ symbol: "OLD" })],
+      asOfDate: "2026-09-18",
+      evaluatorVersion: WEEKLY_STRONG_SNAPSHOT_VERSION,
+    });
+    const fresh = [buildRow({ symbol: "FRESH" })];
+    computeWeeklyStrongStocks.mockResolvedValueOnce(fresh);
+    writeDashboardSnapshot.mockResolvedValueOnce({ asOfDate: "2026-09-25" });
+
+    const result = await getOrComputeWeeklyStrongSnapshot(
+      "col-week-rollover",
+      "BSE",
+      MEMBER_ROWS,
+    );
+
+    expect(computeWeeklyStrongStocks).toHaveBeenCalledTimes(1);
+    expect(writeDashboardSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopeKey: "col-week-rollover:5x",
+        payload: fresh,
+      }),
+    );
+    expect(result.items).toEqual(fresh);
+    expect(result.weekEnding).toBe("2026-09-25");
   });
 
   it("C: a modern cached row with a numeric returnPct is served as-is", async () => {

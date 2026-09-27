@@ -25,6 +25,7 @@ import {
   NSE_NORMAL_EQUITY_SYMBOL_PATTERN,
   pickTopRelativeStrengthRows,
 } from "../market-data/market-data.service";
+import { resolveLatestCompletedWeekEnding } from "../market-data/trading-calendar";
 import { DEFAULT_SCANNER_LOOKBACK, type ScannerLookbackMultiplier } from "../scanner/scanner.constants";
 
 // The expensive live computation now lives behind a persisted, change-invalidated snapshot (dashboard-snapshots.service.ts); this in-process cache just collapses concurrent requests in front of that fast DB read, it's not the source of freshness truth.
@@ -253,7 +254,8 @@ export async function getCollectionWeeklyStrongStocks(input: {
 }) {
   const collection = await requireCollectionByCode(input.code);
   const lookback = input.lookback ?? DEFAULT_SCANNER_LOOKBACK;
-  const cacheKey = `collectionWeeklyStrongStocks:${collection.code}:${lookback}`;
+  const completedWeekEnding = resolveLatestCompletedWeekEnding(collection.exchange);
+  const cacheKey = `collectionWeeklyStrongStocks:${collection.code}:${lookback}:${completedWeekEnding}`;
 
   return getOrSetCache(cacheKey, COLLECTION_CACHE_TTL_MS, async () => {
     const memberRows = await getActiveMemberInstrumentRows(collection.id);

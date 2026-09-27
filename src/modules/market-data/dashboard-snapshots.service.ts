@@ -13,7 +13,10 @@ import {
   WEEKLY_STRONG_SNAPSHOT_VERSION,
   writeDashboardSnapshot,
 } from "./dashboard-snapshot-store";
-import { resolveCompletedWeekEndingFromTradingDay } from "./trading-calendar";
+import {
+  resolveCompletedWeekEndingFromTradingDay,
+  resolveLatestCompletedWeekEnding,
+} from "./trading-calendar";
 
 // A persisted snapshot payload freezes each row's sector/industry as they were
 // when it was computed. Sector-classification sync later updates
@@ -94,11 +97,20 @@ export async function getOrComputeWeeklyStrongSnapshot(
     scopeKey,
     "weekly_strong"
   );
-  if (cached && cached.evaluatorVersion === WEEKLY_STRONG_SNAPSHOT_VERSION) {
+  const cachedWeekEnding = cached
+    ? resolveCompletedWeekEndingFromTradingDay(cached.asOfDate)
+    : null;
+  const latestCompletedWeekEnding = resolveLatestCompletedWeekEnding(exchange);
+
+  if (
+    cached &&
+    cached.evaluatorVersion === WEEKLY_STRONG_SNAPSHOT_VERSION &&
+    cachedWeekEnding === latestCompletedWeekEnding
+  ) {
     // Same stale-frozen-taxonomy correction as the relative_strength base above.
     return {
       items: projectCurrentTaxonomy(cached.payload, memberRows),
-      weekEnding: resolveCompletedWeekEndingFromTradingDay(cached.asOfDate),
+      weekEnding: cachedWeekEnding,
     };
   }
 
