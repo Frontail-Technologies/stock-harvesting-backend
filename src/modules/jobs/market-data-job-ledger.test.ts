@@ -5,6 +5,7 @@ import {
   calculateHistoricalCoverage,
   expectedMarketDataJobsForDate,
   isExpectedJobMissed,
+  isHistoricalCatchUpDate,
   decideBacktestRefresh,
   shouldQueueHistoricalCatchUp,
 } from "./market-data-job-ledger";
@@ -48,10 +49,15 @@ describe("market-data job ledger", () => {
     expect(jobs.map((job) => job.jobType)).toEqual([
       "daily_candle_morning",
       "daily_candle_post_market",
-      "daily_candle_retry",
     ]);
     expect(jobs.every((job) => isExpectedJobMissed(job.status, job.scheduledAt, saturdayStartup))).toBe(true);
     expect(shouldQueueHistoricalCatchUp({ missing: 12 })).toBe(true);
+  });
+
+  it("never auto-enqueues catch-up for the open trading date", () => {
+    const mondayMorning = new Date("2026-09-28T05:00:00.000Z");
+    expect(isHistoricalCatchUpDate("BSE", "2026-09-28", mondayMorning)).toBe(false);
+    expect(isHistoricalCatchUpDate("BSE", "2026-09-25", mondayMorning)).toBe(true);
   });
 
   it("does not expect a newly listed instrument before its first canonical candle", () => {
@@ -90,8 +96,8 @@ describe("market-data job ledger", () => {
 
   it("marks only overdue pending or queued jobs as missed", () => {
     const scheduledAt = new Date("2026-09-18T11:30:00.000Z");
-    const withinGrace = new Date("2026-09-18T11:40:00.000Z");
-    const overdue = new Date("2026-09-18T11:46:00.000Z");
+    const withinGrace = new Date("2026-09-18T23:29:00.000Z");
+    const overdue = new Date("2026-09-18T23:31:00.000Z");
 
     expect(isExpectedJobMissed(BACKGROUND_JOB_RUN_STATUS.pending, scheduledAt, withinGrace)).toBe(false);
     expect(isExpectedJobMissed(BACKGROUND_JOB_RUN_STATUS.queued, scheduledAt, overdue)).toBe(true);

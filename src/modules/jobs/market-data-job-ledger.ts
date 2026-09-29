@@ -23,13 +23,14 @@ import { addJobWithTimeout, getMarketDataQueue } from "./queues";
 import { getGlobalDatafeedsCooldown } from "./provider-cooldown.service";
 
 const EXPECTED_SCHEDULES = [
-  { jobType: BACKGROUND_JOB_TYPES.dailyCandleMorning, time: "09:40" },
-  { jobType: BACKGROUND_JOB_TYPES.dailyCandlePostMarket, time: "15:50" },
-  { jobType: BACKGROUND_JOB_TYPES.dailyCandleRetry, time: "17:00" },
+  { jobType: BACKGROUND_JOB_TYPES.dailyCandleMorning, time: "09:45" },
+  { jobType: BACKGROUND_JOB_TYPES.dailyCandlePostMarket, time: "16:15" },
 ] as const;
 
 const RECONCILIATION_INTERVAL_MS = 60 * 60 * 1000;
-const MISSED_JOB_GRACE_MS = 15 * 60 * 1000;
+// Provider pacing can keep the second exchange queued for well over 15 minutes.
+// Treat a scheduled run as missed only after the same-day processing window has elapsed.
+const MISSED_JOB_GRACE_MS = 12 * 60 * 60 * 1000;
 let reconciliationTimer: NodeJS.Timeout | null = null;
 
 export class MarketDataLedgerRunNotClaimableError extends Error {}
@@ -87,6 +88,10 @@ export function expectedMarketDataJobsForDate(exchange: string, tradingDate: str
 
 export function shouldQueueHistoricalCatchUp(coverage: { missing: number }) {
   return coverage.missing > 0;
+}
+
+export function isHistoricalCatchUpDate(exchange: string, tradingDate: string, at = new Date()) {
+  return tradingDate !== getExchangeTodayIfTradingDay(exchange, at);
 }
 
 export async function ensureExpectedMarketDataJobs(
@@ -301,6 +306,9 @@ export async function reconcileMarketDataJobLedger(at: Date = new Date()) {
   }
 
   for (const target of targets.values()) {
+    // Today's candle belongs to the morning/post-market pipeline. Treating an
+    // open trading day as historical created duplicate catch-ups before close.
+    if (!isHistoricalCatchUpDate(target.exchange, target.tradingDate, at)) continue;
     const coverage = await getHistoricalCoverage(target.exchange, target.tradingDate);
     if (shouldQueueHistoricalCatchUp(coverage)) {
       await createAndQueueCatchUp(target.exchange, target.tradingDate, coverage.missingSymbols);

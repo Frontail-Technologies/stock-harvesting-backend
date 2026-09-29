@@ -4,14 +4,14 @@ import type { Queue } from "bullmq";
 import { env } from "../../shared/env";
 import {
   addJobWithTimeout,
-  CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS,
+  CANDLE_BOOTSTRAP_RECONCILE_CRON,
   getProducerRedisConnectionOptions,
   getRedisConnectionOptions,
 } from "./queues";
 
 describe("maintenance schedule cadence", () => {
-  it("runs candle bootstrap reconciliation twice per hour", () => {
-    expect(CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS).toBe(30 * 60_000);
+  it("runs candle bootstrap reconciliation once after daily sync work", () => {
+    expect(CANDLE_BOOTSTRAP_RECONCILE_CRON).toBe("0 20 * * 1-5");
   });
 });
 

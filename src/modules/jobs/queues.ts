@@ -22,12 +22,9 @@ registerBullmqJobsCollector(async (gauge) => {
   }
 });
 
-export const INSTRUMENT_SYNC_INTERVAL_MS = 30 * 60 * 1000;
-export const INSTRUMENT_SYNC_INDEX_CRON = "10 16 * * 1-5";
+export const INSTRUMENT_SYNC_CRON = "30 8 * * 1";
 export const MARKET_DATA_SCHEDULE_TZ = "Asia/Kolkata";
-// Bootstrap is maintenance work, not a freshness loop. Two batches per hour leave enough of GDF's
-// hourly allowance for chart refreshes, catch-up, and instrument sync while still draining gaps.
-export const CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS = 30 * 60 * 1000;
+export const CANDLE_BOOTSTRAP_RECONCILE_CRON = "0 20 * * 1-5";
 
 let marketDataQueue: Queue | null = null;
 let marketDataQueueEvents: QueueEvents | null = null;
@@ -179,13 +176,9 @@ export async function scheduleRepeatableMarketDataSync(exchanges: string[]) {
   for (const exchange of exchanges) {
     try {
       const schedulerId = `${INSTRUMENT_SYNC_SCHEDULER_PREFIX}${exchange}`;
-      const repeat = exchange.endsWith("_IDX")
-        ? { pattern: INSTRUMENT_SYNC_INDEX_CRON, tz: MARKET_DATA_SCHEDULE_TZ }
-        : { every: INSTRUMENT_SYNC_INTERVAL_MS };
-
       await queue.upsertJobScheduler(
         schedulerId,
-        repeat,
+        { pattern: INSTRUMENT_SYNC_CRON, tz: MARKET_DATA_SCHEDULE_TZ },
         {
           name: JOB_NAMES.instrumentSync,
           data: { exchange },
@@ -242,7 +235,7 @@ export async function scheduleCandleBootstrapReconciliation(exchanges: string[])
       const schedulerId = `${BOOTSTRAP_RECONCILE_SCHEDULER_PREFIX}${exchange}`;
       await queue.upsertJobScheduler(
         schedulerId,
-        { every: CANDLE_BOOTSTRAP_RECONCILE_INTERVAL_MS },
+        { pattern: CANDLE_BOOTSTRAP_RECONCILE_CRON, tz: MARKET_DATA_SCHEDULE_TZ },
         {
           name: JOB_NAMES.candleBootstrapReconcile,
           data: { exchange },
@@ -259,9 +252,8 @@ export async function scheduleCandleBootstrapReconciliation(exchanges: string[])
 }
 
 export const DAILY_CANDLE_SYNC_TZ = MARKET_DATA_SCHEDULE_TZ;
-const DAILY_CANDLE_SYNC_MORNING_CRON = "40 9 * * 1-5";
-const DAILY_CANDLE_SYNC_POST_MARKET_CRON = "50 15 * * 1-5";
-const DAILY_CANDLE_SYNC_RETRY_CRON = "0 17 * * 1-5";
+const DAILY_CANDLE_SYNC_MORNING_CRON = "45 9 * * 1-5";
+const DAILY_CANDLE_SYNC_POST_MARKET_CRON = "15 16 * * 1-5";
 
 export const DAILY_CANDLE_SYNC_SCHEDULES = [
   { suffix: "morning", pattern: DAILY_CANDLE_SYNC_MORNING_CRON, jobType: BACKGROUND_JOB_TYPES.dailyCandleMorning },
@@ -270,7 +262,6 @@ export const DAILY_CANDLE_SYNC_SCHEDULES = [
     pattern: DAILY_CANDLE_SYNC_POST_MARKET_CRON,
     jobType: BACKGROUND_JOB_TYPES.dailyCandlePostMarket,
   },
-  { suffix: "retry", pattern: DAILY_CANDLE_SYNC_RETRY_CRON, jobType: BACKGROUND_JOB_TYPES.dailyCandleRetry },
 ] as const;
 
 export async function scheduleRepeatableDailyCandleSync(exchanges: string[]) {

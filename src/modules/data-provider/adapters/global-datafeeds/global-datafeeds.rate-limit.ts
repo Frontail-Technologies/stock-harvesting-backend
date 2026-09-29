@@ -20,11 +20,22 @@ export class GdfCallGate {
   private blockedUntil = 0;
   private hits = 0;
   private calls: number[] = [];
+  private nextCallAt = 0;
 
   constructor(private readonly maxCallsPerHour = 0) {}
 
   assertAllowed(now = Date.now()) {
     if (now < this.blockedUntil) throw new ProviderRateLimitedError("Global Datafeeds", this.blockedUntil - now);
+  }
+
+  // Reserve evenly spaced send slots instead of allowing the whole hourly
+  // allowance to burst immediately and then blocking the worker for an hour.
+  reserveDelayMs(now = Date.now()) {
+    if (this.maxCallsPerHour <= 0) return 0;
+    const intervalMs = Math.ceil(HOUR_MS / this.maxCallsPerHour);
+    const sendAt = Math.max(now, this.nextCallAt);
+    this.nextCallAt = sendAt + intervalMs;
+    return sendAt - now;
   }
 
   // Counts one call toward the hourly cap; throws when the cap is already reached.

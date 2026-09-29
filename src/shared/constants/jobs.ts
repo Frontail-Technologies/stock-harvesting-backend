@@ -36,7 +36,6 @@ export type BackgroundJobType = (typeof BACKGROUND_JOB_TYPES)[keyof typeof BACKG
 export const SCHEDULED_DAILY_CANDLE_SYNC_JOB_TYPES: BackgroundJobType[] = [
   BACKGROUND_JOB_TYPES.dailyCandleMorning,
   BACKGROUND_JOB_TYPES.dailyCandlePostMarket,
-  BACKGROUND_JOB_TYPES.dailyCandleRetry,
 ];
 
 export const SYNC_JOB_TYPES = {

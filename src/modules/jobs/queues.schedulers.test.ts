@@ -45,6 +45,7 @@ describe("repeatable scheduler registration", () => {
   it("removes schedulers left behind for an exchange that is no longer in the universe", async () => {
     queueApi.getJobSchedulers.mockResolvedValue([
       { id: "repeatable-daily-candle-sync-BSE-morning" },
+      { id: "repeatable-daily-candle-sync-BSE-retry" },
       { id: "repeatable-daily-candle-sync-NSE-morning" },
       { id: "repeatable-daily-candle-sync-US-retry" },
       { id: "some-other-scheduler" },
@@ -54,6 +55,7 @@ describe("repeatable scheduler registration", () => {
 
     const removed = queueApi.removeJobScheduler.mock.calls.map((call) => call[0]);
     expect(removed).toEqual([
+      "repeatable-daily-candle-sync-BSE-retry",
       "repeatable-daily-candle-sync-NSE-morning",
       "repeatable-daily-candle-sync-US-retry",
     ]);
@@ -73,7 +75,7 @@ describe("repeatable scheduler registration", () => {
     ]);
   });
 
-  it("syncs regular instruments every 30 minutes but index instruments once after market", async () => {
+  it("syncs instrument masters once per week without running price refreshes", async () => {
     queueApi.getJobSchedulers.mockResolvedValue([]);
 
     await scheduleRepeatableMarketDataSync(["BSE", "BSE_IDX"]);
@@ -81,7 +83,7 @@ describe("repeatable scheduler registration", () => {
     expect(queueApi.upsertJobScheduler).toHaveBeenNthCalledWith(
       1,
       "repeatable-instrument-sync-BSE",
-      { every: 30 * 60 * 1000 },
+      { pattern: "30 8 * * 1", tz: "Asia/Kolkata" },
       expect.objectContaining({
         name: "instrument-sync",
         data: { exchange: "BSE" },
@@ -90,7 +92,7 @@ describe("repeatable scheduler registration", () => {
     expect(queueApi.upsertJobScheduler).toHaveBeenNthCalledWith(
       2,
       "repeatable-instrument-sync-BSE_IDX",
-      { pattern: "10 16 * * 1-5", tz: "Asia/Kolkata" },
+      { pattern: "30 8 * * 1", tz: "Asia/Kolkata" },
       expect.objectContaining({
         name: "instrument-sync",
         data: { exchange: "BSE_IDX" },

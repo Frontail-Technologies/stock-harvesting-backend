@@ -64,6 +64,10 @@ function parseMessage(raw: string): GlobalDatafeedsResponse | null {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function getRequestMessageType(response: GlobalDatafeedsResponse) {
   const resultToRequestMessageType: Record<string, string> = {
     AuthenticateResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.authenticate,
@@ -138,7 +142,9 @@ export class GlobalDatafeedsWebSocketClient {
   private shouldReconnect = false;
   private remoteTransport: GlobalDatafeedsRemoteTransport | null = null;
   private startupGate: Promise<unknown> | null = null;
-  private callGate = new GdfCallGate(env.GLOBAL_DATAFEEDS_MAX_CALLS_PER_HOUR);
+  private callGate = new GdfCallGate(
+    env.NODE_ENV === "test" ? 0 : env.GLOBAL_DATAFEEDS_MAX_CALLS_PER_HOUR,
+  );
 
   // Requests wait for this before choosing between the local socket and the remote transport, so
   // a process never opens a socket before the broker has decided whether it owns the session.
@@ -184,6 +190,9 @@ export class GlobalDatafeedsWebSocketClient {
     await this.startupGate;
     if (this.remoteTransport) return (await this.remoteTransport.request(request, timeoutMs)) as T;
     // Refuse (fast, without opening a socket) while GDF is rate-limiting this key or the local hourly cap is reached.
+    this.callGate.assertAllowed();
+    const pacingDelayMs = this.callGate.reserveDelayMs();
+    if (pacingDelayMs > 0) await sleep(pacingDelayMs);
     this.callGate.assertAllowed();
     this.callGate.registerCall();
     await this.connect();
@@ -233,6 +242,11 @@ export class GlobalDatafeedsWebSocketClient {
   async send(request: GlobalDatafeedsRequest) {
     await this.startupGate;
     if (this.remoteTransport) return this.remoteTransport.send(request);
+    this.callGate.assertAllowed();
+    const pacingDelayMs = this.callGate.reserveDelayMs();
+    if (pacingDelayMs > 0) await sleep(pacingDelayMs);
+    this.callGate.assertAllowed();
+    this.callGate.registerCall();
     await this.connect();
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify(request));

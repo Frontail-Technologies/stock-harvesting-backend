@@ -299,15 +299,6 @@ const worker = new Worker(
         const result = await syncProviderInstruments(exchange);
         // A newly discovered exchange may only now have active instruments.
         void scheduleProductionMarketDataJobs();
-        await refreshAllLatestInstrumentPrices(exchange);
-        if (exchange) {
-          await reconcileWeeklyStrongBacktests(exchange).catch((error) => {
-            logger.error(
-              { exchange, message: getErrorMessage(error, "Unknown error") },
-              "Weekly Strong backtest incremental sync failed",
-            );
-          });
-        }
         return result;
       })));
     }

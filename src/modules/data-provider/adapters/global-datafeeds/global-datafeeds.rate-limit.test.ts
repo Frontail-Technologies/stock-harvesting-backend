@@ -106,4 +106,12 @@ describe("GdfCallGate hourly cap", () => {
 
     expect(() => gate.registerCall(T + 61 * MIN)).not.toThrow();
   });
+
+  it("paces reservations evenly across the configured hourly allowance", () => {
+    const gate = new GdfCallGate(3_000);
+
+    expect(gate.reserveDelayMs(T)).toBe(0);
+    expect(gate.reserveDelayMs(T)).toBe(1_200);
+    expect(gate.reserveDelayMs(T)).toBe(2_400);
+  });
 });
