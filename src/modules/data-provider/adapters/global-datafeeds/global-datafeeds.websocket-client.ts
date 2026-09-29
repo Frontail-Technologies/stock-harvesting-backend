@@ -76,6 +76,7 @@ function getRequestMessageType(response: GlobalDatafeedsResponse) {
     InstrumentsOnSearchResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getInstrumentsOnSearch,
     InstrumentSearchResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getInstrumentsOnSearch,
     HistoryResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory,
+    HistoryOHLCResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory,
     LastQuoteResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getLastQuote,
     LastQuoteArrayResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.getLastQuoteArray,
     RealtimeResult: GLOBAL_DATAFEEDS_MESSAGE_TYPE.subscribeRealtime,
@@ -142,6 +143,7 @@ export class GlobalDatafeedsWebSocketClient {
   private shouldReconnect = false;
   private remoteTransport: GlobalDatafeedsRemoteTransport | null = null;
   private startupGate: Promise<unknown> | null = null;
+  private localRequestTail: Promise<void> = Promise.resolve();
   private callGate = new GdfCallGate(
     env.NODE_ENV === "test" ? 0 : env.GLOBAL_DATAFEEDS_MAX_CALLS_PER_HOUR,
   );
@@ -189,6 +191,30 @@ export class GlobalDatafeedsWebSocketClient {
   ): Promise<T> {
     await this.startupGate;
     if (this.remoteTransport) return (await this.remoteTransport.request(request, timeoutMs)) as T;
+    return this.runSerializedLocalRequest(() => this.requestOnLocalSocket<T>(request, timeoutMs));
+  }
+
+  // GDF often omits UserTag and Request metadata, including on RequestError.
+  // Keep exactly one response-bearing call in flight so an untagged response
+  // can never resolve or reject the wrong symbol's request.
+  private async runSerializedLocalRequest<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.localRequestTail;
+    let release!: () => void;
+    this.localRequestTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await run();
+    } finally {
+      release();
+    }
+  }
+
+  private async requestOnLocalSocket<T extends GlobalDatafeedsResponse>(
+    request: GlobalDatafeedsRequest,
+    timeoutMs: number,
+  ): Promise<T> {
     // Refuse (fast, without opening a socket) while GDF is rate-limiting this key or the local hourly cap is reached.
     this.callGate.assertAllowed();
     const pacingDelayMs = this.callGate.reserveDelayMs();

@@ -138,6 +138,10 @@ export type BackfillDailyCandlesResult = {
   providerFailedDates?: string[];
 };
 
+function usesGlobalDatafeedsMinuteHistory(exchange: string) {
+  return exchange === "BSE" || exchange === GLOBAL_DATAFEEDS_INDEX_EXCHANGE;
+}
+
 export async function backfillDailyCandles(
   input: {
     symbol: string;
@@ -174,7 +178,9 @@ export async function backfillDailyCandles(
     const accessToken = await getActiveProviderAccessToken(adapter.providerKey);
     let daily: ProviderDailyCandle[];
     const providerFailedDates: string[] = [];
-    const useIntradayRepair = exchange === "BSE" && input.intradayRepairDates !== undefined && adapter.fetchIntradayCandles;
+    const useIntradayRepair = usesGlobalDatafeedsMinuteHistory(exchange)
+      && input.intradayRepairDates !== undefined
+      && adapter.fetchIntradayCandles;
     try {
       if (useIntradayRepair) {
         daily = [];
@@ -199,7 +205,7 @@ export async function backfillDailyCandles(
             );
           }
         }
-      } else if (exchange === "BSE" && input.from === input.to && adapter.fetchIntradayCandles) {
+      } else if (usesGlobalDatafeedsMinuteHistory(exchange) && input.from === input.to && adapter.fetchIntradayCandles) {
         const bars = await adapter.fetchIntradayCandles({
           accessToken,
           instrumentToken: instrument.instrumentToken,
@@ -229,7 +235,10 @@ export async function backfillDailyCandles(
     // A 15-minute repair supplies isolated completed days, not a complete
     // week/month. Upsert only those daily rows; chart and analytics reads
     // derive larger timeframes from the authoritative daily series.
-    const isIntradayWrite = Boolean(useIntradayRepair || (exchange === "BSE" && input.from === input.to && adapter.fetchIntradayCandles));
+    const isIntradayWrite = Boolean(
+      useIntradayRepair
+      || (usesGlobalDatafeedsMinuteHistory(exchange) && input.from === input.to && adapter.fetchIntradayCandles),
+    );
     const weekly = isIntradayWrite ? [] : aggregateWeeklyCandles(daily);
     const monthly = isIntradayWrite ? [] : aggregateMonthlyCandles(daily);
 
@@ -764,7 +773,7 @@ export async function refreshDailyCandles(
   // Give that adapter the exact completed tail dates missing after the last
   // stored candle; adapters with daily history continue using the range path.
   const intradayRepairDates =
-    exchange === "BSE" && !isBootstrap && !input.targetDate && latestStoredDate
+    usesGlobalDatafeedsMinuteHistory(exchange) && !isBootstrap && !input.targetDate && latestStoredDate
       ? getCompletedWeekdaysAfter(latestStoredDate, latestExpectedTradingDate)
       : undefined;
   const result = await backfillDailyCandles(
