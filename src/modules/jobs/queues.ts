@@ -163,7 +163,7 @@ async function removeStaleSchedulers(queue: Queue, prefix: string, keepIds: Set<
   }
 }
 
-export async function scheduleRepeatableMarketDataSync(exchanges: string[]) {
+export async function scheduleRepeatableMarketDataSync(exchanges: string[], options?: { startDate?: Date }) {
   const queue = getMarketDataQueue();
   if (!queue) return;
 
@@ -178,7 +178,11 @@ export async function scheduleRepeatableMarketDataSync(exchanges: string[]) {
       const schedulerId = `${INSTRUMENT_SYNC_SCHEDULER_PREFIX}${exchange}`;
       await queue.upsertJobScheduler(
         schedulerId,
-        { pattern: INSTRUMENT_SYNC_CRON, tz: MARKET_DATA_SCHEDULE_TZ },
+        {
+          pattern: INSTRUMENT_SYNC_CRON,
+          tz: MARKET_DATA_SCHEDULE_TZ,
+          ...(options?.startDate ? { startDate: options.startDate } : {}),
+        },
         {
           name: JOB_NAMES.instrumentSync,
           data: { exchange },
@@ -220,7 +224,7 @@ export async function enqueueCandleBootstrapJobs(exchange: string, symbols: stri
   return { queued: jobs.length };
 }
 
-export async function scheduleCandleBootstrapReconciliation(exchanges: string[]) {
+export async function scheduleCandleBootstrapReconciliation(exchanges: string[], options?: { startDate?: Date }) {
   const queue = getMarketDataQueue();
   if (!queue) return;
 
@@ -235,7 +239,11 @@ export async function scheduleCandleBootstrapReconciliation(exchanges: string[])
       const schedulerId = `${BOOTSTRAP_RECONCILE_SCHEDULER_PREFIX}${exchange}`;
       await queue.upsertJobScheduler(
         schedulerId,
-        { pattern: CANDLE_BOOTSTRAP_RECONCILE_CRON, tz: MARKET_DATA_SCHEDULE_TZ },
+        {
+          pattern: CANDLE_BOOTSTRAP_RECONCILE_CRON,
+          tz: MARKET_DATA_SCHEDULE_TZ,
+          ...(options?.startDate ? { startDate: options.startDate } : {}),
+        },
         {
           name: JOB_NAMES.candleBootstrapReconcile,
           data: { exchange },
@@ -264,7 +272,7 @@ export const DAILY_CANDLE_SYNC_SCHEDULES = [
   },
 ] as const;
 
-export async function scheduleRepeatableDailyCandleSync(exchanges: string[]) {
+export async function scheduleRepeatableDailyCandleSync(exchanges: string[], options?: { startDate?: Date }) {
   const queue = getMarketDataQueue();
   if (!queue) {
     logger.warn("Market data queue unavailable; daily candle sync schedules were not registered");
@@ -294,7 +302,11 @@ export async function scheduleRepeatableDailyCandleSync(exchanges: string[]) {
           {
             jobId: `${DAILY_CANDLE_SYNC_SCHEDULER_PREFIX}${exchange}-${schedule.suffix}`,
             priority: SCHEDULED_JOB_PRIORITY,
-            repeat: { pattern: schedule.pattern, tz: DAILY_CANDLE_SYNC_TZ },
+            repeat: {
+              pattern: schedule.pattern,
+              tz: DAILY_CANDLE_SYNC_TZ,
+              ...(options?.startDate ? { startDate: options.startDate } : {}),
+            },
           },
         );
         registered += 1;

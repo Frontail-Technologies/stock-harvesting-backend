@@ -6,8 +6,6 @@ const scheduleRepeatableMarketDataSync = vi.hoisted(() => vi.fn());
 const scheduleRepeatableDailyCandleSync = vi.hoisted(() => vi.fn());
 const scheduleCandleBootstrapReconciliation = vi.hoisted(() => vi.fn());
 const reconcileWeeklyStrongBacktests = vi.hoisted(() => vi.fn());
-const ensureExpectedMarketDataJobs = vi.hoisted(() => vi.fn());
-const markExpectedMarketDataJobsQueued = vi.hoisted(() => vi.fn());
 
 vi.mock("../market-data/market-data.universe", () => ({ listProductionExchanges, listInstrumentSyncExchanges }));
 vi.mock("./queues", () => ({
@@ -16,7 +14,6 @@ vi.mock("./queues", () => ({
   scheduleCandleBootstrapReconciliation,
 }));
 vi.mock("../weekly-strong-backtest/weekly-strong-backtest.reconciliation", () => ({ reconcileWeeklyStrongBacktests }));
-vi.mock("./market-data-job-ledger", () => ({ ensureExpectedMarketDataJobs, markExpectedMarketDataJobsQueued }));
 
 import { scheduleProductionMarketDataJobs } from "./schedule-production-jobs";
 

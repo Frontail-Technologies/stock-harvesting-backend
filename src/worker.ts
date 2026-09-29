@@ -22,7 +22,6 @@ import { scheduleProductionMarketDataJobs } from "./modules/jobs/schedule-produc
 import {
   finishLedgerCoverage,
   MarketDataLedgerRunNotClaimableError,
-  startMarketDataLedgerReconciliation,
 } from "./modules/jobs/market-data-job-ledger";
 import { isInstrumentSyncExchange, isProductionExchange } from "./modules/market-data/market-data.universe";
 import { getExchangeTodayIfTradingDay, getLatestExpectedTradingDay } from "./modules/market-data/trading-calendar";
@@ -447,7 +446,6 @@ async function heartbeat() {
 }
 
 void heartbeat();
-startMarketDataLedgerReconciliation();
 const heartbeatTimer = setInterval(() => void heartbeat(), WORKER_HEARTBEAT_INTERVAL_MS);
 
 logger.info({ startedAt: workerStartedAt, queue: QUEUE_NAMES.marketData }, "Market data worker started");

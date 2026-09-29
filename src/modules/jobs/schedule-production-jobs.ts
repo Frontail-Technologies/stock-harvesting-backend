@@ -7,7 +7,6 @@ import {
   scheduleRepeatableDailyCandleSync,
   scheduleRepeatableMarketDataSync,
 } from "./queues";
-import { ensureExpectedMarketDataJobs, markExpectedMarketDataJobsQueued } from "./market-data-job-ledger";
 import { reconcileWeeklyStrongBacktests } from "../weekly-strong-backtest/weekly-strong-backtest.reconciliation";
 
 // Idempotent: registers repeatable jobs only for exchanges in the production
@@ -21,10 +20,8 @@ export async function scheduleProductionMarketDataJobs() {
     ]);
 
     await scheduleRepeatableMarketDataSync(syncExchanges);
-    const queuedExchanges = await scheduleRepeatableDailyCandleSync(productionExchanges);
+    await scheduleRepeatableDailyCandleSync(productionExchanges);
     await scheduleCandleBootstrapReconciliation(productionExchanges);
-    await ensureExpectedMarketDataJobs(new Date(), productionExchanges);
-    await markExpectedMarketDataJobsQueued(queuedExchanges ?? []);
     await Promise.all(productionExchanges.map((exchange) => reconcileWeeklyStrongBacktests(exchange)));
     await triggerPendingCollectionPreparations();
   } catch (error) {

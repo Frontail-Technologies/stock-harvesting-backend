@@ -42,6 +42,19 @@ describe("repeatable scheduler registration", () => {
     expect(jobIds.every((id) => id.startsWith("repeatable-daily-candle-sync-BSE-"))).toBe(true);
   });
 
+  it("can defer newly registered schedules until the next operating day", async () => {
+    queueApi.getJobSchedulers.mockResolvedValue([]);
+    const startDate = new Date("2026-09-29T18:30:00.000Z");
+
+    await scheduleRepeatableDailyCandleSync(["BSE"], { startDate });
+
+    expect(queueApi.add).toHaveBeenCalledWith(
+      "daily-candle-sync",
+      expect.any(Object),
+      expect.objectContaining({ repeat: expect.objectContaining({ startDate }) }),
+    );
+  });
+
   it("removes schedulers left behind for an exchange that is no longer in the universe", async () => {
     queueApi.getJobSchedulers.mockResolvedValue([
       { id: "repeatable-daily-candle-sync-BSE-morning" },

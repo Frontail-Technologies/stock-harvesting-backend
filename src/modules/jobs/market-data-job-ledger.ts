@@ -280,7 +280,6 @@ export async function createAndQueueCatchUp(
 }
 
 export async function reconcileMarketDataJobLedger(at: Date = new Date()) {
-  const { exchanges } = await ensureExpectedMarketDataJobs(at);
   const missedRows = await db
     .update(backgroundJobRuns)
     .set({ status: BACKGROUND_JOB_RUN_STATUS.missed, updatedAt: new Date() })
@@ -291,31 +290,12 @@ export async function reconcileMarketDataJobLedger(at: Date = new Date()) {
         lt(backgroundJobRuns.scheduledAt, new Date(at.getTime() - MISSED_JOB_GRACE_MS)),
       ),
     )
-    .returning({ tradingDate: backgroundJobRuns.tradingDate, exchange: backgroundJobRuns.exchange });
+    .returning({ id: backgroundJobRuns.id });
 
-  const targets = new Map<string, { exchange: string; tradingDate: string }>();
-  for (const exchange of exchanges) {
-    for (const tradingDate of getRecentExpectedTradingDays(exchange, at, 3)) {
-      targets.set(`${exchange}:${tradingDate}`, { exchange, tradingDate });
-    }
-  }
-  for (const row of missedRows) {
-    if (row.exchange && row.tradingDate) {
-      targets.set(`${row.exchange}:${row.tradingDate}`, { exchange: row.exchange, tradingDate: row.tradingDate });
-    }
-  }
-
-  for (const target of targets.values()) {
-    // Today's candle belongs to the morning/post-market pipeline. Treating an
-    // open trading day as historical created duplicate catch-ups before close.
-    if (!isHistoricalCatchUpDate(target.exchange, target.tradingDate, at)) continue;
-    const coverage = await getHistoricalCoverage(target.exchange, target.tradingDate);
-    if (shouldQueueHistoricalCatchUp(coverage)) {
-      await createAndQueueCatchUp(target.exchange, target.tradingDate, coverage.missingSymbols);
-    }
-  }
-
-  return { missed: missedRows.length, targets: targets.size };
+  // Reconciliation is deliberately passive. Provider work is started only by
+  // a real schedule or the explicit Refresh candles action, never by opening
+  // the admin page, restarting a process, or pressing the status Refresh button.
+  return { missed: missedRows.length, targets: 0 };
 }
 
 export async function finishLedgerCoverage(input: {
@@ -495,7 +475,17 @@ export async function claimMarketDataLedgerRun(input: {
   const tradingDate = input.tradingDate
     ?? getExchangeTodayIfTradingDay(input.exchange, now)
     ?? getLatestExpectedTradingDay(input.exchange, now);
-  await ensureExpectedMarketDataJobs(now, [input.exchange]);
+
+  // Persist a scheduled run only when BullMQ actually starts it. Pre-creating
+  // expected rows made healthy schedules appear as pending/missed even though
+  // no queue job had run, and caused old catch-ups to be recreated on startup.
+  if (!input.ledgerRunId) {
+    const expected = expectedMarketDataJobsForDate(input.exchange, tradingDate)
+      .find((job) => job.jobType === input.jobType);
+    if (expected) {
+      await db.insert(backgroundJobRuns).values(expected).onConflictDoNothing();
+    }
+  }
 
   const [row] = input.ledgerRunId
     ? await db.select({ id: backgroundJobRuns.id }).from(backgroundJobRuns).where(eq(backgroundJobRuns.id, input.ledgerRunId)).limit(1)
