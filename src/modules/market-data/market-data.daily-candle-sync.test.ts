@@ -350,6 +350,40 @@ describe("refreshDailyCandles - gap repair", () => {
     expect(fetchDailyCandles.mock.calls[0]?.[0].from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it("seeds a zero-history GDF symbol from the latest completed 15-minute session", async () => {
+    getLatestExpectedTradingDay.mockReturnValue("2026-09-21");
+    readCandleHistoryRange.mockResolvedValue(null);
+    readCandleDatesInRange
+      .mockResolvedValueOnce(new Set())
+      .mockResolvedValueOnce(new Set(["2026-09-21"]));
+    const fetchDailyCandles = vi.fn();
+    const fetchIntradayCandles = vi.fn().mockResolvedValue(
+      Array.from({ length: 25 }, (_, index) => ({
+        time: new Date(Date.parse("2026-09-21T03:45:00.000Z") + index * 900_000).toISOString(),
+        open: 100,
+        high: 102,
+        low: 99,
+        close: 101,
+        volume: 10,
+      })),
+    );
+    getEligibleProviderAdapter.mockResolvedValue({
+      providerKey: "global-datafeeds",
+      fetchDailyCandles,
+      fetchIntradayCandles,
+    } as never);
+
+    const result = await refreshDailyCandles({ symbol: "ARABIAN", exchange: "BSE" });
+
+    expect(fetchIntradayCandles).toHaveBeenCalledTimes(1);
+    expect(fetchIntradayCandles).toHaveBeenCalledWith(expect.objectContaining({
+      date: "2026-09-21",
+      periodMinutes: 15,
+    }));
+    expect(fetchDailyCandles).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: "updated", insertedDaily: 1 });
+  });
+
   it("reports provider-empty when the provider returns no rows for the planned range", async () => {
     readCandleHistoryRange.mockResolvedValue({ from: "2020-01-01", to: "2026-09-11" });
     readCandleDatesInRange.mockResolvedValue(new Set());

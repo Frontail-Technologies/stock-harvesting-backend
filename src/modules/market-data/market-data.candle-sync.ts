@@ -135,6 +135,7 @@ export type BackfillDailyCandlesResult = {
   dailyCandles: ProviderDailyCandle[];
   providerConfirmedEmpty?: boolean;
   intradayRepairSkipped?: boolean;
+  usedIntradayRepair?: boolean;
   providerFailedDates?: string[];
 };
 
@@ -286,6 +287,7 @@ export async function backfillDailyCandles(
       // error/timeout (thrown above) or a no-op because no provider was eligible.
       providerConfirmedEmpty: daily.length === 0,
       intradayRepairSkipped: Boolean(useIntradayRepair && input.intradayRepairDates?.length === 0),
+      usedIntradayRepair: Boolean(useIntradayRepair),
       providerFailedDates,
     };
   } catch (error) {
@@ -772,10 +774,16 @@ export async function refreshDailyCandles(
   // GDF's current BSE subscription exposes history as 15-minute bars only.
   // Give that adapter the exact completed tail dates missing after the last
   // stored candle; adapters with daily history continue using the range path.
-  const intradayRepairDates =
-    usesGlobalDatafeedsMinuteHistory(exchange) && !isBootstrap && !input.targetDate && latestStoredDate
-      ? getCompletedWeekdaysAfter(latestStoredDate, latestExpectedTradingDate)
-      : undefined;
+  const intradayRepairDates = usesGlobalDatafeedsMinuteHistory(exchange) && !input.targetDate
+    ? isBootstrap
+      // This subscription has minute history but no EOD history. Seed a new
+      // symbol with the latest completed session instead of requesting an
+      // unsupported multi-year DAY bootstrap.
+      ? [latestExpectedTradingDate]
+      : latestStoredDate
+        ? getCompletedWeekdaysAfter(latestStoredDate, latestExpectedTradingDate)
+        : undefined
+    : undefined;
   const result = await backfillDailyCandles(
     { symbol, exchange, from: syncFrom, to: syncTo, intradayRepairDates },
     dbClient
@@ -799,7 +807,7 @@ export async function refreshDailyCandles(
     if (result.intradayRepairSkipped) {
       return { symbol, instrumentId: instrument.id, status: "already-current", insertedDaily: 0, failedDates: [] };
     }
-    if (isBootstrap && result.providerConfirmedEmpty) {
+    if (isBootstrap && result.providerConfirmedEmpty && !result.usedIntradayRepair) {
       await recordNoHistoryConfirmed({ exchange, symbol, requestedFrom: syncFrom, requestedTo: syncTo }).catch((error) => {
         logger.warn(
           { exchange, symbol, message: getErrorMessage(error, "Unknown error") },
