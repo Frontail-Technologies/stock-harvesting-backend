@@ -67,7 +67,9 @@ async function main() {
   await scheduleRepeatableDailyCandleSync(productionExchanges, scheduleOptions);
   await scheduleCandleBootstrapReconciliation(productionExchanges, scheduleOptions);
 
-  const jobId = `manual-daily-candle-sync:${jobType}:${exchange}:${tradingDate}`;
+  // BullMQ rejects ':' in custom job IDs because it uses that character in
+  // its own Redis keys. Keep the operator-visible identity readable but safe.
+  const jobId = `manual-daily-candle-sync-${jobType}-${exchange}-${tradingDate}`;
   const [run] = await db.insert(backgroundJobRuns).values({
     tradingDate,
     exchange,
