@@ -31,6 +31,12 @@ function indiaDate() {
   }).format(new Date());
 }
 
+function parseJobType(value: string | undefined) {
+  if (!value || value === "post-market") return BACKGROUND_JOB_TYPES.dailyCandlePostMarket;
+  if (value === "morning") return BACKGROUND_JOB_TYPES.dailyCandleMorning;
+  throw new Error('Invalid --job-type. Use "morning" or "post-market".');
+}
+
 async function main() {
   if (!process.argv.includes("--confirm-reset")) {
     throw new Error("Refusing to clear jobs without --confirm-reset");
@@ -38,6 +44,7 @@ async function main() {
 
   const tradingDate = argument("--date") ?? indiaDate();
   const exchange = (argument("--exchange") ?? "BSE").toUpperCase();
+  const jobType = parseJobType(argument("--job-type"));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(tradingDate)) {
     throw new Error(`Invalid --date: ${tradingDate}`);
   }
@@ -60,11 +67,11 @@ async function main() {
   await scheduleRepeatableDailyCandleSync(productionExchanges, scheduleOptions);
   await scheduleCandleBootstrapReconciliation(productionExchanges, scheduleOptions);
 
-  const jobId = `manual-daily-candle-sync:${exchange}:${tradingDate}`;
+  const jobId = `manual-daily-candle-sync:${jobType}:${exchange}:${tradingDate}`;
   const [run] = await db.insert(backgroundJobRuns).values({
     tradingDate,
     exchange,
-    jobType: BACKGROUND_JOB_TYPES.dailyCandlePostMarket,
+    jobType,
     scheduledAt: new Date(),
     status: BACKGROUND_JOB_RUN_STATUS.queued,
     bullmqJobId: jobId,
@@ -74,7 +81,7 @@ async function main() {
     await addJobWithTimeout(
       queue,
       JOB_NAMES.dailyCandleSync,
-      { exchange, jobType: BACKGROUND_JOB_TYPES.dailyCandlePostMarket },
+      { exchange, jobType },
       { jobId, attempts: 1 },
     );
   } catch (error) {
@@ -85,7 +92,7 @@ async function main() {
   console.log(JSON.stringify({
     cleared: true,
     schedulesStartAt: schedulesStartAt.toISOString(),
-    queued: { jobId, runId: run.id, exchange, tradingDate },
+    queued: { jobId, runId: run.id, exchange, tradingDate, jobType },
   }, null, 2));
 }
 
