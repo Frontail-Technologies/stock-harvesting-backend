@@ -68,6 +68,12 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isHistoryTimeout(error: unknown, request: GlobalDatafeedsRequest) {
+  return request.MessageType === GLOBAL_DATAFEEDS_MESSAGE_TYPE.getHistory
+    && error instanceof Error
+    && error.message.includes("request timed out: GetHistory");
+}
+
 function toFiniteNumberOrNull(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
@@ -102,7 +108,13 @@ async function requestWithRetry<T extends GlobalDatafeedsResponse = GlobalDatafe
       lastError = error;
       // A refused request or an exhausted quota is not transient: retrying only spends another call.
       if (error instanceof GlobalDatafeedsRequestError || isProviderRateLimitedError(error)) throw error;
-      if (attempt < attempts) await sleep(500);
+      if (attempt < attempts) {
+        // GDF may send an untagged history response after the client timeout.
+        // Reusing that socket would let the late reply be matched to the retry
+        // (or a later symbol), so discard it before retrying the request.
+        if (isHistoryTimeout(error, request)) globalDatafeedsClient.close();
+        await sleep(500);
+      }
     }
   }
   throw lastError;
