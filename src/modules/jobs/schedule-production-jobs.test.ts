@@ -15,13 +15,23 @@ vi.mock("./queues", () => ({
 }));
 vi.mock("../weekly-strong-backtest/weekly-strong-backtest.reconciliation", () => ({ reconcileWeeklyStrongBacktests }));
 
-import { scheduleProductionMarketDataJobs } from "./schedule-production-jobs";
+import { refreshProductionMarketDataSchedules, scheduleProductionMarketDataJobs } from "./schedule-production-jobs";
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe("scheduleProductionMarketDataJobs", () => {
+  it("restores the repeat schedules without launching backtest or collection maintenance", async () => {
+    listProductionExchanges.mockResolvedValue(["BSE"]);
+    listInstrumentSyncExchanges.mockResolvedValue(["BSE", "BSE_IDX"]);
+
+    await refreshProductionMarketDataSchedules();
+
+    expect(scheduleRepeatableDailyCandleSync).toHaveBeenCalledWith(["BSE"]);
+    expect(scheduleRepeatableMarketDataSync).toHaveBeenCalledWith(["BSE", "BSE_IDX"]);
+    expect(reconcileWeeklyStrongBacktests).not.toHaveBeenCalled();
+  });
   it("hands only the production universe to every scheduler - retired NSE never reaches them", async () => {
     listProductionExchanges.mockResolvedValue(["BSE", "BSE_IDX"]);
     listInstrumentSyncExchanges.mockResolvedValue(["BSE", "BSE_IDX"]);

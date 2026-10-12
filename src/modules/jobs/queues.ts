@@ -22,7 +22,7 @@ registerBullmqJobsCollector(async (gauge) => {
   }
 });
 
-export const INSTRUMENT_SYNC_CRON = "30 8 * * 1";
+export const INSTRUMENT_SYNC_CRON = "30 18 * * 5";
 export const MARKET_DATA_SCHEDULE_TZ = "Asia/Kolkata";
 export const CANDLE_BOOTSTRAP_RECONCILE_CRON = "0 20 * * 1-5";
 
@@ -291,22 +291,36 @@ export async function scheduleRepeatableDailyCandleSync(exchanges: string[], opt
     ),
   );
 
+  // Older deployments used Queue.add({ repeat }) for these schedules. Its
+  // option-derived repeat key changes when startDate is added or removed,
+  // leaving duplicate Friday/Monday jobs after a reset or API restart.
+  try {
+    const repeats = await queue.getRepeatableJobs();
+    for (const repeat of repeats) {
+      if (repeat.name !== JOB_NAMES.dailyCandleSync || repeat.key.startsWith(DAILY_CANDLE_SYNC_SCHEDULER_PREFIX)) continue;
+      await queue.removeRepeatableByKey(repeat.key);
+      logger.info({ repeatKey: repeat.key }, "Removed legacy daily candle schedule");
+    }
+  } catch (error) {
+    logger.warn({ message: getErrorMessage(error, "Unknown error") }, "Failed to remove legacy daily candle schedules");
+  }
+
   let registered = 0;
   const registeredExchanges = new Set<string>();
   for (const exchange of exchanges) {
     for (const schedule of DAILY_CANDLE_SYNC_SCHEDULES) {
       try {
-        await queue.add(
-          JOB_NAMES.dailyCandleSync,
-          { exchange, jobType: schedule.jobType },
+        await queue.upsertJobScheduler(
+          `${DAILY_CANDLE_SYNC_SCHEDULER_PREFIX}${exchange}-${schedule.suffix}`,
           {
-            jobId: `${DAILY_CANDLE_SYNC_SCHEDULER_PREFIX}${exchange}-${schedule.suffix}`,
-            priority: SCHEDULED_JOB_PRIORITY,
-            repeat: {
-              pattern: schedule.pattern,
-              tz: DAILY_CANDLE_SYNC_TZ,
-              ...(options?.startDate ? { startDate: options.startDate } : {}),
-            },
+            pattern: schedule.pattern,
+            tz: DAILY_CANDLE_SYNC_TZ,
+            ...(options?.startDate ? { startDate: options.startDate } : {}),
+          },
+          {
+            name: JOB_NAMES.dailyCandleSync,
+            data: { exchange, jobType: schedule.jobType },
+            opts: { priority: SCHEDULED_JOB_PRIORITY },
           },
         );
         registered += 1;

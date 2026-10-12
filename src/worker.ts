@@ -18,7 +18,7 @@ import {
 } from "./modules/market-data/market-data.candle-sync";
 import { syncSectorClassifications } from "./modules/market-data/sector-classification.service";
 import { enqueueCandleBootstrapJobs, getRedisConnectionOptions } from "./modules/jobs/queues";
-import { scheduleProductionMarketDataJobs } from "./modules/jobs/schedule-production-jobs";
+import { scheduleProductionMarketDataJobs, startProductionMarketDataScheduleRefresh } from "./modules/jobs/schedule-production-jobs";
 import {
   finishLedgerCoverage,
   MarketDataLedgerRunNotClaimableError,
@@ -446,6 +446,7 @@ async function heartbeat() {
 }
 
 void heartbeat();
+const stopScheduleRefresh = startProductionMarketDataScheduleRefresh();
 const heartbeatTimer = setInterval(() => void heartbeat(), WORKER_HEARTBEAT_INTERVAL_MS);
 
 logger.info({ startedAt: workerStartedAt, queue: QUEUE_NAMES.marketData }, "Market data worker started");
@@ -468,6 +469,7 @@ worker.on("failed", (job, error) => {
 async function shutdown(signal: string) {
   logger.info({ signal }, "Shutting down worker");
   clearInterval(heartbeatTimer);
+  stopScheduleRefresh();
   await worker.close();
   await stopGdfSessionBroker();
   await pool.end();
