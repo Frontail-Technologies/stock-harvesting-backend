@@ -4,6 +4,7 @@ const queueApi = vi.hoisted(() => ({
   add: vi.fn(),
   upsertJobScheduler: vi.fn(),
   getJobSchedulers: vi.fn(),
+  getJob: vi.fn(),
   removeJobScheduler: vi.fn(),
   getRepeatableJobs: vi.fn(),
   removeRepeatableByKey: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock("bullmq", () => ({
     add = queueApi.add;
     upsertJobScheduler = queueApi.upsertJobScheduler;
     getJobSchedulers = queueApi.getJobSchedulers;
+    getJob = queueApi.getJob;
     removeJobScheduler = queueApi.removeJobScheduler;
     getRepeatableJobs = queueApi.getRepeatableJobs;
     removeRepeatableByKey = queueApi.removeRepeatableByKey;
@@ -33,6 +35,7 @@ beforeEach(() => {
   queueApi.add.mockResolvedValue(undefined);
   queueApi.upsertJobScheduler.mockResolvedValue(undefined);
   queueApi.removeJobScheduler.mockResolvedValue(true);
+  queueApi.getJob.mockResolvedValue(null);
   queueApi.getRepeatableJobs.mockResolvedValue([]);
   queueApi.removeRepeatableByKey.mockResolvedValue(true);
 });
@@ -58,6 +61,74 @@ describe("repeatable scheduler registration", () => {
       "repeatable-daily-candle-sync-BSE-morning",
       expect.objectContaining({ startDate }),
       expect.objectContaining({ name: "daily-candle-sync" }),
+    );
+  });
+
+  it("preserves an overdue daily job waiting behind provider work", async () => {
+    const next = new Date("2026-10-13T04:15:00.000Z").getTime();
+    queueApi.getJobSchedulers.mockResolvedValue([
+      {
+        id: "repeatable-daily-candle-sync-BSE-morning", name: "daily-candle-sync",
+        pattern: "45 9 * * 1-5", tz: "Asia/Kolkata", next,
+        template: { data: { exchange: "BSE", jobType: "daily_candle_morning" } },
+      },
+      {
+        id: "repeatable-daily-candle-sync-BSE-post-market", name: "daily-candle-sync",
+        pattern: "15 16 * * 1-5", tz: "Asia/Kolkata", next,
+        template: { data: { exchange: "BSE", jobType: "daily_candle_post_market" } },
+      },
+    ]);
+    queueApi.getJob.mockResolvedValue({ id: "waiting-job", getState: vi.fn().mockResolvedValue("waiting") });
+
+    await scheduleRepeatableDailyCandleSync(["BSE"]);
+    await scheduleRepeatableDailyCandleSync(["BSE"]);
+
+    expect(queueApi.getJob).toHaveBeenCalledWith(`repeat:repeatable-daily-candle-sync-BSE-morning:${next}`);
+    expect(queueApi.upsertJobScheduler).not.toHaveBeenCalled();
+  });
+
+  it("repairs a scheduler only when its next job has disappeared", async () => {
+    queueApi.getJobSchedulers.mockResolvedValue([{
+      id: "repeatable-daily-candle-sync-BSE-morning", name: "daily-candle-sync",
+      pattern: "45 9 * * 1-5", tz: "Asia/Kolkata", next: 1_800_000_000_000,
+      template: { data: { exchange: "BSE", jobType: "daily_candle_morning" } },
+    }]);
+
+    await scheduleRepeatableDailyCandleSync(["BSE"]);
+
+    expect(queueApi.upsertJobScheduler.mock.calls.map((call) => call[0])).toEqual([
+      "repeatable-daily-candle-sync-BSE-morning",
+      "repeatable-daily-candle-sync-BSE-post-market",
+    ]);
+  });
+
+  it("repairs a scheduler whose recorded next job is terminal", async () => {
+    queueApi.getJobSchedulers.mockResolvedValue([{
+      id: "repeatable-instrument-sync-BSE", name: "instrument-sync",
+      pattern: "30 18 * * 5", tz: "Asia/Kolkata", next: 1_800_000_000_000,
+      template: { data: { exchange: "BSE" } },
+    }]);
+    queueApi.getJob.mockResolvedValue({ getState: vi.fn().mockResolvedValue("failed") });
+
+    await scheduleRepeatableMarketDataSync(["BSE"]);
+
+    expect(queueApi.upsertJobScheduler).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates a changed schedule even when its old next job exists", async () => {
+    queueApi.getJobSchedulers.mockResolvedValue([{
+      id: "repeatable-instrument-sync-BSE", name: "instrument-sync",
+      pattern: "30 8 * * 1", tz: "Asia/Kolkata", next: 1_800_000_000_000,
+      template: { data: { exchange: "BSE" } },
+    }]);
+    queueApi.getJob.mockResolvedValue({ id: "old-job", getState: vi.fn().mockResolvedValue("waiting") });
+
+    await scheduleRepeatableMarketDataSync(["BSE"]);
+
+    expect(queueApi.upsertJobScheduler).toHaveBeenCalledWith(
+      "repeatable-instrument-sync-BSE",
+      { pattern: "30 18 * * 5", tz: "Asia/Kolkata" },
+      expect.any(Object),
     );
   });
 

@@ -1,4 +1,4 @@
-import { Queue, QueueEvents } from "bullmq";
+import { Queue, QueueEvents, type JobSchedulerJson } from "bullmq";
 
 import {
   BACKGROUND_JOB_TYPES,
@@ -155,19 +155,40 @@ async function removeStaleSchedulers(queue: Queue, prefix: string, keepIds: Set<
       await queue.removeJobScheduler(id);
       logger.info({ schedulerId: id }, "Removed stale repeatable scheduler");
     }
+    return schedulers.filter((scheduler) => {
+      const id = scheduler.id ?? scheduler.key;
+      return id && keepIds.has(id);
+    });
   } catch (error) {
     logger.warn(
       { prefix, message: getErrorMessage(error, "Unknown error") },
       "Failed to prune stale repeatable schedulers",
     );
+    return [];
   }
+}
+
+async function shouldUpsertScheduler(
+  queue: Queue,
+  scheduler: JobSchedulerJson | undefined,
+  expected: { id: string; name: string; pattern: string; tz: string; data: object },
+) {
+  if (!scheduler || scheduler.name !== expected.name || scheduler.pattern !== expected.pattern || scheduler.tz !== expected.tz
+    || JSON.stringify(scheduler.template?.data) !== JSON.stringify(expected.data) || !scheduler.next) return true;
+
+  // BullMQ's upsert removes an existing waiting job. Leave it alone even if it
+  // is overdue behind provider work; only repair a missing or terminal iteration.
+  const nextJob = await queue.getJob(`repeat:${expected.id}:${scheduler.next}`);
+  if (!nextJob) return true;
+  const state = await nextJob.getState();
+  return !["waiting", "delayed", "active", "prioritized", "waiting-children"].includes(state);
 }
 
 export async function scheduleRepeatableMarketDataSync(exchanges: string[], options?: { startDate?: Date }) {
   const queue = getMarketDataQueue();
   if (!queue) return;
 
-  await removeStaleSchedulers(
+  const existing = await removeStaleSchedulers(
     queue,
     INSTRUMENT_SYNC_SCHEDULER_PREFIX,
     new Set(exchanges.map((exchange) => `${INSTRUMENT_SYNC_SCHEDULER_PREFIX}${exchange}`)),
@@ -176,6 +197,10 @@ export async function scheduleRepeatableMarketDataSync(exchanges: string[], opti
   for (const exchange of exchanges) {
     try {
       const schedulerId = `${INSTRUMENT_SYNC_SCHEDULER_PREFIX}${exchange}`;
+      if (!(await shouldUpsertScheduler(queue, existing.find((scheduler) => (scheduler.id ?? scheduler.key) === schedulerId), {
+        id: schedulerId, name: JOB_NAMES.instrumentSync, pattern: INSTRUMENT_SYNC_CRON,
+        tz: MARKET_DATA_SCHEDULE_TZ, data: { exchange },
+      }))) continue;
       await queue.upsertJobScheduler(
         schedulerId,
         {
@@ -228,7 +253,7 @@ export async function scheduleCandleBootstrapReconciliation(exchanges: string[],
   const queue = getMarketDataQueue();
   if (!queue) return;
 
-  await removeStaleSchedulers(
+  const existing = await removeStaleSchedulers(
     queue,
     BOOTSTRAP_RECONCILE_SCHEDULER_PREFIX,
     new Set(exchanges.map((exchange) => `${BOOTSTRAP_RECONCILE_SCHEDULER_PREFIX}${exchange}`)),
@@ -237,6 +262,10 @@ export async function scheduleCandleBootstrapReconciliation(exchanges: string[],
   for (const exchange of exchanges) {
     try {
       const schedulerId = `${BOOTSTRAP_RECONCILE_SCHEDULER_PREFIX}${exchange}`;
+      if (!(await shouldUpsertScheduler(queue, existing.find((scheduler) => (scheduler.id ?? scheduler.key) === schedulerId), {
+        id: schedulerId, name: JOB_NAMES.candleBootstrapReconcile, pattern: CANDLE_BOOTSTRAP_RECONCILE_CRON,
+        tz: MARKET_DATA_SCHEDULE_TZ, data: { exchange },
+      }))) continue;
       await queue.upsertJobScheduler(
         schedulerId,
         {
@@ -279,7 +308,7 @@ export async function scheduleRepeatableDailyCandleSync(exchanges: string[], opt
     return [];
   }
 
-  await removeStaleSchedulers(
+  const existing = await removeStaleSchedulers(
     queue,
     DAILY_CANDLE_SYNC_SCHEDULER_PREFIX,
     new Set(
@@ -310,8 +339,17 @@ export async function scheduleRepeatableDailyCandleSync(exchanges: string[], opt
   for (const exchange of exchanges) {
     for (const schedule of DAILY_CANDLE_SYNC_SCHEDULES) {
       try {
+        const schedulerId = `${DAILY_CANDLE_SYNC_SCHEDULER_PREFIX}${exchange}-${schedule.suffix}`;
+        if (!(await shouldUpsertScheduler(queue, existing.find((scheduler) => (scheduler.id ?? scheduler.key) === schedulerId), {
+          id: schedulerId, name: JOB_NAMES.dailyCandleSync, pattern: schedule.pattern,
+          tz: DAILY_CANDLE_SYNC_TZ, data: { exchange, jobType: schedule.jobType },
+        }))) {
+          registered += 1;
+          registeredExchanges.add(exchange);
+          continue;
+        }
         await queue.upsertJobScheduler(
-          `${DAILY_CANDLE_SYNC_SCHEDULER_PREFIX}${exchange}-${schedule.suffix}`,
+          schedulerId,
           {
             pattern: schedule.pattern,
             tz: DAILY_CANDLE_SYNC_TZ,
