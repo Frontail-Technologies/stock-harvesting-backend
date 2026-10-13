@@ -19,6 +19,7 @@ import {
 import { syncSectorClassifications } from "./modules/market-data/sector-classification.service";
 import { enqueueCandleBootstrapJobs, getRedisConnectionOptions } from "./modules/jobs/queues";
 import { scheduleProductionMarketDataJobs, startProductionMarketDataScheduleRefresh } from "./modules/jobs/schedule-production-jobs";
+import { startDailyCandleScheduleWatchdog } from "./modules/jobs/daily-candle-schedule-watchdog";
 import {
   finishLedgerCoverage,
   MarketDataLedgerRunNotClaimableError,
@@ -186,12 +187,12 @@ async function runTrackedDailyCandleSync(
   exchange: string,
   jobType: BackgroundJobType,
   job: Job,
-  options?: { ledgerRunId?: string; tradingDate?: string; symbols?: string[] },
+  options?: { ledgerRunId?: string; tradingDate?: string; coverageTradingDate?: string; symbols?: string[] },
 ) {
   const scheduledTradingDate = options?.tradingDate
     ?? getExchangeTodayIfTradingDay(exchange)
     ?? getLatestExpectedTradingDay(exchange);
-  const coverageTradingDate = options?.tradingDate ?? getLatestExpectedTradingDay(exchange);
+  const coverageTradingDate = options?.coverageTradingDate ?? options?.tradingDate ?? getLatestExpectedTradingDay(exchange);
   let claimed: string;
   try {
     claimed = await startBackgroundJobRun(jobType, {
@@ -329,8 +330,10 @@ const worker = new Worker(
         typeof job.data.jobType === "string"
           ? (job.data.jobType as BackgroundJobType)
           : BACKGROUND_JOB_TYPES.dailyCandlePostMarket;
+      const tradingDate = typeof job.data.tradingDate === "string" ? job.data.tradingDate : undefined;
+      const coverageTradingDate = typeof job.data.coverageTradingDate === "string" ? job.data.coverageTradingDate : undefined;
       return runProviderOperationOnce(`${job.name}:${jobType}:${exchange}`, () =>
-        runTrackedJob(job, () => runTrackedDailyCandleSync(exchange, jobType, job))
+        runTrackedJob(job, () => runTrackedDailyCandleSync(exchange, jobType, job, { tradingDate, coverageTradingDate }))
       );
     }
 
@@ -447,6 +450,7 @@ async function heartbeat() {
 
 void heartbeat();
 const stopScheduleRefresh = startProductionMarketDataScheduleRefresh();
+const stopDailyScheduleWatchdog = startDailyCandleScheduleWatchdog();
 const heartbeatTimer = setInterval(() => void heartbeat(), WORKER_HEARTBEAT_INTERVAL_MS);
 
 logger.info({ startedAt: workerStartedAt, queue: QUEUE_NAMES.marketData }, "Market data worker started");
@@ -470,6 +474,7 @@ async function shutdown(signal: string) {
   logger.info({ signal }, "Shutting down worker");
   clearInterval(heartbeatTimer);
   stopScheduleRefresh();
+  stopDailyScheduleWatchdog();
   await worker.close();
   await stopGdfSessionBroker();
   await pool.end();
