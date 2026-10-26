@@ -9,12 +9,20 @@ export type ProviderCooldown = {
   remainingMs: number;
 };
 
+const COOLDOWN_READ_TIMEOUT_MS = 3_000;
+
 export async function getGlobalDatafeedsCooldown(now = new Date()): Promise<ProviderCooldown> {
   const client = await getMarketDataQueueRedisClient();
   if (!client) return { active: false, until: null, remainingMs: 0 };
 
+  let timer: NodeJS.Timeout | undefined;
   try {
-    const raw = await client.get(GDF_RATE_LIMIT_REDIS_KEY);
+    const raw = await Promise.race([
+      client.get(GDF_RATE_LIMIT_REDIS_KEY),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Global Datafeeds cooldown read timed out")), COOLDOWN_READ_TIMEOUT_MS);
+      }),
+    ]);
     const blockedUntil = raw ? Number(raw) : 0;
     const remainingMs = Math.max(0, blockedUntil - now.getTime());
     return {
@@ -28,6 +36,8 @@ export async function getGlobalDatafeedsCooldown(now = new Date()): Promise<Prov
       "Failed to read Global Datafeeds cooldown",
     );
     return { active: false, until: null, remainingMs: 0 };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

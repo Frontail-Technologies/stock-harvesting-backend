@@ -20,6 +20,7 @@ import { syncSectorClassifications } from "./modules/market-data/sector-classifi
 import { enqueueCandleBootstrapJobs, getRedisConnectionOptions } from "./modules/jobs/queues";
 import { scheduleProductionMarketDataJobs, startProductionMarketDataScheduleRefresh } from "./modules/jobs/schedule-production-jobs";
 import { startDailyCandleScheduleWatchdog } from "./modules/jobs/daily-candle-schedule-watchdog";
+import { getScheduledDailyCandleRun } from "./modules/jobs/scheduled-daily-candle-run";
 import {
   finishLedgerCoverage,
   MarketDataLedgerRunNotClaimableError,
@@ -266,13 +267,6 @@ startGdfSessionBroker("owner-candidate");
 const worker = new Worker(
   QUEUE_NAMES.marketData,
   async (job) => {
-    if (PROVIDER_BACKED_JOB_NAMES.has(job.name)) {
-      const cooldown = await getGlobalDatafeedsCooldown();
-      if (cooldown.active) {
-        await worker.rateLimit(cooldown.remainingMs);
-        throw Worker.RateLimitError();
-      }
-    }
     const runtimeLimitMs = getJobRuntimeLimitMs(job.name);
     const watchdog = setTimeout(() => {
       logger.fatal(
@@ -287,6 +281,13 @@ const worker = new Worker(
     watchdog.unref();
 
     try {
+    if (PROVIDER_BACKED_JOB_NAMES.has(job.name)) {
+      const cooldown = await getGlobalDatafeedsCooldown();
+      if (cooldown.active) {
+        await worker.rateLimit(cooldown.remainingMs);
+        throw Worker.RateLimitError();
+      }
+    }
     const exchange =
       typeof job.data.exchange === "string" ? job.data.exchange : undefined;
 
@@ -325,13 +326,18 @@ const worker = new Worker(
 
     if (job.name === JOB_NAMES.dailyCandleSync) {
       if (!exchange) throw new Error("dailyCandleSync job missing exchange");
+      const scheduledRun = getScheduledDailyCandleRun(job.id, exchange);
+      if (scheduledRun?.stale || (scheduledRun && !scheduledRun.tradingDate)) {
+        logger.warn({ ...jobLogContext(job), scheduledAt: scheduledRun.scheduledAt }, "Skipped stale scheduled daily candle job");
+        return { skipped: true, reason: "stale-scheduled-run" };
+      }
       if (!(await isProductionExchange(exchange))) return skippedNonProductionExchange(job, exchange);
       const jobType =
         typeof job.data.jobType === "string"
           ? (job.data.jobType as BackgroundJobType)
           : BACKGROUND_JOB_TYPES.dailyCandlePostMarket;
-      const tradingDate = typeof job.data.tradingDate === "string" ? job.data.tradingDate : undefined;
-      const coverageTradingDate = typeof job.data.coverageTradingDate === "string" ? job.data.coverageTradingDate : undefined;
+      const tradingDate = typeof job.data.tradingDate === "string" ? job.data.tradingDate : scheduledRun?.tradingDate ?? undefined;
+      const coverageTradingDate = typeof job.data.coverageTradingDate === "string" ? job.data.coverageTradingDate : scheduledRun?.coverageTradingDate;
       return runProviderOperationOnce(`${job.name}:${jobType}:${exchange}`, () =>
         runTrackedJob(job, () => runTrackedDailyCandleSync(exchange, jobType, job, { tradingDate, coverageTradingDate }))
       );

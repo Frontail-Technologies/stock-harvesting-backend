@@ -42,7 +42,7 @@ export async function getScheduledDailyCandleSyncStatuses(): Promise<ScheduledJo
   ]);
 
   return SCHEDULED_DAILY_CANDLE_SYNC_JOB_TYPES.map((jobType) => {
-    const scheduler = schedulers.find((entry) => schedulerIdMatchesJobType(entry.id, jobType));
+    const scheduler = schedulers.find((entry) => schedulerIdMatchesJobType(entry.id ?? entry.key, jobType));
     const run = latestRunByType.get(jobType) ?? null;
 
     return {

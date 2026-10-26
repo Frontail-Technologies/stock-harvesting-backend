@@ -28,6 +28,18 @@ describe("Global Datafeeds shared cooldown", () => {
     await expect(getGlobalDatafeedsCooldown(NOW)).resolves.toEqual({ active: false, until: null, remainingMs: 0 });
   });
 
+  it("does not leave a worker job active forever when the Redis cooldown read hangs", async () => {
+    vi.useFakeTimers();
+    try {
+      getMarketDataQueueRedisClient.mockResolvedValue({ get: vi.fn(() => new Promise(() => undefined)) } as never);
+      const result = getGlobalDatafeedsCooldown(NOW);
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expect(result).resolves.toEqual({ active: false, until: null, remainingMs: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects a provider action during the shared cooldown", async () => {
     getMarketDataQueueRedisClient.mockResolvedValue({
       get: vi.fn(async () => String(Date.now() + 10 * 60_000)),
