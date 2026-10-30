@@ -197,6 +197,20 @@
       "when": 1790488573229,
       "tag": "0027_real_dark_beast",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793340497616,
+      "tag": "0028_pink_reptil",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793341070660,
+      "tag": "0029_hot_mantis",
+      "breakpoints": true
     }
   ]
 }

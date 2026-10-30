@@ -1,0 +1,1 @@
+ALTER TABLE "subscription_plans" ADD COLUMN "razorpay_mode" varchar(8);

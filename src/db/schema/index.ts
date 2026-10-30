@@ -14,6 +14,7 @@ export * from "./password-reset-tokens";
 export * from "./price-alerts";
 export * from "./registration-verifications";
 export * from "./scanner";
+export * from "./subscriptions";
 export * from "./users";
 export * from "./watchlists";
 export * from "./weekly-strong-backtest";

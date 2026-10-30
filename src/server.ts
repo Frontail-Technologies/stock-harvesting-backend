@@ -18,6 +18,7 @@ import {
 } from "./modules/market-stream";
 import { env } from "./shared/env";
 import { logger } from "./shared/logger";
+import { startSubscriptionReconciliation } from "./modules/subscriptions/subscriptions.reconciliation";
 
 // GDF allows one session per key: the worker owns it, this API process only relays through Redis.
 startGdfSessionBroker("proxy");
@@ -38,6 +39,7 @@ subscribeRealtimeEvents((message) => {
 });
 
 const stopWorkerStatusMonitor = startWorkerStatusChangeMonitor();
+const stopSubscriptionReconciliation = startSubscriptionReconciliation();
 
 server.listen(env.PORT, () => {
   logger.info({ port: env.PORT }, "Backend listening");
@@ -47,6 +49,7 @@ server.listen(env.PORT, () => {
 async function shutdown(signal: string) {
   logger.info({ signal }, "Shutting down backend");
   stopWorkerStatusMonitor();
+  stopSubscriptionReconciliation();
   server.close(async () => {
     await marketStreamGateway.close();
     closeMarketStreamProviders();

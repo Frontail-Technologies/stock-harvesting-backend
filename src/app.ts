@@ -9,6 +9,8 @@ import { errorHandler, notFound } from "./shared/errors";
 import { logger } from "./shared/logger";
 import { httpMetricsMiddleware } from "./shared/metrics/http-metrics.middleware";
 import { metricsRouter } from "./shared/metrics/metrics.routes";
+import { API_ROUTES } from "./shared/constants";
+import { razorpayWebhookHandler } from "./modules/subscriptions/subscriptions.webhook";
 
 export function createApp() {
   const app = express();
@@ -34,6 +36,7 @@ export function createApp() {
       credentials: true,
     }),
   );
+  app.post(`${API_ROUTES.subscriptions}/webhook`, express.raw({ type: "application/json", limit: "1mb" }), razorpayWebhookHandler);
   app.use(express.json({ limit: "1mb" }));
   app.use(
     pinoHttp<Request, Response>({

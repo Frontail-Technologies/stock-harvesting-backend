@@ -15,6 +15,7 @@ export const API_ROUTES = {
   watchlists: "/api/watchlists",
   widgetPreferences: "/api/widget-preferences",
   monetization: "/api/monetization",
+  subscriptions: "/api/subscriptions",
   weeklyStrongBacktest: "/api/weekly-strong-backtest",
 } as const;
 

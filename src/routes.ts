@@ -15,6 +15,7 @@ import { scannerRouter } from "./modules/scanner/scanner.routes";
 import { watchlistsRouter } from "./modules/watchlists/watchlists.routes";
 import { weeklyStrongBacktestRouter } from "./modules/weekly-strong-backtest/weekly-strong-backtest.routes";
 import { widgetPreferencesRouter } from "./modules/widget-preferences/widget-preferences.routes";
+import { subscriptionsRouter } from "./modules/subscriptions/subscriptions.routes";
 import { API_ROUTES } from "./shared/constants";
 
 export function createRouter() {
@@ -34,6 +35,7 @@ export function createRouter() {
   router.use(API_ROUTES.watchlists, watchlistsRouter);
   router.use(API_ROUTES.widgetPreferences, widgetPreferencesRouter);
   router.use(API_ROUTES.monetization, monetizationRouter);
+  router.use(API_ROUTES.subscriptions, subscriptionsRouter);
   router.use(API_ROUTES.weeklyStrongBacktest, weeklyStrongBacktestRouter);
 
   return router;
